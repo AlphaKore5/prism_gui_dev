@@ -1102,3 +1102,152 @@ class EnterMovesTheTaskOn(GateTest):
         win.input_panel.cancel_route_clicked.connect(lambda: cancelled.append(1))
         self._press(win)
         self.assertEqual(cancelled, [])
+
+
+class QuietUpdateBanner(GateTest):
+    """A downloaded, verified update waits behind a banner; only the customer's
+    "Restart now" applies it, and never while a task is running. The download,
+    verification and re-verification are tests/test_e2e_update.py's job; this
+    is what the window does with the result."""
+
+    def setUp(self):
+        super().setUp()
+        import workspace
+        self.extra = [
+            mock.patch.object(workspace, "unreachable", return_value=""),
+            mock.patch.object(licensing.secretstore, "_keyring", return_value=None),
+        ]
+        for p in self.extra:
+            p.start()
+
+    def tearDown(self):
+        for p in self.extra:
+            p.stop()
+        super().tearDown()
+
+    def _staged(self, version="99.0.0"):
+        import updater
+        return updater.StagedUpdate(version=version, stage_dir="/nonexistent/stage",
+                                    manifest={})
+
+    def _ready_window(self, version="99.0.0", **advised):
+        self.grant(["core"])
+        if advised:
+            store.update(self.tmp, **advised)
+            licensing.reload()
+        win = self._window()
+        win._on_quiet_update_ready(self._staged(version))
+        return win
+
+    def test_a_waiting_update_is_offered_with_restart_and_later(self):
+        win = self._ready_window()
+        self.assertFalse(win.banner.isHidden())
+        self.assertIn("99.0.0", win._banner_text.text())
+        self.assertIn("ready", win._banner_text.text())
+        self.assertEqual(win._banner_btn.text(), "Restart now")
+        self.assertEqual(win._banner_alt.text(), "Later")
+
+    def test_it_replaces_the_plain_download_offer_for_the_same_release(self):
+        win = self._ready_window(latest_version="99.0.0")
+        self.assertEqual(win._banner_btn.text(), "Restart now")
+
+    def test_a_licence_problem_still_outranks_it(self):
+        self.grant(["core"], days=-1)
+        win = self._window()
+        win._on_quiet_update_ready(self._staged())
+        self.assertIn("ended", win._banner_text.text())
+        self.assertEqual(win._banner_btn.text(), "Enter a licence key")
+
+    def test_later_hides_it_for_this_version_only(self):
+        win = self._ready_window()
+        win._later_ready_update()
+        self.assertTrue(win.banner.isHidden())
+        win._on_quiet_update_ready(self._staged("99.1.0"))
+        self.assertFalse(win.banner.isHidden())
+
+    def test_restart_now_applies_the_waiting_update_and_quits(self):
+        import updater
+        win = self._ready_window()
+        with mock.patch.object(updater, "apply_ready") as apply, \
+             mock.patch.object(QApplication, "quit") as quit_:
+            win._banner_action()
+        apply.assert_called_once_with()
+        quit_.assert_called_once_with()
+
+    def test_restart_waits_while_a_task_is_running(self):
+        import main_window
+        import updater
+        win = self._ready_window()
+        win._active_run = mock.Mock(isRunning=mock.Mock(return_value=True))
+        with mock.patch.object(updater, "apply_ready") as apply, \
+             mock.patch.object(QApplication, "quit") as quit_, \
+             mock.patch.object(main_window.QMessageBox, "information") as told:
+            win._banner_action()
+        apply.assert_not_called()
+        quit_.assert_not_called()
+        told.assert_called_once()
+        self.assertIsNotNone(win._ready_update, "the update keeps waiting")
+
+    def test_an_update_that_fails_its_recheck_falls_back_to_the_download_page(self):
+        import main_window
+        import updater
+        win = self._ready_window()
+        with mock.patch.object(updater, "apply_ready",
+                               side_effect=updater.UpdateError("changed")), \
+             mock.patch.object(QApplication, "quit") as quit_, \
+             mock.patch.object(main_window.QDesktopServices, "openUrl") as opened:
+            win._banner_action()
+        quit_.assert_not_called()
+        opened.assert_called_once()
+        self.assertIsNone(win._ready_update)
+
+    def test_the_download_button_uses_a_waiting_update_instead_of_downloading(self):
+        import paths
+        import updater
+        win = self._ready_window()
+        with mock.patch.object(paths, "is_frozen", return_value=True), \
+             mock.patch.object(updater, "apply_ready") as apply, \
+             mock.patch.object(QApplication, "quit"):
+            win._open_download()
+        apply.assert_called_once_with()
+
+    def test_a_source_run_never_starts_the_background_check(self):
+        win = self._window()
+        self.assertIsNone(win._quiet_worker)
+        self.assertFalse(hasattr(win, "_quiet_timer"))
+
+    def test_the_background_check_runs_one_worker_at_a_time(self):
+        import main_window
+        win = self._window()
+        fake = mock.MagicMock()
+        fake.isRunning.return_value = True
+        with mock.patch.object(main_window, "QuietUpdateWorker",
+                               return_value=fake) as made:
+            win._quiet_update_check()
+            win._quiet_update_check()            # still running: no second one
+        made.assert_called_once_with()
+        fake.start.assert_called_once_with()
+        fake.ready.connect.assert_called_once()
+
+    def test_no_background_check_while_an_update_is_already_waiting(self):
+        import main_window
+        win = self._ready_window()
+        with mock.patch.object(main_window, "QuietUpdateWorker") as made:
+            win._quiet_update_check()
+        made.assert_not_called()
+
+    def test_frozen_builds_schedule_the_check_and_report_on_the_licence_tick(self):
+        import main_window
+        import paths
+        import updater
+        with mock.patch.object(paths, "is_frozen", return_value=True), \
+             mock.patch.object(main_window.QTimer, "singleShot") as single:
+            win = self._window()
+        self.assertTrue(hasattr(win, "_quiet_timer"))
+        self.assertTrue(win._quiet_timer.isActive())
+        self.assertIn(mock.call(win.QUIET_UPDATE_FIRST_MS, win._quiet_update_check),
+                      single.call_args_list)
+        with mock.patch.object(updater, "report_async") as report, \
+             mock.patch.object(licensing, "refresh"):
+            win._tick_licence()
+        report.assert_called_once_with()

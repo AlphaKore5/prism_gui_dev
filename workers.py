@@ -895,6 +895,32 @@ class UpdateWorker(_Worker):
             self.failed.emit(str(e))
 
 
+class QuietUpdateWorker(_Worker):
+    """The background half of a quiet update: check (honouring the rollout),
+    download and verify, and leave the result waiting. Applies nothing -- only
+    the customer's restart does (updater.apply_ready).
+
+    Off the UI thread for the same reason as UpdateWorker, and more so: this
+    one runs unprompted, and re-proving a waiting update hashes the whole
+    staged tree, which is seconds of disk the window must not wait for.
+    """
+    ready = Signal(object)           # updater.StagedUpdate, verified and waiting
+    none = Signal()                  # nothing to offer this device
+    failed = Signal(str)
+
+    def run(self):
+        import updater
+        try:
+            staged = updater.auto_stage()
+        except Exception as e:                        # noqa: BLE001
+            self.failed.emit(str(e))
+            return
+        if staged is None:
+            self.none.emit()
+        else:
+            self.ready.emit(staged)
+
+
 class FFmpegWorker(_Worker):
     """Download and install FFmpeg, off the UI thread.
 

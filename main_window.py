@@ -68,7 +68,7 @@ from workers import (RouteWorker, AutomationWorker, RecordWorker,
                      PlanBriefWorker,
                      StudioFollowupWorker,
                      InterpretWorker, FindWorker, AuthorizeWorker,
-                     FFmpegWorker, UpdateWorker, FollowupRouteWorker,
+                     FFmpegWorker, QuietUpdateWorker, UpdateWorker, FollowupRouteWorker,
                      ReelWorker)
 import wakeword
 from wakeword import WakeWordListener
@@ -158,6 +158,8 @@ def _is_running(worker) -> bool:
     closeEvent would skip retiring every worker after it in the list — turning
     a tidy shutdown back into the abort this is here to prevent.
     """
+    if worker is None:                  # nothing was ever started
+        return False
     try:
         return bool(worker.isRunning())
     except RuntimeError:
@@ -358,6 +360,7 @@ class MainWindow(QMainWindow):
         self._wire()
         self.refresh_licence_ui()
         self._start_licence_timer()
+        self._start_quiet_update_timer()
 
         # The explainer needs nothing but eyes on the window, so it no longer
         # waits on the licence — a first launch with a stuck licence sync is
@@ -414,6 +417,66 @@ class MainWindow(QMainWindow):
         for delay_ms in (1500, 4000, 10_000, 30_000, 60_000, 90_000, 150_000):
             QTimer.singleShot(delay_ms, self._repaint_licence)
 
+    # ── quiet updates ───────────────────────────────────────────────────────
+    # Check for a release now and then, download it in the background, and
+    # leave it waiting; the banner offers "Restart now". Nothing is applied
+    # without the customer pressing it, and never while a task is running.
+    QUIET_UPDATE_FIRST_MS = 60 * 1000          # a minute in: after startup settles
+    QUIET_UPDATE_EVERY_MS = 6 * 60 * 60 * 1000
+
+    def _start_quiet_update_timer(self):
+        self._ready_update = None
+        self._quiet_worker = None
+        if not paths.is_frozen():
+            return          # a source checkout has no installed folder to swap
+        self._quiet_timer = QTimer(self)
+        self._quiet_timer.setInterval(self.QUIET_UPDATE_EVERY_MS)
+        self._quiet_timer.timeout.connect(self._quiet_update_check)
+        self._quiet_timer.start()
+        QTimer.singleShot(self.QUIET_UPDATE_FIRST_MS, self._quiet_update_check)
+
+    def _quiet_update_check(self):
+        """Start the background check unless one is running or an update is
+        already waiting (it was verified when it was staged and is verified
+        again before it is applied)."""
+        if self._ready_update is not None or _is_running(self._quiet_worker):
+            return
+        worker = QuietUpdateWorker()
+        worker.ready.connect(self._on_quiet_update_ready)
+        # none / failed: stay silent. The manual Download path is unchanged,
+        # and a background check that cannot reach the host is not news.
+        self._quiet_worker = worker
+        self._workers.append(worker)
+        worker.start()
+
+    def _on_quiet_update_ready(self, staged):
+        self._ready_update = staged
+        self.refresh_licence_ui()
+
+    def _apply_ready_update(self):
+        """The banner's "Restart now"."""
+        if _is_running(getattr(self, "_active_run", None)):
+            QMessageBox.information(
+                self, i18n.t("Update"),
+                i18n.t("A task is still running. The update is ready and will "
+                       "wait — restart Prism when it finishes."))
+            return
+        try:
+            updater.apply_ready()
+        except Exception:                           # noqa: BLE001
+            # It failed its re-check (changed, withdrawn, overtaken): forget
+            # it and use the download page, as the manual path always has.
+            self._ready_update = None
+            self.refresh_licence_ui()
+            self._open_download_fallback()
+            return
+        QApplication.instance().quit()
+
+    def _later_ready_update(self):
+        if self._ready_update is not None:
+            updater.dismiss(self._ready_update.version)
+        self.refresh_licence_ui()
+
     def _repaint_licence(self):
         """Re-read the cached licence and repaint. No network, never raises."""
         try:
@@ -425,6 +488,7 @@ class MainWindow(QMainWindow):
     def _tick_licence(self):
         try:
             licensing.refresh()
+            updater.report_async()          # outcomes queued by an update; a no-op when empty
             # Repaint from the CACHED state, which the previous tick's refresh
             # has by now written. Reading it here rather than waiting on this
             # tick's network call is what keeps the timer non-blocking.
@@ -761,6 +825,16 @@ class MainWindow(QMainWindow):
             if offline:
                 self._show_banner(offline, theme.WARN_INK, "alert")
                 return
+            waiting = getattr(self, "_ready_update", None)
+            if waiting is not None and not updater.dismissed(waiting.version):
+                self._show_banner(
+                    i18n.t("Prism {version} is ready. Restart to finish "
+                           "updating — everything you've made stays right "
+                           "where it is.").format(version=waiting.version),
+                    theme.INFO_INK, "arrow-up",
+                    action=("Restart now", self._apply_ready_update),
+                    alt=("Later", self._later_ready_update))
+                return
             newer = updater.available(state)
             if newer and not updater.dismissed(newer):
                 self._show_banner(
@@ -876,6 +950,9 @@ class MainWindow(QMainWindow):
         """
         if not paths.is_frozen():
             self._open_download_fallback()
+            return
+        if getattr(self, "_ready_update", None) is not None:
+            self._apply_ready_update()      # already downloaded and verified
             return
         self._download_progress = LoadingDialog(
             i18n.t("Update"), i18n.t("Checking for an update…"), True, self)
