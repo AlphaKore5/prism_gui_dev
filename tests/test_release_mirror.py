@@ -174,3 +174,46 @@ class Channels(unittest.TestCase):
         self.assertEqual(seen[0][0], R.DEV_REPO)
         self.assertEqual(seen[0][-1], "udev2")
         mirror.assert_not_called()
+
+
+class DevManifestsAreReadWithTheDevKeys(unittest.TestCase):
+    """release_all read every manifest with the production keys only, so the
+    first dev publish signed fine and then could not read its own file list."""
+
+    def setUp(self):
+        from cryptography.hazmat.primitives import serialization as ser
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+        import licensing.keys as K
+        import update_manifest as UM
+        k = Ed25519PrivateKey.generate()
+        self.sec = k.private_bytes(ser.Encoding.Raw, ser.PrivateFormat.Raw,
+                                   ser.NoEncryption()).hex()
+        pub = k.public_key().public_bytes(ser.Encoding.Raw, ser.PublicFormat.Raw).hex()
+        patch = mock.patch.dict(K.UPDATE_DEVELOPMENT, {"udevT": pub})
+        patch.start()
+        self.addCleanup(patch.stop)
+        self.UM, self.K = UM, K
+        entry = {"path": "Prism", "size": 3, "sha256": "0" * 64, "mode": 0}
+        token = UM.sign({"version": "1.0.0", "files": [entry]}, self.sec, kid="udevT")
+        self.path = os.path.join(tempfile.mkdtemp(), "manifest.linux-x64.signed")
+        open(self.path, "w").write(token)
+
+    def test_keys_for_picks_one_table_never_both(self):
+        self.assertEqual(R.keys_for("udevT"), self.K.UPDATE_DEVELOPMENT)
+        self.assertEqual(R.keys_for("u1"), self.K.UPDATE_PRODUCTION)
+        self.assertFalse(set(R.keys_for("udevT")) & set(R.keys_for("u1")))
+
+    def test_a_dev_signed_manifest_is_readable_with_its_dev_kid(self):
+        got = R.expected_flat_names(self.path, "linux-x64", "udevT")
+        self.assertEqual(got, {1: {"linux-x64__Prism": "Prism"}})
+
+    def test_the_same_file_is_refused_when_read_as_production(self):
+        with self.assertRaises(self.UM.ManifestError):
+            R.expected_flat_names(self.path, "linux-x64")      # default kid: u1
+
+    def test_verify_upload_reads_it_the_same_way(self):
+        import verify_upload as V
+        self.assertEqual(V.expected_flat_names(self.path, "linux-x64", 1, "udevT"),
+                         {"linux-x64__Prism": "Prism"})
+        with self.assertRaises(self.UM.ManifestError):
+            V.expected_flat_names(self.path, "linux-x64", 1)

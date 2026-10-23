@@ -163,8 +163,16 @@ def already_signed(repo: str, tag: str, platform_tag: str) -> bool:
     return out != "0"
 
 
-def expected_flat_names(manifest_path: str,
-                        platform_tag: str) -> dict[int, dict[str, str]]:
+def keys_for(kid: str) -> dict[str, str]:
+    """The public keys a manifest signed with `kid` is verified against: the
+    development table for a dev key id, the production table otherwise. Never
+    both, so a dev-signed file cannot pass for a production release."""
+    return dict(K.UPDATE_DEVELOPMENT if kid in K.UPDATE_DEVELOPMENT
+                else K.UPDATE_PRODUCTION)
+
+
+def expected_flat_names(manifest_path: str, platform_tag: str,
+                        kid: str = "u1") -> dict[int, dict[str, str]]:
     """{part: {flat_name: manifest path}} for every file needing an uploaded
     asset — matches flatten_update_assets.py's own skip rules: no
     symlinks (recreated from the manifest's own `symlink` field), no
@@ -172,7 +180,7 @@ def expected_flat_names(manifest_path: str,
     them directly). Grouped by the release each file belongs to — the
     signed manifest's own `part` for it (1 when it names none)."""
     token = open(manifest_path, encoding="utf-8").read().strip()
-    payload = UM.verify(token, public_keys=K.UPDATE_PRODUCTION)
+    payload = UM.verify(token, public_keys=keys_for(kid))
     out: dict[int, dict[str, str]] = {}
     for e in payload["files"]:
         if UM.is_hosted(e):
@@ -270,15 +278,15 @@ def do_platform(repo: str, tag: str, run_id: str, work: str,
         # _manifest_url() reads it from there via "latest/download".
         run(["gh", "release", "upload", tag, "-R", repo, "--clobber", signed])
 
-    publish_assets(repo, tag, platform_tag, signed, assets_dir)
+    publish_assets(repo, tag, platform_tag, signed, assets_dir, kid)
 
 
 def publish_assets(repo: str, tag: str, platform_tag: str, signed: str,
-                   assets_dir: str) -> None:
+                   assets_dir: str, kid: str = "u1") -> None:
     """Create the per-platform assets release(s) in `repo` and upload every
     file the signed manifest expects, confirming each part is complete."""
     version = _version_from_tag(tag)
-    expected_by_part = expected_flat_names(signed, platform_tag)
+    expected_by_part = expected_flat_names(signed, platform_tag, kid)
     parts = max(expected_by_part, default=1)
     for part in range(1, parts + 1):
         expected = expected_by_part.get(part, {})

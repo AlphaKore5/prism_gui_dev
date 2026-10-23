@@ -65,7 +65,7 @@ def _list_assets(repo: str, release_id: int) -> set[str]:
 
 
 def expected_flat_names(manifest_path: str, platform_tag: str,
-                        part: int = 1) -> dict[str, str]:
+                        part: int = 1, kid: str = "u1") -> dict[str, str]:
     """{flat_name: local_relative_path} for every file of release `part` that
     needs an uploaded asset — matches flatten_update_assets.py's own skip
     rules: no symlinks (recreated from the manifest's own `symlink` field),
@@ -73,7 +73,8 @@ def expected_flat_names(manifest_path: str, platform_tag: str,
     directly). A build too big for one release is hosted across several
     (update_manifest.assign_parts); this checks one of them."""
     token = open(manifest_path, encoding="utf-8").read().strip()
-    payload = UM.verify(token, public_keys=K.UPDATE_PRODUCTION)
+    payload = UM.verify(token, public_keys=dict(
+        K.UPDATE_DEVELOPMENT if kid in K.UPDATE_DEVELOPMENT else K.UPDATE_PRODUCTION))
     out = {}
     for entry in payload["files"]:
         if UM.is_hosted(entry) and UM.part_of(entry) == part:
@@ -96,11 +97,13 @@ def main(argv: list[str] | None = None) -> int:
                                       "directory (flattened filenames)")
     p.add_argument("manifest_path", help="That platform's SIGNED manifest")
     p.add_argument("--repo", default="HitarthTrivedi/prism_gui")
+    p.add_argument("--kid", default="u1",
+                   help="Key id the manifest was signed with (udev2 for a dev release)")
     args = p.parse_args(argv)
 
     release_id = _release_id(args.repo, args.tag)
     part = part_of_tag(args.tag)
-    expected = expected_flat_names(args.manifest_path, args.platform_tag, part)
+    expected = expected_flat_names(args.manifest_path, args.platform_tag, part, args.kid)
     print(f"{args.platform_tag}: manifest expects {len(expected)} assets "
           f"on {args.tag} (part {part})")
 
