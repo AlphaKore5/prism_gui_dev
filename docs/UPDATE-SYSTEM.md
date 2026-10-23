@@ -1,0 +1,129 @@
+# The update system — read this before you touch it
+
+Anyone changing how Prism updates itself reads this file first and ticks the
+checklist at the bottom in the pull request. Updating is the one feature that
+cannot be fixed by shipping an update: a client whose updater is broken stays
+broken. Related: [`RELEASING-UPDATES.md`](../RELEASING-UPDATES.md) (the
+release steps), `updater.py`, `update_manifest.py`, `apply_update.py`,
+`channel.py`.
+
+Plan and diagrams: `artifacts/update-plan-2026-10-23/` (outside this repo,
+in the owner's `prism+gui/` folder): `overview-flow.html`,
+`plan-v2-github-gitlab.html`.
+
+## 1. The rule everything follows
+
+**A client can only do what its own installed updater can do.** Whatever
+version a customer runs today reads our manifest with that version's code,
+for as long as they have not updated. So:
+
+- New manifest fields must be ignorable by old clients (they are: `verify()`
+  ignores unknown payload fields).
+- An incompatible change gets a **new manifest name**; never reuse an old one
+  (see section 4).
+- A change to the updater ships alone, tested old-to-new, before anything is
+  built on top of it.
+
+## 2. Trust (do not weaken)
+
+| Rule | Where |
+|---|---|
+| Manifest host is a fixed build constant, never from a server response | `updater.UPDATE_HOST` |
+| Manifest is signed with the **update** key, not the licence key | `licensing/keys.py` |
+| Nothing is trusted until: signature OK, not expired, newer than running, newer than `highest_seen_version`, every file hash OK | `updater.check_for_update`, `stage_update` |
+| The running install is untouched until the staged tree is fully verified | `stage_update` |
+| Old build is kept; a new build that does not confirm startup is rolled back | `apply_update.py` |
+| The prod signing key is never in CI, never in the repo | `RELEASING-UPDATES.md` |
+| The licence server has no say in what gets installed (it only supplies an unsigned banner hint) | `updater.py` docstring |
+
+## 3. Channels: dev and prod
+
+- `channel.CHANNEL` is `"prod"` in the repo. A dev build rewrites that one
+  line at build time. It is never read from the environment or a server.
+- A dev build keeps its data in `~/.prism-dev-home` (HOME/USERPROFILE are
+  redirected by `channel.isolate_home()` before anything imports). This is
+  because the engine and `prospector/` hard-code `expanduser("~")/.prism`;
+  redirecting HOME covers them without editing the submodule.
+- A source run can use `PRISM_HOME=/abs/path`. A frozen prod build **ignores**
+  it, so a customer's environment cannot move their licence folder.
+- Dev and prod trust different update keys and use different hosts. A prod
+  build must never contain the dev key in its trusted list.
+- Not built yet: dev/prod host constants, dev key trust for dev builds, the
+  build step that rewrites `CHANNEL`. See the plan.
+
+## 4. Changing something big (formats, layout, build engine, hosts)
+
+The safest tool is already in the code: when macOS builds changed layout,
+the channel name was retired (`macos-arm64` → `macos-arm64-app`). Old clients
+asked for the old manifest, got a 404 and used the download page. Copy that:
+
+1. Incompatible change → **new manifest filename** (and a `gen` number once
+   the bridge release carries it). Never reuse an old name.
+2. Publish old and new side by side during the transition. Retire the old
+   one only when telemetry says few clients still need it.
+3. Keep the swap helper (`apply_update.py`) tiny and stable. A bug there
+   cannot be fixed by an update.
+4. Every client must always be able to reach a full installer from the app.
+5. A manifest may declare what it needs (`needs: [...]`); a client lacking a
+   capability says "download the installer" instead of attempting it.
+6. Ship one big change per release, never mixed with features.
+
+## 5. Big downloads
+
+Check free disk space for the staged copy plus backup before starting; resume
+interrupted files; never block the UI; ask before a very large download.
+GitHub caps a release at 1000 assets; the per-platform `-assets-<tag>-N` split
+exists for that (`updater._assets_release_tag`).
+
+## 6. User data
+
+`~/.prism` outlives every update and every rollback. Migrations are additive
+(add keys, never rename or delete in the same release), `config.json` is
+backed up before any migration, and old keys are removed only two releases
+after nothing reads them. Tests run against a sandbox home; they never touch
+the real `~/.prism` (`tests/conftest.py` fails the run if the real config
+changes).
+
+## 7. Mirrors (planned, in the bridge release)
+
+Hosts are interchangeable because every file is checked against the signed
+manifest: a mirror can fail or go stale but cannot install anything forged.
+The bridge adds a fixed ordered host list (GitHub, then GitLab), tried in
+turn, and a signed `mirrors` list in the manifest that may only **add**
+`static` hosts. A host with a different URL scheme is new code and therefore
+a normal release.
+
+## 8. Rollout and patches (planned)
+
+Dev first (our machines, dev key), then the same files promoted and re-signed
+with the prod key at 5%, then 25%, then 100% (`rollout` in the signed manifest;
+membership = `hash(device_id + version) mod 100 < rollout`). Patch and hotfix
+lanes branch from the released tag. A signed `revoked` list stops a bad
+version being offered.
+
+## 9. Checklist for any change to updating
+
+Copy into the PR and tick each line, or write why it does not apply.
+
+- [ ] Old clients: what does the **oldest supported client** do when it meets
+      this change? Tested old → new on **Windows and macOS**, not only Linux.
+- [ ] No manifest name reused for an incompatible layout.
+- [ ] New manifest fields are optional and ignorable by old clients.
+- [ ] Trust rules in section 2 unchanged, or the change is justified here.
+- [ ] Dev key is not in any prod build's trusted keys.
+- [ ] Prod signing key was not placed in CI or the repo.
+- [ ] Failure leaves the running install untouched; rollback path tested.
+- [ ] `~/.prism` data still readable by the previous version (additive only).
+- [ ] A client can still reach a full installer if updating breaks.
+- [ ] This file and `RELEASING-UPDATES.md` updated in the same commit.
+- [ ] Tests added; no guard test deleted or skipped.
+- [ ] Not pushed or released without the owner's explicit OK.
+
+## 10. Known gaps (check before relying on them)
+
+- The Windows and macOS swap paths have never run on real hardware
+  (`apply_update.py` header).
+- Rollback is self-reported; it cannot catch a build the OS refuses to start.
+- macOS in-app updating is held until the Apple Developer ID and a real Mac
+  test; manifests are per platform, so Windows/Linux can move first.
+- Versions below 1.4.2 cannot self-update (first-launch rollback bug).

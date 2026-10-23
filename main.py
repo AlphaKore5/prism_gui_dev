@@ -14,6 +14,10 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+# Before any import below reads "~": a dev build must not touch the real ~/.prism.
+import channel
+channel.isolate_home()
+
 from PySide6.QtGui import QFontDatabase
 from PySide6.QtWidgets import QApplication
 
