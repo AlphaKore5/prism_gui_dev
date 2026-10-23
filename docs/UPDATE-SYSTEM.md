@@ -46,13 +46,15 @@ for as long as they have not updated. So:
   redirecting HOME covers them without editing the submodule.
 - A source run can use `PRISM_HOME=/abs/path`. A frozen prod build **ignores**
   it, so a customer's environment cannot move their licence folder.
-- **Keys:** `licensing/keys.py::update_public_keys()` — a frozen prod build
+- **Keys:** `licensing/keys.py::update_public_keys()` -- a frozen prod build
   trusts only `UPDATE_PRODUCTION`; a frozen dev build trusts only
-  `UPDATE_DEVELOPMENT`; a source run trusts both. Neither can be updated from
-  the other's manifests. The checked-in dev private key is *not* protected, so
-  a dev-trusting binary must never reach a customer: `tests/test_channel_keys.py`
-  pins `CHANNEL = "prod"` in the repo. Before dev builds go beyond our own
-  machines, replace `udev1` with a key whose private half is a CI secret.
+  `UPDATE_DEVELOPMENT` (kid `udev2`); a source run trusts both. Neither can be
+  updated from the other's manifests. The private half of `udev2` lives outside
+  the repo (`~/prism-keys/prism-update-dev-udev2.hex` on the machine that made
+  it, owner-only) -- move it to a password manager and, for dev CI, an org
+  secret. `tests/test_channel_keys.py` pins `CHANNEL = "prod"` in the repo, and
+  the prod and dev tables must share no kid and no key. `devtools/sign_manifest.py`
+  refuses a signing key that is not the one published under `--kid`.
 - **Building a dev build:** `PRISM_CHANNEL=dev [PRISM_UPDATE_REPO=owner/name]
   python packaging/build.py`. `packaging/build.py` rewrites `CHANNEL` and the
   `UPDATE_REPO` literal for the build and restores them afterwards (same
@@ -244,3 +246,13 @@ Before the first real bridge release, check by hand: the org repo's Actions are
 still disabled (they were switched off on creation), `.gitmodules` still points
 at the old engine repo (switch it only when the org copy of `prism_terminal` is
 verified), and `tests/test_e2e_update.py` passes with the `v1.6.10` tag present.
+
+## 14. Publishing a DEV release
+
+`python devtools/release_all.py <tag> <run_id> --dev` (with `UPDATE_SIGNING_KEY_HEX`
+set to the dev key in that shell): repo `AlphaKore5/prism_gui_dev`, key id
+`udev2`, no mirror. `--dev` refuses a production repository and a run without
+`--dev` refuses the dev repository, so the two cannot be mixed by a typo.
+Dev builds themselves come from `PRISM_CHANNEL=dev python packaging/build.py`
+(section 3). Not built yet: CI for dev builds in the dev repo (Actions are off),
+and the `1.6.10-dev` build of the old tag used to rehearse the 1.6.10 to bridge hop.

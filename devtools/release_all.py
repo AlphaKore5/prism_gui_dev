@@ -225,7 +225,8 @@ def upload_missing(repo: str, assets_tag: str, assets_dir: str,
 
 
 def do_platform(repo: str, tag: str, run_id: str, work: str,
-                platform_tag: str, matrix_os: str, force: bool) -> None:
+                platform_tag: str, matrix_os: str, force: bool,
+                kid: str = "u1") -> None:
     version = _version_from_tag(tag)
     unsigned = os.path.join(work, f"manifest.{platform_tag}.unsigned.json")
     signed = os.path.join(work, f"manifest.{platform_tag}.signed")
@@ -264,7 +265,7 @@ def do_platform(repo: str, tag: str, run_id: str, work: str,
         # it on THIS process's command line for no benefit.
         extra = ["--allow-downgrade"] if force else []
         run([sys.executable, os.path.join(HERE, "sign_manifest.py"),
-            unsigned, "-o", signed] + extra)
+            unsigned, "-o", signed, "--kid", kid] + extra)
         # The signed manifest goes on the MAIN release — updater.py's
         # _manifest_url() reads it from there via "latest/download".
         run(["gh", "release", "upload", tag, "-R", repo, "--clobber", signed])
@@ -309,6 +310,36 @@ def publish_assets(repo: str, tag: str, platform_tag: str, signed: str,
 #: always be published. The old one is never deleted, renamed or reused.
 DEFAULT_MIRRORS = ("AlphaKore5/prism_gui",)
 
+#: The DEV channel: its own repository, its own signing key id (udev2), no
+#: mirror. A dev build trusts only that key and asks only that repository, so a
+#: dev release can never reach a customer and a prod release can never reach a
+#: dev machine. See docs/UPDATE-SYSTEM.md.
+DEV_REPO = "AlphaKore5/prism_gui_dev"
+DEV_KID = "udev2"
+PROD_REPOS = ("HitarthTrivedi/prism_gui", "AlphaKore5/prism_gui")
+
+
+def resolve_channel(repo: str | None, mirrors: list[str] | None,
+                    no_mirror: bool, dev: bool) -> tuple[str, list[str], str]:
+    """(source repo, mirror repos, signing kid) for this run, or ValueError.
+
+    The point is to make the dev/prod mix-up impossible rather than unlikely:
+    --dev signs with the dev key id and refuses a prod repository, and a run
+    without --dev refuses the dev repository.
+    """
+    if dev:
+        repo = repo or DEV_REPO
+        if repo in PROD_REPOS:
+            raise ValueError(f"--dev refuses the production repository {repo!r}")
+        if mirrors:
+            raise ValueError("--dev has no mirror")
+        return repo, [], DEV_KID
+    repo = repo or PROD_REPOS[0]
+    if repo == DEV_REPO or repo.endswith("_dev"):
+        raise ValueError(f"{repo!r} is the dev repository: add --dev (it signs "
+                         "with the dev key), or name a production repository")
+    return repo, ([] if no_mirror else list(mirrors or DEFAULT_MIRRORS)), "u1"
+
 
 def mirror_platform(mirror: str, tag: str, work: str, platform_tag: str,
                     source_repo: str) -> None:
@@ -341,7 +372,10 @@ def main(argv: list[str] | None = None) -> int:
         formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("tag", help="Release tag, e.g. v1.4.0")
     p.add_argument("run_id", help="The CI run id that built this tag")
-    p.add_argument("--repo", default="HitarthTrivedi/prism_gui",
+    p.add_argument("--dev", action="store_true",
+                   help=f"Publish the DEV channel: repo {DEV_REPO}, signed "
+                        f"with key id {DEV_KID}, no mirror. Never mixes with prod.")
+    p.add_argument("--repo", default=None,
                    help="The repository CI built the tag in. Stays the OLD "
                         "name: every build up to 1.6.10 reads only this one.")
     p.add_argument("--mirror", action="append", metavar="OWNER/REPO",
@@ -363,6 +397,11 @@ def main(argv: list[str] | None = None) -> int:
                         "order given — e.g. --only windows-x64 to do Windows "
                         "first. Default: every platform, in table order")
     args = p.parse_args(argv)
+    try:
+        args.repo, mirrors, kid = resolve_channel(
+            args.repo, args.mirror, args.no_mirror, args.dev)
+    except ValueError as e:
+        p.error(str(e))
 
     # No upfront "key must be set" check: a platform whose signed manifest
     # already exists (the common re-run case — everything but a genuinely
@@ -383,14 +422,13 @@ def main(argv: list[str] | None = None) -> int:
         print(f"── {platform_tag} " + "─" * max(1, 40 - len(platform_tag)))
         try:
             do_platform(args.repo, args.tag, args.run_id, work,
-                       platform_tag, matrix_os, args.force)
+                       platform_tag, matrix_os, args.force, kid)
             done.append(platform_tag)
             print(f"✓ {platform_tag} done\n")
         except (subprocess.CalledProcessError, RuntimeError) as e:
             print(f"✗ {platform_tag} failed: {e}\n", file=sys.stderr)
             failed.append(platform_tag)
 
-    mirrors = [] if args.no_mirror else list(args.mirror or DEFAULT_MIRRORS)
     mirror_failed = []
     for mirror in mirrors:
         for platform_tag in done:       # only what the source release completed

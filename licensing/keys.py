@@ -73,14 +73,15 @@ UPDATE_PRODUCTION: dict[str, str] = {
     "u1": "49f27ccbfba0e52b62f1244ba63c2a54bf81fa3ff13d9d88be802dbc68496d4e",
 }
 
-# Development update-signing key. Same rule as DEVELOPMENT above: usable only
-# from source, invisible to a frozen build. Generated 2026-08-30 for testing
-# the in-app updater end to end; this key's PRIVATE half is not a secret
-# worth protecting the way the production one is (it can only ever sign a
-# manifest that non-frozen, from-source Prisms will accept), but it must
-# never be treated as good enough to sign a real release with.
+# Development update-signing key (kid udev2). Trusted ONLY by a frozen DEV
+# build (channel.CHANNEL == "dev") and by source runs; a prod build does not
+# contain it. Unlike its predecessor (udev1, whose private half was a test
+# fixture in a working tree), the private half of udev2 is kept like a real
+# key -- outside the repo, never in a prod build's trust list -- because a
+# dev-trusting binary that ever reached a customer would accept whatever it
+# signs. Do not add this to UPDATE_PRODUCTION, and do not ship a dev build.
 UPDATE_DEVELOPMENT: dict[str, str] = {
-    "udev1": "b6f1c8e924c63c5631d5e317156a15c12cf24904b29ce01a5c9f6f425300a569",
+    "udev2": "0b059146aae977b638e59e24b6fea80296eb49ccfc412b312e303847f91e0506",
 }
 
 

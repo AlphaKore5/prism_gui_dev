@@ -105,6 +105,34 @@ def _record_signed_version(manifest_path: str, version: str) -> None:
         f.write(version)
 
 
+def check_key_matches_kid(key_hex: str, kid: str) -> None:
+    """Refuse to sign with a key that no build could verify.
+
+    A manifest signed by a key whose public half is not what the app has under
+    `kid` is rejected by every client as "not recognised" -- found only after
+    publishing. Checking here turns a wrong key, a wrong --kid, or a dev key
+    used for prod (or the reverse) into an error at the signing machine.
+    """
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from licensing import keys
+
+    try:
+        pub = Ed25519PrivateKey.from_private_bytes(bytes.fromhex(key_hex)) \
+            .public_key().public_bytes(serialization.Encoding.Raw,
+                                       serialization.PublicFormat.Raw).hex()
+    except ValueError as e:
+        raise ValueError(f"the signing key is not a valid Ed25519 key ({e})") from e
+    known = {**keys.UPDATE_PRODUCTION, **keys.UPDATE_DEVELOPMENT}
+    if kid not in known:
+        raise ValueError(f"kid {kid!r} is not a key id any build trusts "
+                         f"(known: {sorted(known)})")
+    if known[kid] != pub:
+        raise ValueError(f"this signing key is not the one published as {kid!r} in "
+                         "licensing/keys.py, so no build would accept the manifest. "
+                         "Wrong key for this kid, or wrong --kid for this key?")
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("manifest_path", help="Unsigned manifest JSON from packaging/manifest.py")
@@ -118,6 +146,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--allow-downgrade", action="store_true",
                    help="Bypass the monotonic-version check. For test fixtures only — "
                         "never pass this when signing a real release.")
+    p.add_argument("--allow-unpublished-key", action="store_true",
+                   help="Skip the check that the signing key is the one published "
+                        "under --kid in licensing/keys.py. For test fixtures only: "
+                        "a manifest signed this way is rejected by every real build.")
     p.add_argument("--rollout", type=int, default=None,
                    help="Offer automatically to this percent of devices (0-100). "
                         "Omit for everyone. Clients built before 1.6.11 ignore it.")
@@ -154,6 +186,12 @@ def main(argv: list[str] | None = None) -> int:
         update_manifest.check_policy(manifest)
     except update_manifest.ManifestError as e:
         p.error(str(e))
+
+    if not args.allow_unpublished_key:
+        try:
+            check_key_matches_kid(args.key_hex, args.kid)
+        except ValueError as e:
+            p.error(str(e))
 
     token = update_manifest.sign(manifest, args.key_hex, kid=args.kid,
                                  validity_days=args.validity_days)

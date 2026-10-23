@@ -86,7 +86,8 @@ class TheDowngradeGuardIsScopedPerPlatform(unittest.TestCase):
             [sys.executable,
              os.path.join(self.work, "devtools", "sign_manifest.py"),
              manifest_path, "-o", os.path.join(self.work, out_name),
-             "--key-hex", DEV_KEY, "--kid", "u1dev"],
+             "--key-hex", DEV_KEY, "--kid", "u1dev",
+             "--allow-unpublished-key"],
             cwd=self.work, env=env, capture_output=True, text=True)
 
     def test_three_platforms_at_the_identical_version_all_succeed(self):

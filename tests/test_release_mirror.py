@@ -91,7 +91,7 @@ class Main(unittest.TestCase):
     """The command: which repos, and what the exit code says."""
 
     def run_main(self, argv, *, platform_ok=True, mirror_ok=True):
-        def do_platform(repo, tag, run_id, work, plat, matrix, force):
+        def do_platform(repo, tag, run_id, work, plat, matrix, force, kid="u1"):
             if not platform_ok:
                 raise RuntimeError("source failed")
 
@@ -128,3 +128,49 @@ class Main(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Channels(unittest.TestCase):
+    """--dev and prod can never be mixed by accident."""
+
+    def test_default_is_prod_with_the_org_mirror_and_the_prod_key(self):
+        self.assertEqual(R.resolve_channel(None, None, False, False),
+                         ("HitarthTrivedi/prism_gui", ["AlphaKore5/prism_gui"], "u1"))
+
+    def test_dev_uses_the_dev_repo_the_dev_key_and_no_mirror(self):
+        self.assertEqual(R.resolve_channel(None, None, False, True),
+                         (R.DEV_REPO, [], "udev2"))
+
+    def test_dev_refuses_every_production_repository(self):
+        for repo in R.PROD_REPOS:
+            with self.subTest(repo=repo), self.assertRaises(ValueError):
+                R.resolve_channel(repo, None, False, True)
+
+    def test_dev_refuses_a_mirror(self):
+        with self.assertRaises(ValueError):
+            R.resolve_channel(None, ["a/b"], False, True)
+
+    def test_prod_refuses_the_dev_repository(self):
+        for repo in (R.DEV_REPO, "someone/prism_gui_dev"):
+            with self.subTest(repo=repo), self.assertRaises(ValueError):
+                R.resolve_channel(repo, None, False, False)
+
+    def test_no_mirror_still_works_for_prod(self):
+        self.assertEqual(R.resolve_channel(None, None, True, False)[1], [])
+
+    def test_main_rejects_a_mixed_up_command_before_touching_anything(self):
+        with mock.patch.object(R, "do_platform") as do, \
+             self.assertRaises(SystemExit):
+            R.main(["v1.6.11", "1", "--repo", R.DEV_REPO])
+        do.assert_not_called()
+
+    def test_main_signs_dev_releases_with_the_dev_kid(self):
+        seen = []
+        with mock.patch.object(R, "do_platform",
+                               side_effect=lambda *a: seen.append(a)), \
+             mock.patch.object(R, "mirror_platform") as mirror:
+            R.main(["v1.6.11", "1", "--dev", "--only", "linux-x64",
+                    "--work-dir", tempfile.mkdtemp()])
+        self.assertEqual(seen[0][0], R.DEV_REPO)
+        self.assertEqual(seen[0][-1], "udev2")
+        mirror.assert_not_called()
