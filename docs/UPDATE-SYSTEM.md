@@ -193,3 +193,29 @@ disabling rollback, and ignoring fallback hosts each make these tests fail.
 - The real GitHub (redirect on our own repo, rate limits, asset caps).
 - A full disk, a laptop sleeping mid-download, a proxy rewriting responses.
 Those need the real-hardware runs listed in section 10.
+
+## 12. Quiet updates and outcome reports (core built; UI not wired yet)
+
+- `updater.auto_stage()` checks (honouring `rollout`), downloads and verifies in
+  the background, and leaves the result waiting (`ready` in `update_state.json`,
+  the signed manifest saved beside the stage as `<stage>.token`). It applies
+  nothing. `updater.apply_ready()` is what a "Restart to update" button calls.
+- `ready_update()` re-proves the stage every time it is asked: signature and
+  expiry of the saved manifest, still newer than what runs, not failed, not
+  revoked (including by any manifest seen since), and every staged file against
+  the manifest. A stage that fails any of it is deleted, never applied.
+- `stage_update()` refuses to start without room for the whole new tree plus a
+  margin (`FREE_SPACE_*`), before writing anything.
+- Outcomes (`downloaded`, `ok`, `failed`, `rolled_back`, with a fixed reason
+  code, never a message) are queued in `update_state.json` and sent by
+  `report_async()`. A server that is down keeps them for next time; only our own
+  malformed request is dropped; reports older than 14 days are dropped.
+  `ok` is reported by the first confirmed start after a swap; `rolled_back` by
+  the version it rolled back to.
+- Gotcha found by the tests: the pending-update marker holds the version swapped
+  IN, not out, whatever `mark_pending_confirm`'s parameter is called. The
+  version an update started from is `updater.staged_from()`.
+- Known gap: a swap that fails inside the detached helper is only logged
+  (`update-apply.log`); it is not reported, because the helper has no access to
+  the queue.
+- Still to wire: the timer and the "ready" banner in `main_window.py`.

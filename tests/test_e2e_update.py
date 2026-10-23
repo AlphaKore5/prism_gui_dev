@@ -271,3 +271,162 @@ class TheStandInMatchesMain(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@NEEDS_TAG
+class Reporting(E2E):
+    """The app tells the server how an update went (advisory, see
+    license_server models.UpdateEvent)."""
+
+    def flush(self, app):
+        before = len(app.events())
+        app.run("--flush")
+        return [e for e in app.events()[before:] if e["event"] == "flushed"][-1]["sent"]
+
+    def reports(self, result=None):
+        got = list(self.server.reports)
+        return [r for r in got if result is None or r["result"] == result]
+
+    def test_a_successful_update_reports_downloaded_then_ok(self):
+        app = self.new_client("1.6.11")
+        self.server.publish(self.release("1.6.12", payload="r\n"))
+        app.run("--update")
+        self.assertTrue(app.wait_for("confirmed:1.6.12"), app.names())
+        self.flush(app)
+        results = [r["result"] for r in self.reports()]
+        self.assertEqual(sorted(results), ["downloaded", "ok"])
+        ok = self.reports("ok")[0]
+        self.assertEqual((ok["from_version"], ok["to_version"], ok["channel"]),
+                         ("1.6.11", "1.6.12", "prod"))
+        self.assertEqual(ok["platform"], __import__("updater").platform_tag())
+        self.assertEqual(ok["license_id"], "lic_e2e")
+        self.assertEqual(self.reports("downloaded")[0]["host"], H.PRIMARY)
+
+    def test_a_rollback_is_reported_by_the_version_it_rolled_back_to(self):
+        app = self.new_client("1.6.11")
+        self.server.publish(self.release("1.6.12", crash_on_start=True, payload="b\n"))
+        app.run("--update")
+        self.assertTrue(app.wait_for("crash:1.6.12"), app.names())
+        app.run()
+        self.assertTrue(app.wait_count("confirmed:1.6.11", 2), app.names())
+        self.flush(app)
+        rolled = self.reports("rolled_back")
+        self.assertEqual(len(rolled), 1)
+        self.assertEqual((rolled[0]["to_version"], rolled[0]["reason"]), ("1.6.12", "no_confirm"))
+        self.assertEqual(self.reports("ok"), [], "a rolled-back update must not report ok")
+
+    def test_a_failed_update_is_reported_with_a_code_not_a_message(self):
+        app = self.new_client("1.6.11")
+        self.server.publish(self.release("1.6.12", payload="f\n"))
+        for repo in (H.PRIMARY, H.FALLBACK):
+            self.server.fault(repo, "corrupt", "payload.txt")
+        app.run("--update")
+        self.flush(app)
+        failed = self.reports("failed")
+        self.assertEqual(len(failed), 1)
+        self.assertEqual(failed[0]["reason"], "hash_mismatch")
+        self.assertNotIn("/", failed[0]["reason"])
+
+    def test_reports_survive_the_server_being_down_and_arrive_later(self):
+        app = self.new_client("1.6.11")
+        self.server.publish(self.release("1.6.12", payload="o\n"))
+        app.run("--update")
+        self.assertTrue(app.wait_for("confirmed:1.6.12"), app.names())
+        self.server.reports_down = True
+        self.assertEqual(self.flush(app), 0)
+        self.assertEqual(self.reports(), [])
+        self.assertEqual(len(app.update_state()["outbox"]), 2)
+        self.server.reports_down = False
+        self.assertEqual(self.flush(app), 2)
+        self.assertEqual(app.update_state()["outbox"], [])
+
+    def test_no_report_goes_out_for_a_version_that_was_never_installed(self):
+        app = self.new_client("1.6.11")
+        self.server.publish(self.release("1.6.12"))
+        app.run("--flush")
+        self.assertEqual(self.reports(), [])
+
+
+@NEEDS_TAG
+class QuietUpdate(E2E):
+    """auto_stage downloads and verifies in the background and leaves the result
+    waiting; only the customer's restart applies it."""
+
+    def test_staging_applies_nothing_until_the_customer_restarts(self):
+        app = self.new_client("1.6.11")
+        rel = self.release("1.6.12", payload="q\n")
+        self.server.publish(rel)
+        before = H.tree_digest(app.install)
+        app.run("--auto-stage")
+        self.assertEqual(app.names()[-1], "ready:1.6.12")
+        self.assertEqual(H.tree_digest(app.install), before, "install must be untouched")
+        self.assertEqual(app.names().count("apply_started"), 0)
+        app.run("--apply-ready")
+        self.assertTrue(app.wait_for("confirmed:1.6.12"), app.names())
+        self.assert_matches_manifest(app, rel)
+        self.assertEqual(app.update_state()["ready"], {})
+        self.assertEqual(app.leftovers(), [])
+
+    def test_a_second_check_reuses_the_waiting_update_instead_of_downloading_again(self):
+        app = self.new_client("1.6.11")
+        self.server.publish(self.release("1.6.12", payload="q\n"))
+        app.run("--auto-stage")
+
+        def files():
+            return [n for n in self.server.hits("cdn") if not n.startswith("manifest.")]
+        fetched = len(files())
+        manifests = len(self.server.hits("manifest"))
+        app.run("--auto-stage")
+        self.assertEqual(app.names()[-1], "ready:1.6.12")
+        self.assertEqual(len(files()), fetched, "a waiting update must not be fetched twice")
+        self.assertEqual(len(self.server.hits("manifest")), manifests + 1,
+                         "but the manifest is re-read, to learn of a revocation")
+
+    def test_a_staged_file_changed_while_waiting_is_never_applied(self):
+        app = self.new_client("1.6.11")
+        self.server.publish(self.release("1.6.12", payload="q\n"))
+        app.run("--auto-stage")
+        stage = app.update_state()["ready"]["stage_dir"]
+        with open(os.path.join(stage, "_internal", "payload.txt"), "w") as f:
+            f.write("tampered\n")
+        before = H.tree_digest(app.install)
+        app.run("--apply-ready")
+        self.assertEqual(app.names()[-1], "update_failed")
+        self.assertNotIn("apply_started", app.names())
+        self.assertEqual(H.tree_digest(app.install), before)
+        self.assertEqual(app.update_state()["ready"], {})
+        self.assertFalse(os.path.exists(stage), "a tampered stage is removed")
+
+    def test_a_waiting_update_the_publisher_withdraws_is_not_applied(self):
+        app = self.new_client("1.6.11")
+        self.server.publish(self.release("1.6.12", payload="q\n"))
+        app.run("--auto-stage")
+        self.assertEqual(app.names()[-1], "ready:1.6.12")
+        # the publisher withdraws it: a newer manifest lists 1.6.12 as revoked
+        self.server.publish(self.release("1.6.13", label="-b", payload="q\n",
+                                         policy={"revoked": ["1.6.12"]}),
+                            manifest=True)
+        before = H.tree_digest(app.install)
+        app.run("--apply-ready")
+        self.assertNotIn("apply_started", app.names())
+        self.assertEqual(H.tree_digest(app.install), before)
+        self.assertEqual(app.update_state()["ready"], {})
+
+    def test_rollout_zero_stages_nothing_in_the_background(self):
+        app = self.new_client("1.6.11")
+        self.server.publish(self.release("1.6.12", policy={"rollout": 0}))
+        app.run("--auto-stage")
+        self.assertEqual(app.names()[-1], "no_update")
+        self.assertEqual(app.update_state()["ready"], {})
+
+    def test_a_waiting_update_overtaken_by_the_running_version_is_dropped(self):
+        app = self.new_client("1.6.11")
+        self.server.publish(self.release("1.6.12", payload="q\n"))
+        app.run("--auto-stage")
+        # the customer installed 1.6.12 some other way: same version now running
+        newer_client = self.new_client("1.6.12")
+        shutil.rmtree(app.install)
+        shutil.copytree(newer_client.install, app.install)
+        app.run("--apply-ready")
+        self.assertEqual(app.names()[-1], "update_failed")
+        self.assertEqual(app.update_state()["ready"], {})

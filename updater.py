@@ -52,6 +52,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 import app_meta
+import channel
 import licensing
 import paths
 import update_manifest
@@ -82,6 +83,17 @@ _DEFAULT: dict[str, Any] = {
     # apart from rolled_back_from, which the one-time banner clears, so it
     # can go on stopping that same build being offered again.
     "failed_version": "",
+    # Outcomes not yet reported to the licence server (see note_outcome). Kept
+    # on disk so an offline launch, or a rollback that relaunches at once,
+    # still gets reported by whichever process runs next.
+    "outbox": [],
+    # A fully staged, verified update waiting for the customer to restart.
+    # {version, stage_dir}; the signed manifest it was verified against sits
+    # beside it in <stage_dir>.token and is checked again before applying.
+    "ready": {},
+    # The version that was running when the last update was staged, so the
+    # "ok" report after the swap can say what it updated FROM.
+    "update_from": "",
 }
 
 # Fixed at build time, exactly like licensing/client.py's DEFAULT_SERVER —
@@ -260,6 +272,7 @@ class UpdateCheck:
     fetched or written yet beyond the manifest itself."""
     version: str
     manifest: dict[str, Any]
+    token: str = ""        # the signed PRSMUv1 text this manifest came from
 
 
 @dataclass
@@ -328,6 +341,11 @@ def _writable_dir(path: str) -> bool:
 def note_installed(version: str) -> None:
     """Record the version that has actually started. See stage_update()."""
     _record_seen_version(version)
+    try:
+        if (_load().get("ready") or {}).get("version") == version:
+            clear_ready(remove_files=False)       # the swap already used it up
+    except Exception:                                # noqa: BLE001
+        pass
 
 
 def _highest_seen_version() -> str:
@@ -551,6 +569,7 @@ def check_for_update(*, running: str | None = None,
     # wins; a genuine but stale one (an out-of-date mirror) does not stop the
     # next host being asked.
     payload = None
+    payload_token = ""
     bad: update_manifest.ManifestError | None = None
     for repo in _repos():
         try:
@@ -565,10 +584,11 @@ def check_for_update(*, running: str | None = None,
         except update_manifest.ManifestError as e:
             bad = bad or e
             continue
+        _revoked_seen.update(candidate.get("revoked") or ())
         if payload is None or newer(candidate["version"], payload["version"]):
-            payload = candidate
+            payload, payload_token = candidate, token
         if acceptable(candidate["version"], candidate.get("revoked")):
-            payload = candidate
+            payload, payload_token = candidate, token
             break
 
     if payload is None:
@@ -586,7 +606,7 @@ def check_for_update(*, running: str | None = None,
             payload, _device_fingerprint()):
         return None
 
-    return UpdateCheck(version=version, manifest=payload)
+    return UpdateCheck(version=version, manifest=payload, token=payload_token)
 
 
 def _local_file_matches(install_dir: str, entry: dict[str, Any]) -> bool:
@@ -610,6 +630,50 @@ def _files_to_fetch(manifest: dict[str, Any], install_dir: str) -> list[dict[str
     not the ~210+ MB archive."""
     return [entry for entry in manifest["files"]
            if not _local_file_matches(install_dir, entry)]
+
+
+def _verify_tree(stage_dir: str, files: list[dict[str, Any]]) -> None:
+    """Every file in the manifest is present in `stage_dir` with the exact
+    size and sha256 it declares. Raises UpdateError otherwise. Used when a
+    stage is built AND again before a stage that has been waiting is applied."""
+    for entry in files:
+        full = os.path.join(stage_dir, entry["path"])
+        if "symlink" in entry:
+            if not (os.path.islink(full)
+                    and os.readlink(full) == entry["symlink"]):
+                raise UpdateError(f"{entry['path']}: staged symlink mismatch.")
+            continue
+        if (not os.path.isfile(full)
+                or os.path.getsize(full) != entry["size"]
+                or update_manifest.sha256_file(full) != entry["sha256"]):
+            raise UpdateError(f"{entry['path']}: staged copy failed final verification.")
+
+
+#: Room to keep free beyond the bytes of the new tree, so a nearly full disk
+#: fails here with a clear message instead of halfway through the copy.
+FREE_SPACE_MARGIN = 0.05
+FREE_SPACE_FLOOR = 50 * 1024 * 1024
+
+
+def _check_free_space(where: str, files: list[dict[str, Any]]) -> None:
+    """A staged tree is a COMPLETE copy of the new version (unchanged files
+    are copied across, not linked), so it needs the whole tree's size free."""
+    import shutil
+    need = sum(int(e.get("size") or 0) for e in files if "symlink" not in e)
+    need = int(need * (1 + FREE_SPACE_MARGIN)) + FREE_SPACE_FLOOR
+    try:
+        free = shutil.disk_usage(where).free
+    except OSError:
+        return                       # cannot tell; do not block on a guess
+    if free < need:
+        raise UpdateError(
+            f"not enough disk space to prepare the update: it needs about "
+            f"{need // (1024 * 1024)} MB free and {free // (1024 * 1024)} MB is "
+            "available. Free some space and try again; nothing has been changed.")
+
+
+_revoked_seen: set[str] = set()   # versions any verified manifest withdrew
+_served_by: list[str] = []      # repositories that supplied files in the current stage
 
 
 def _fetch_file(version: str, entry: dict[str, Any],
@@ -646,6 +710,8 @@ def _fetch_file(version: str, entry: dict[str, Any],
         if hashlib.sha256(data).hexdigest() != entry["sha256"]:
             problem = UpdateError(f"{entry['path']}: hash mismatch after download.")
             continue
+        if repo not in _served_by:
+            _served_by.append(repo)
         return data
     if isinstance(problem, UpdateError):
         raise problem
@@ -668,9 +734,15 @@ def stage_update(check: UpdateCheck, install_dir: str, *,
     import shutil
 
     manifest = check.manifest
+    del _served_by[:]
     stage_dir = os.path.join(stage_root(install_dir), check.version)
     if os.path.isdir(stage_dir):
         shutil.rmtree(stage_dir, ignore_errors=True)
+    try:
+        _check_free_space(os.path.dirname(stage_dir), manifest["files"])
+    except UpdateError as e:
+        note_outcome("failed", check.version, reason=reason_code(e))
+        raise
     os.makedirs(stage_dir, exist_ok=True)
 
     to_fetch = {e["path"] for e in _files_to_fetch(manifest, install_dir)}
@@ -734,23 +806,15 @@ def stage_update(check: UpdateCheck, install_dir: str, *,
                 on_progress(i + 1, total)
 
         # Re-verify the ENTIRE staged tree, including files that were just
-        # copied unchanged from the current install — cheap, and it's what
+        # copied unchanged from the current install -- cheap, and it's what
         # catches a corrupted local copy that happened to match on size
         # alone, or a manifest/build mismatch, before this is ever handed to
         # apply_update.py as "safe to swap in".
-        for entry in files:
-            full = os.path.join(stage_dir, entry["path"])
-            if "symlink" in entry:
-                if not (os.path.islink(full)
-                       and os.readlink(full) == entry["symlink"]):
-                    raise UpdateError(f"{entry['path']}: staged symlink mismatch.")
-                continue
-            if (not os.path.isfile(full)
-                   or os.path.getsize(full) != entry["size"]
-                   or update_manifest.sha256_file(full) != entry["sha256"]):
-                raise UpdateError(f"{entry['path']}: staged copy failed final verification.")
-    except Exception:
+        _verify_tree(stage_dir, files)
+    except Exception as e:
         shutil.rmtree(stage_dir, ignore_errors=True)
+        note_outcome("failed", check.version, reason=reason_code(e),
+                     host=_host_label())
         raise
 
     # apply_update.perform_apply_and_relaunch() reads the outgoing version
@@ -770,7 +834,220 @@ def stage_update(check: UpdateCheck, install_dir: str, *,
     # and it cleared only when a still-newer version was published. The
     # version is recorded when it has actually STARTED — see note_installed(),
     # called from main.py once the window is up.
+    try:
+        _save({**_load(), "update_from": app_meta.VERSION})
+    except Exception:                                # noqa: BLE001
+        pass
+    note_outcome("downloaded", check.version, host=_host_label())
     return StagedUpdate(version=check.version, stage_dir=stage_dir, manifest=manifest)
+
+
+# ── reporting outcomes (advisory; see license_server models.UpdateEvent) ────
+import threading as _threading
+
+_outbox_lock = _threading.Lock()
+OUTBOX_MAX = 20
+OUTBOX_MAX_AGE = 14 * 24 * 3600      # a report older than this is no use to anyone
+
+
+def reason_code(exc: BaseException) -> str:
+    """A short, fixed code for why an update failed. Codes, never the message:
+    messages can carry file paths, and the server stores shapes only."""
+    text = str(exc).lower()
+    for needle, code in (("hash mismatch", "hash_mismatch"),
+                         ("manifest says", "size_mismatch"),
+                         ("could not be downloaded", "download_failed"),
+                         ("disk space", "disk_full"),
+                         ("shortcut file", "symlink_privilege"),
+                         ("final verification", "verify_failed"),
+                         ("symlink mismatch", "verify_failed"),
+                         ("newer updater", "updater_too_old")):
+        if needle in text:
+            return code
+    return "error"
+
+
+def _host_label() -> str:
+    return ",".join(_served_by)[:80]
+
+
+def staged_from() -> str:
+    """The version the most recent staged update started from."""
+    return str(_load().get("update_from") or "")
+
+
+def note_outcome(result: str, to_version: str, *, reason: str = "",
+                 from_version: str | None = None, host: str = "") -> None:
+    """Queue one outcome for the licence server. Never raises, never blocks on
+    the network: it only writes the queue. report_async() sends it."""
+    try:
+        entry = {"from_version": app_meta.VERSION if from_version is None else from_version,
+                 "to_version": to_version, "platform": platform_tag(),
+                 "channel": channel.CHANNEL, "result": result,
+                 "reason": reason[:60], "host": host[:80],
+                 "queued_at": int(time.time())}
+        with _outbox_lock:
+            state = _load()
+            box = list(state.get("outbox") or [])
+            box.append(entry)
+            _save({**state, "outbox": box[-OUTBOX_MAX:]})
+    except Exception:                                # noqa: BLE001
+        pass
+
+
+def flush_outbox() -> int:
+    """Send what is queued. Returns how many were delivered. A server that
+    cannot be reached leaves the queue for next time; a server that answers
+    "no" drops that entry (retrying a rejection forever helps nobody)."""
+    try:
+        from licensing import client
+        data = store.load(licensing.user_dir())
+        license_id = data.get("license_id") or licensing.state().license_id
+        if not license_id:
+            return 0
+        fp = licensing.device_fingerprint()
+    except Exception:                                # noqa: BLE001
+        return 0
+    with _outbox_lock:
+        pending = list(_load().get("outbox") or [])
+    sent = 0
+    now = time.time()
+    for entry in pending:
+        age = now - float(entry.get("queued_at") or now)
+        if age > OUTBOX_MAX_AGE:
+            sent += 1                                # too old to be useful: drop
+            continue
+        body = {k: v for k, v in entry.items() if k != "queued_at"}
+        try:
+            client.call("/v1/update-report",
+                        {"license_id": license_id, "device_fp": fp, **body},
+                        app_version=app_meta.VERSION, timeout=8)
+        except client.ServerError as e:
+            # Our own malformed request will never be accepted: drop it.
+            # Anything else (a 5xx, a gateway page, rate limiting) is the
+            # server's trouble, not a verdict on the report: keep it.
+            if e.code != "INVALID_REQUEST":
+                break
+        except Exception:                            # noqa: BLE001 -- unreachable etc.
+            break                                    # try again next time
+        sent += 1
+    if sent:
+        with _outbox_lock:
+            state = _load()
+            _save({**state, "outbox": list(state.get("outbox") or [])[sent:]})
+    return sent
+
+
+def report_async() -> None:
+    """flush_outbox() on a daemon thread. Cheap when the queue is empty."""
+    if not (_load().get("outbox")):
+        return
+    _threading.Thread(target=flush_outbox, name="prism-update-report",
+                      daemon=True).start()
+
+
+# ── a staged update that waits for the customer to restart ─────────────────
+def _token_path(stage_dir: str) -> str:
+    return stage_dir.rstrip(os.sep) + ".token"
+
+
+def clear_ready(*, remove_files: bool = True) -> None:
+    import shutil
+    try:
+        state = _load()
+        ready = state.get("ready") or {}
+        _save({**state, "ready": {}})
+        if remove_files and ready.get("stage_dir"):
+            shutil.rmtree(ready["stage_dir"], ignore_errors=True)
+            for suffix in (".token", ".VERSION"):
+                try:
+                    os.remove(ready["stage_dir"].rstrip(os.sep) + suffix)
+                except OSError:
+                    pass
+    except Exception:                                # noqa: BLE001
+        pass
+
+
+def mark_ready(staged: StagedUpdate, check: UpdateCheck) -> None:
+    """Remember a finished stage so the app can offer 'restart to update'.
+    The signed manifest text is kept beside it: ready_update() checks it, and
+    the whole tree against it, again before anything is applied."""
+    with open(_token_path(staged.stage_dir), "w", encoding="utf-8") as f:
+        f.write(check.token)
+    _save({**_load(), "ready": {"version": staged.version,
+                                "stage_dir": staged.stage_dir}})
+
+
+def ready_update(running: str | None = None) -> StagedUpdate | None:
+    """The staged update that is still good to apply, or None.
+
+    "Still good" is re-proved every time, not remembered: the signature and
+    expiry of the saved manifest, that the version is still newer than what is
+    running and has not been revoked or failed, and every file of the staged
+    tree against the manifest. Anything off clears it, so a stage that was
+    tampered with, half deleted, or overtaken by a newer release is never
+    applied.
+    """
+    running = app_meta.VERSION if running is None else running
+    ready = _load().get("ready") or {}
+    if not ready:
+        return None
+    try:
+        stage, version = ready["stage_dir"], ready["version"]
+        with open(_token_path(stage), encoding="utf-8") as f:
+            payload = update_manifest.verify(
+                f.read(), public_keys=licensing.keys.update_public_keys())
+        if (payload["version"] != version or not newer(version, running)
+                or version in (payload.get("revoked") or ())
+                or version in _revoked_seen
+                or version == str(_load().get("failed_version") or "")):
+            raise UpdateError("stage is no longer current")
+        if int(payload.get("min_updater", 0)) > UPDATER_LEVEL:
+            raise UpdateError("stage needs a newer updater")
+        _verify_tree(stage, payload["files"])
+        return StagedUpdate(version=version, stage_dir=stage, manifest=payload)
+    except Exception:                                # noqa: BLE001
+        clear_ready()
+        return None
+
+
+def auto_stage(*, fetch: Callable[..., Any] | None = None,
+               on_progress: Callable[[int, int], None] | None = None) -> StagedUpdate | None:
+    """The quiet background path: check (honouring the rollout), download,
+    verify, and leave the result waiting. Applies nothing -- the customer's
+    restart does that (apply_ready). Returns the waiting update, or None when
+    there is nothing to offer this device. Raises UpdateError like the manual
+    path; the caller decides whether to say anything."""
+    try:
+        check = check_for_update(fetch=fetch, honour_rollout=True)
+    except UpdateError:
+        check = None
+        if ready_update() is None:
+            raise
+    # check_for_update just refreshed _revoked_seen, so a waiting update that
+    # the publisher has since withdrawn is dropped by ready_update().
+    waiting = ready_update()
+    if waiting is not None:
+        return waiting
+    if check is None:
+        return None
+    staged = stage_update(check, install_dir(), fetch=fetch, on_progress=on_progress)
+    mark_ready(staged, check)
+    return staged
+
+
+def apply_ready() -> None:
+    """Restart into the waiting update. Raises UpdateError if there is none
+    (or it failed its re-check); the caller then falls back to the download
+    page, as the manual path always has."""
+    try:
+        check_for_update()          # learn of any revocation since staging; offline is fine
+    except Exception:                                # noqa: BLE001
+        pass
+    staged = ready_update()
+    if staged is None:
+        raise UpdateError("The update is no longer ready to install.")
+    begin_apply(staged, install_dir())
 
 
 def install_dir() -> str:

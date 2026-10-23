@@ -462,6 +462,8 @@ def main():
                 # continuing this process would mean "rolled back" but still
                 # running the thing that just failed to start.
                 updater.note_rollback(app_meta.VERSION)
+                updater.note_outcome("rolled_back", app_meta.VERSION,
+                                     reason="no_confirm")
                 apply_update.spawn_detached(updater.relaunch_argv())
                 sys.exit(0)
         except SystemExit:
@@ -525,6 +527,9 @@ def main():
         try:
             import apply_update
             _dir = updater.install_dir()
+            # Read BEFORE confirming: confirm removes the marker, and the
+            # marker is how this launch knows it is the first after an update.
+            _updated = apply_update.pending_update_version(_dir)
             apply_update.confirm_startup_success(_dir, _dir + ".old")
             # This version has now actually run, which is the only honest
             # moment to record it as the highest this machine has accepted.
@@ -532,6 +537,10 @@ def main():
             # a swap that failed afterwards convinced Prism it was already
             # up to date and sent the next "Update" press to the browser.
             updater.note_installed(app_meta.VERSION)
+            if _updated:
+                updater.note_outcome("ok", app_meta.VERSION,
+                                     from_version=updater.staged_from())
+            updater.report_async()      # also sends a rollback queued by the last run
         except Exception:                            # noqa: BLE001
             pass
 

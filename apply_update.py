@@ -123,10 +123,11 @@ def _tidy_staging(staged_dir: str) -> None:
     not rmtree: the folder is removed only if the swap really emptied it.
     """
     base = staged_dir.rstrip(os.sep)
-    try:
-        os.remove(base + ".VERSION")
-    except OSError:
-        pass
+    for suffix in (".VERSION", ".token"):     # .token: updater.mark_ready's signed copy
+        try:
+            os.remove(base + suffix)
+        except OSError:
+            pass
     try:
         os.rmdir(os.path.dirname(base))
     except OSError:
@@ -317,6 +318,24 @@ def mark_pending_confirm(install_dir: str, from_version: str) -> None:
     """
     with open(confirm_marker_path(install_dir), "w", encoding="utf-8") as f:
         f.write(from_version.strip() + "\n")
+
+
+def pending_update_version(install_dir: str) -> str:
+    """The version named in the "swapped in, not yet confirmed" marker, or ""
+    when no swap is waiting for its first confirmed start.
+
+    NOTE the marker holds the version that was swapped IN (stage_update writes
+    the incoming version to <stage>.VERSION, which is what gets recorded), even
+    though mark_pending_confirm()'s parameter is called from_version. Use this
+    only to learn "this launch is the first after an update"; the version the
+    update started from is updater.staged_from(). Read it BEFORE
+    confirm_startup_success(), which removes the marker."""
+    try:
+        with open(confirm_marker_path(install_dir), encoding="utf-8") as f:
+            first = f.readline().strip()
+        return "" if first == LAUNCHED_LINE else first
+    except OSError:
+        return ""
 
 
 def is_pending_confirm(install_dir: str) -> bool:

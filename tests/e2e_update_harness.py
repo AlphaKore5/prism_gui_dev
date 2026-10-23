@@ -88,10 +88,17 @@ def log(event, **kw):
         f.write(json.dumps(kw) + "\n")
 
 
-import app_meta, paths, updater, apply_update
+import app_meta, paths, licensing, updater, apply_update
 VERSION = app_meta.VERSION
 
 port = os.environ.get("PRISM_E2E_PORT")
+# The frozen build's licence server is the real production one. A test must
+# never reach it: aim it at the local server (or a dead port) and give the
+# process a stand-in licence and device id.
+import licensing.client as _lc
+_lc.DEFAULT_SERVER = "http://127.0.0.1:" + (port or "9")
+licensing.store.load = lambda _dir: {"license_id": "lic_e2e"}
+licensing.device_fingerprint = lambda: "e2e-device-0001"
 if port:
     import requests
     from requests.adapters import HTTPAdapter
@@ -116,6 +123,8 @@ d = updater.install_dir()
 if apply_update.check_and_rollback_if_pending(d, d + ".old"):   # main.py, early
     log("rolled_back", version=VERSION)
     updater.note_rollback(VERSION)
+    if hasattr(updater, "note_outcome"):
+        updater.note_outcome("rolled_back", VERSION, reason="no_confirm")
     apply_update.spawn_detached(updater.relaunch_argv())
     sys.exit(0)
 
@@ -123,9 +132,35 @@ log("start", version=VERSION)
 if os.path.exists(os.path.join(HERE, "crash_on_start")):
     log("crash", version=VERSION)
     sys.exit(3)
+_updated = apply_update.pending_update_version(d) if hasattr(
+    apply_update, "pending_update_version") else ""              # main.py, before confirm
 apply_update.confirm_startup_success(d, d + ".old")             # main.py, window up
 updater.note_installed(VERSION)
+if _updated and hasattr(updater, "note_outcome"):
+    updater.note_outcome("ok", VERSION, from_version=updater.staged_from())
 log("confirmed", version=VERSION)
+if "--flush" in args:                                           # report_async, synchronously
+    log("flushed", sent=updater.flush_outbox())
+    sys.exit(0)
+
+if "--auto-stage" in args:                                      # the quiet background path
+    try:
+        staged = updater.auto_stage()
+        if staged:
+            log("ready", version=staged.version)
+        else:
+            log("no_update")
+    except updater.UpdateError as e:
+        log("update_failed", kind=type(e).__name__, msg=str(e)[:300])
+    sys.exit(0)
+
+if "--apply-ready" in args:                                     # customer pressed Restart
+    try:
+        updater.apply_ready()
+        log("apply_started")
+    except updater.UpdateError as e:
+        log("update_failed", kind=type(e).__name__, msg=str(e)[:300])
+    sys.exit(0)
 
 if "--update" in args or "--auto" in args:                      # main_window.py flow
     import inspect
@@ -210,9 +245,9 @@ def tree_digest(root: str) -> dict[str, str]:
 class Release:
     def __init__(self, work: str, version: str, src: str, *, sec: str, pub: str,
                  policy: dict | None = None, fallbacks=(FALLBACK,), repo=PRIMARY,
-                 crash_on_start=False, payload=""):
+                 crash_on_start=False, payload="", label=""):
         self.version = version
-        self.tree = build_tree(os.path.join(work, f"release-{version}"), version, src,
+        self.tree = build_tree(os.path.join(work, f"release-{version}{label}"), version, src,
                                test_pub=pub, repo=repo, fallbacks=fallbacks,
                                crash_on_start=crash_on_start, payload=payload)
         manifest = UM.build(self.tree, version)
@@ -222,7 +257,7 @@ class Release:
         self.plat = updater.platform_tag()
         self.manifest_name = f"manifest.{self.plat}.signed"
         self.token = UM.sign(manifest, sec, kid="u1").encode()
-        self.assets_dir = os.path.join(work, f"assets-{version}")
+        self.assets_dir = os.path.join(work, f"assets-{version}{label}")
         flatten_update_assets.flatten(self.tree, self.assets_dir, self.plat)
         self.tag = updater._assets_release_tag(version, self.plat, 1)
         self.manifest = manifest
@@ -238,6 +273,8 @@ class FakeGitHub(http.server.ThreadingHTTPServer):
         self.assets: dict[tuple[str, str], str] = {}     # (repo, tag) -> dir
         self.faults: dict[str, list[tuple]] = {}         # repo -> [(kind, arg)]
         self.requests: list[tuple[str, str, str]] = []   # (repo, route, name)
+        self.reports: list[dict] = []                    # POST /v1/update-report bodies
+        self.reports_down = False
         self.lock = threading.Lock()
         self.thread = threading.Thread(target=self.serve_forever, daemon=True)
         self.thread.start()
@@ -284,6 +321,19 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     def _record(self, repo, route, name):
         with self.server.lock:
             self.server.requests.append((repo, route, name))
+
+    def do_POST(self):
+        srv = self.server
+        length = int(self.headers.get("Content-Length") or 0)
+        raw = self.rfile.read(length)
+        if self.path == "/v1/update-report":
+            if srv.reports_down:
+                return self._send(503, b'{"error":{"code":"DOWN"}}',
+                                  {"Content-Type": "application/json"})
+            with srv.lock:
+                srv.reports.append(json.loads(raw or b"{}"))
+            return self._send(200, b'{"recorded":1}', {"Content-Type": "application/json"})
+        self._send(404, b"no")
 
     def do_GET(self):
         srv = self.server
