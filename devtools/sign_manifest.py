@@ -67,9 +67,24 @@ def _tracker_key(manifest_path: str) -> str:
     return m.group(1) if m else name
 
 
-def _last_signed_path(manifest_path: str) -> str:
+def _is_dev_kid(kid: str) -> bool:
+    from licensing import keys
+    return kid in keys.UPDATE_DEVELOPMENT
+
+
+def _last_signed_path(manifest_path: str, kid: str = "u1") -> str:
+    """Where the downgrade history for this manifest lives.
+
+    A DEV signing has its own lane (`.dev` after the platform). Dev and prod
+    version numbers are independent, so sharing one tracker meant a dev release
+    could overwrite the production release history: block the next prod signing
+    as a "downgrade", or lower the recorded prod version so a real downgrade
+    slipped through. The production path is unchanged, so existing history on
+    a signing machine keeps working.
+    """
     safe = re.sub(r"[^A-Za-z0-9_.-]", "_", _tracker_key(manifest_path))
-    return os.path.join(HERE, f".last_signed_update_version.{safe}")
+    lane = ".dev" if _is_dev_kid(kid) else ""
+    return os.path.join(HERE, f".last_signed_update_version.{safe}{lane}")
 
 
 def _version_tuple(v: str) -> tuple[int, ...]:
@@ -82,7 +97,7 @@ def _version_tuple(v: str) -> tuple[int, ...]:
     return tuple(parts)
 
 
-def _last_signed_version(manifest_path: str) -> str:
+def _last_signed_version(manifest_path: str, kid: str = "u1") -> str:
     # Deliberately NOT falling back to the old global _LEGACY_LAST_SIGNED_PATH
     # here: that file can't say which PLATFORM last wrote it, so treating its
     # value as "the last version signed for THIS platform" would silently
@@ -94,14 +109,14 @@ def _last_signed_version(manifest_path: str) -> str:
     # downgrade, having no prior record to compare against), which is a far
     # smaller risk than the guard wrongly refusing a legitimate release.
     try:
-        with open(_last_signed_path(manifest_path), "r", encoding="utf-8") as f:
+        with open(_last_signed_path(manifest_path, kid), "r", encoding="utf-8") as f:
             return f.read().strip()
     except OSError:
         return ""
 
 
-def _record_signed_version(manifest_path: str, version: str) -> None:
-    with open(_last_signed_path(manifest_path), "w", encoding="utf-8") as f:
+def _record_signed_version(manifest_path: str, version: str, kid: str = "u1") -> None:
+    with open(_last_signed_path(manifest_path, kid), "w", encoding="utf-8") as f:
         f.write(version)
 
 
@@ -169,7 +184,7 @@ def main(argv: list[str] | None = None) -> int:
     if not version:
         p.error("manifest has no 'version' field")
 
-    last = _last_signed_version(args.manifest_path)
+    last = _last_signed_version(args.manifest_path, args.kid)
     if last and not args.allow_downgrade and _version_tuple(version) <= _version_tuple(last):
         p.error(f"refusing to sign {version!r}: not newer than the last version this "
                 f"machine signed for {_tracker_key(args.manifest_path)!r} ({last!r}). "
@@ -200,7 +215,7 @@ def main(argv: list[str] | None = None) -> int:
         f.write(token)
 
     if not args.allow_downgrade:
-        _record_signed_version(args.manifest_path, version)
+        _record_signed_version(args.manifest_path, version, args.kid)
 
     print(f"Signed manifest for {version} (kid={args.kid}) -> {args.output}")
     return 0

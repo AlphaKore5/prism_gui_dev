@@ -83,5 +83,45 @@ class KeyMatchesKid(unittest.TestCase):
         S.check_key_matches_kid(open(path).read().strip(), "udev2")
 
 
+class DevAndProdHaveSeparateDowngradeHistory(unittest.TestCase):
+    """A dev signing must never rewrite the production release history on a
+    signing machine (found just before the first dev release was signed)."""
+
+    def setUp(self):
+        import tempfile
+        from unittest import mock
+        self.here = tempfile.mkdtemp(prefix="trackers-")
+        p = mock.patch.object(S, "HERE", self.here)
+        p.start()
+        self.addCleanup(p.stop)
+        self.manifest = "manifest.linux-x64.unsigned.json"
+        self.dev = next(iter(keys.UPDATE_DEVELOPMENT))
+
+    def test_the_paths_differ_and_the_prod_one_is_unchanged(self):
+        prod = S._last_signed_path(self.manifest, "u1")
+        dev = S._last_signed_path(self.manifest, self.dev)
+        self.assertNotEqual(prod, dev)
+        self.assertTrue(prod.endswith(".last_signed_update_version.linux-x64"),
+                        "the production path must not change: existing history lives there")
+        self.assertTrue(dev.endswith(".linux-x64.dev"))
+
+    def test_recording_a_dev_version_leaves_the_prod_history_alone(self):
+        S._record_signed_version(self.manifest, "1.6.10", "u1")
+        S._record_signed_version(self.manifest, "9.9.9", self.dev)
+        self.assertEqual(S._last_signed_version(self.manifest, "u1"), "1.6.10")
+        self.assertEqual(S._last_signed_version(self.manifest, self.dev), "9.9.9")
+
+    def test_a_high_dev_version_does_not_block_the_next_prod_release(self):
+        S._record_signed_version(self.manifest, "1.6.10", "u1")
+        S._record_signed_version(self.manifest, "1.6.99", self.dev)
+        last = S._last_signed_version(self.manifest, "u1")
+        self.assertLess(S._version_tuple(last), S._version_tuple("1.6.11"))
+
+    def test_the_default_kid_is_prod(self):
+        S._record_signed_version(self.manifest, "2.0.0")
+        self.assertEqual(S._last_signed_version(self.manifest), "2.0.0")
+        self.assertEqual(S._last_signed_version(self.manifest, self.dev), "")
+
+
 if __name__ == "__main__":
     unittest.main()
