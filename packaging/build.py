@@ -429,9 +429,39 @@ def archive_macos(app_bundle: str) -> list[str]:
     dmg = os.path.join(DIST, f"{STEM}.dmg")
     if os.path.exists(dmg):
         os.remove(dmg)
-    run(["hdiutil", "create", "-volname", app_meta.NAME, "-srcfolder", staging,
-         "-ov", "-format", "UDZO", dmg])
+    run_with_retries(["hdiutil", "create", "-volname", app_meta.NAME,
+                      "-srcfolder", staging, "-ov", "-format", "UDZO", dmg],
+                     cleanup=dmg)
     return [dmg]
+
+
+def run_with_retries(cmd: list[str], *, attempts: int = 4, wait: float = 10.0,
+                     cleanup: str | None = None):
+    """`run`, trying again a few times before giving up.
+
+    For `hdiutil create`, which on GitHub's macOS runners intermittently fails
+    with "create failed - Resource busy" (Spotlight or diskimages-help still
+    holding the staging folder) after the app itself built fine -- seen on the
+    first dev CI run, 2026-10-23. A real failure still fails: the last attempt's
+    error is raised. `cleanup` is a partial output removed between attempts so
+    a half-written image is never mistaken for a finished one.
+    """
+    import time
+    for attempt in range(1, attempts + 1):
+        try:
+            run(cmd)
+            return
+        except subprocess.CalledProcessError:
+            if cleanup and os.path.exists(cleanup):
+                try:
+                    os.remove(cleanup)
+                except OSError:
+                    pass
+            if attempt == attempts:
+                raise
+            print(f"[prism] {cmd[0]} failed (attempt {attempt}/{attempts}); "
+                  f"retrying in {wait:.0f}s")
+            time.sleep(wait)
 
 
 def checksum(path: str) -> str:

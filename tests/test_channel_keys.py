@@ -116,6 +116,41 @@ class BuildBakesDevChannel(unittest.TestCase):
                        "GITHUB_REPOSITORY: ${{ github.repository }}"):
             self.assertIn(needle, text)
 
+    def test_a_flaky_command_is_retried_and_a_real_failure_still_fails(self):
+        import subprocess
+        calls = []
+
+        def flaky(cmd, **kw):
+            calls.append(cmd)
+            if len(calls) < 3:
+                raise subprocess.CalledProcessError(1, cmd)
+        with mock.patch.object(self.build.subprocess, "run", side_effect=flaky), \
+             mock.patch("time.sleep") as slept:
+            self.build.run_with_retries(["hdiutil", "create"], attempts=4, wait=5)
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(slept.call_count, 2)
+        calls.clear()
+        always = subprocess.CalledProcessError(1, ["hdiutil"])
+        with mock.patch.object(self.build.subprocess, "run", side_effect=always), \
+             mock.patch("time.sleep"):
+            with self.assertRaises(subprocess.CalledProcessError):
+                self.build.run_with_retries(["hdiutil", "create"], attempts=3, wait=0)
+
+    def test_a_partial_image_is_removed_between_attempts(self):
+        import subprocess, tempfile
+        partial = os.path.join(tempfile.mkdtemp(), "Prism.dmg")
+        open(partial, "w").write("half")
+        seen = []
+
+        def flaky(cmd, **kw):
+            seen.append(os.path.exists(partial))
+            if len(seen) == 1:
+                raise subprocess.CalledProcessError(1, cmd)
+        with mock.patch.object(self.build.subprocess, "run", side_effect=flaky), \
+             mock.patch("time.sleep"):
+            self.build.run_with_retries(["hdiutil"], attempts=2, wait=0, cleanup=partial)
+        self.assertEqual(seen, [True, False])
+
     def test_unknown_channel_refuses(self):
         with mock.patch.dict(os.environ, {"PRISM_CHANNEL": "beta"}):
             with self.assertRaises(SystemExit):
