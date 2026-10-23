@@ -279,6 +279,13 @@ jobs:
           # not a secret — it is a public URL, and secrets are masked in logs
           # which makes a wrong one impossible to diagnose.
           PRISM_SERVER_URL: ${{ vars.PRISM_SERVER_URL }}
+          # The release channel is a repository variable too, set to `dev`
+          # ONLY on the dev repository (AlphaKore5/prism_gui_dev). Unset or
+          # empty means prod. packaging/build.py refuses a dev channel inside a
+          # production repository and a prod channel inside the dev one.
+          PRISM_CHANNEL: ${{ vars.PRISM_CHANNEL }}
+          PRISM_UPDATE_REPO: ${{ vars.PRISM_UPDATE_REPO }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
           # Read by packaging/codesign.py; all empty until the secrets exist.
           MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
           MACOS_NOTARY_APPLE_ID: ${{ secrets.MACOS_NOTARY_APPLE_ID }}

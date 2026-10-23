@@ -83,6 +83,39 @@ class BuildBakesDevChannel(unittest.TestCase):
             with self.subTest(repo=bad), self.assertRaises(SystemExit):
                 self.build.patch_channel(self.channel_src, self.updater_src, bad)
 
+    def test_a_dev_build_is_refused_inside_a_production_repository(self):
+        with mock.patch.dict(os.environ, {"PRISM_CHANNEL": "dev"}):
+            for repo in ("HitarthTrivedi/prism_gui", "AlphaKore5/prism_gui"):
+                with self.subTest(repo=repo), self.assertRaises(SystemExit):
+                    self.build.requested_channel(repo)
+            self.assertEqual(self.build.requested_channel("AlphaKore5/prism_gui_dev"), "dev")
+            self.assertEqual(self.build.requested_channel(""), "dev")   # a local build
+
+    def test_a_prod_build_is_refused_inside_the_dev_repository(self):
+        for value in ("prod", "", "  "):
+            with mock.patch.dict(os.environ, {"PRISM_CHANNEL": value}):
+                with self.subTest(channel=value), self.assertRaises(SystemExit):
+                    self.build.requested_channel("AlphaKore5/prism_gui_dev")
+        with mock.patch.dict(os.environ, {"PRISM_CHANNEL": ""}):
+            self.assertEqual(self.build.requested_channel("AlphaKore5/prism_gui"), "prod")
+
+    def test_the_ci_variables_being_empty_means_prod_and_the_default_dev_repo(self):
+        with mock.patch.dict(os.environ, {"PRISM_CHANNEL": "", "PRISM_UPDATE_REPO": "",
+                                          "GITHUB_REPOSITORY": "x/y"}):
+            self.assertEqual(self.build.requested_channel(), "prod")
+        import inspect
+        self.assertIn('os.environ.get("PRISM_UPDATE_REPO") or DEV_UPDATE_REPO',
+                      inspect.getsource(self.build.build),
+                      "an EMPTY repository variable must fall back to the default")
+
+    def test_workflow_passes_the_channel_variables_and_the_repository(self):
+        text = open(os.path.join(ROOT, ".github", "workflows", "build.yml"),
+                    encoding="utf-8").read()
+        for needle in ("PRISM_CHANNEL: ${{ vars.PRISM_CHANNEL }}",
+                       "PRISM_UPDATE_REPO: ${{ vars.PRISM_UPDATE_REPO }}",
+                       "GITHUB_REPOSITORY: ${{ github.repository }}"):
+            self.assertIn(needle, text)
+
     def test_unknown_channel_refuses(self):
         with mock.patch.dict(os.environ, {"PRISM_CHANNEL": "beta"}):
             with self.assertRaises(SystemExit):

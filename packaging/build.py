@@ -156,7 +156,7 @@ def build(engine: str = "pyinstaller"):
                 restore[path] = f.read()
         new_channel, new_updater = patch_channel(
             restore[channel_py], restore[updater_py],
-            os.environ.get("PRISM_UPDATE_REPO", DEV_UPDATE_REPO))
+            os.environ.get("PRISM_UPDATE_REPO") or DEV_UPDATE_REPO)
         for path, text in ((channel_py, new_channel), (updater_py, new_updater)):
             with open(path, "w", encoding="utf-8") as f:
                 f.write(text)
@@ -207,10 +207,29 @@ def patch_channel(channel_src: str, updater_src: str, repo: str) -> tuple[str, s
 DEV_UPDATE_REPO = "AlphaKore5/prism_gui_dev"      # exists (created 2026-10-23); dev builds publish here
 
 
-def requested_channel() -> str:
+PROD_REPOSITORIES = ("HitarthTrivedi/prism_gui", "AlphaKore5/prism_gui")
+
+
+def requested_channel(repository: str | None = None) -> str:
+    """The channel to build, from PRISM_CHANNEL (empty or unset: prod).
+
+    `repository` is the CI repository (GITHUB_REPOSITORY), when there is one.
+    A dev build inside a production repository would publish a dev-trusting
+    binary as a customer release, and a prod build inside the dev repository
+    would publish something no dev machine can update from -- so both are
+    refused here, where CI cannot route around it with a variable.
+    """
     value = os.environ.get("PRISM_CHANNEL", "prod").strip().lower() or "prod"
     if value not in ("prod", "dev"):
         sys.exit(f"packaging: PRISM_CHANNEL must be prod or dev, got {value!r}")
+    repository = os.environ.get("GITHUB_REPOSITORY", "") if repository is None else repository
+    if value == "dev" and repository in PROD_REPOSITORIES:
+        sys.exit(f"packaging: refusing a DEV build inside the production repository "
+                 f"{repository!r} -- it would ship a build that trusts the dev key. "
+                 "Unset the PRISM_CHANNEL variable there.")
+    if value == "prod" and repository.endswith("_dev"):
+        sys.exit(f"packaging: refusing a PROD build inside the dev repository "
+                 f"{repository!r}. Set the repository variable PRISM_CHANNEL=dev.")
     return value
 
 
