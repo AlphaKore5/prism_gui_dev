@@ -53,6 +53,15 @@ class TheRepositoryShipsAsProd(unittest.TestCase):
 
 class BuildBakesDevChannel(unittest.TestCase):
     def setUp(self):
+        # These tests must give the same answer in any repository's CI. CI sets
+        # GITHUB_REPOSITORY (to the dev repo's name, in the dev repo), and the
+        # channel guard reads it -- so isolate it. Found by the first dev CI run.
+        env = mock.patch.dict(os.environ)
+        env.start()
+        self.addCleanup(env.stop)
+        os.environ.pop("GITHUB_REPOSITORY", None)
+        os.environ.pop("PRISM_CHANNEL", None)
+        os.environ.pop("PRISM_UPDATE_REPO", None)
         sys.path.insert(0, os.path.join(ROOT, "packaging"))
         import build
         self.build = build
