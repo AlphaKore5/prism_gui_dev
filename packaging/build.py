@@ -204,7 +204,7 @@ def patch_channel(channel_src: str, updater_src: str, repo: str) -> tuple[str, s
             updater_src.replace(repo_old, f'UPDATE_REPO = "{repo}"', 1))
 
 
-DEV_UPDATE_REPO = "AlphaKore5/prism_gui_dev"      # create before the first dev build
+DEV_UPDATE_REPO = "AlphaKore5/prism_gui_dev"      # exists (created 2026-10-23); dev builds publish here
 
 
 def requested_channel() -> str:

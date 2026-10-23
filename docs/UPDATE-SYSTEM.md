@@ -58,8 +58,8 @@ for as long as they have not updated. So:
   `UPDATE_REPO` literal for the build and restores them afterwards (same
   pattern as `DEFAULT_SERVER`); it exits if a marker has moved, because an
   unbaked dev build would update from the production repo. The default dev
-  repo `AlphaKore5/prism_gui_dev` (exists, empty) is where dev builds publish. `UPDATE_REPO` stays a plain literal in source, so the guard
-  tests in `tests/test_update_channel.py` still hold.
+  repo `AlphaKore5/prism_gui_dev` (created 2026-10-23, empty so far) is where dev builds publish.
+  `UPDATE_REPO` stays a plain literal in source, so the guard tests in `tests/test_update_channel.py` still hold.
 - **Host failover (built):** `updater.UPDATE_FALLBACK_REPOS` lists repositories
   tried after `UPDATE_REPO`. Empty until the bridge release sets the org repo
   first and keeps the old one second. A repo that is down, stale or serving
