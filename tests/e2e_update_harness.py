@@ -60,8 +60,19 @@ def keypair() -> tuple[str, str]:
 
 
 def tag_available(tag: str = OLD_TAG) -> bool:
-    return subprocess.run(["git", "rev-parse", "--verify", "-q", tag + "^{commit}"],
-                          cwd=ROOT, capture_output=True).returncode == 0
+    """The released-1.6.10 tag is present AND really holds the old code
+    (tests/old_release.py)."""
+    import old_release
+    return old_release.skip_reason(tag) == ""
+
+
+def skip_reason(tag: str = OLD_TAG) -> str:
+    """Why the end-to-end scenarios cannot run here, or ""."""
+    if sys.platform == "win32":
+        return ("the end-to-end harness launches a /bin/sh wrapper, so it runs on "
+                "Linux and macOS only (Windows needs real-machine runs)")
+    import old_release
+    return old_release.skip_reason(tag)
 
 
 def extract_tag(dest: str, tag: str = OLD_TAG) -> str:

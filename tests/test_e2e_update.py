@@ -15,8 +15,8 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import e2e_update_harness as H                                  # noqa: E402
 
-NEEDS_TAG = unittest.skipUnless(
-    H.tag_available(), f"git tag {H.OLD_TAG} not in this clone -- `git fetch --tags`")
+_SKIP = H.skip_reason()
+NEEDS_TAG = unittest.skipIf(bool(_SKIP), _SKIP)
 
 
 class E2E(unittest.TestCase):

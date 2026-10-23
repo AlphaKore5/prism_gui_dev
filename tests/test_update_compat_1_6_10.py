@@ -15,6 +15,7 @@ import tempfile
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from cryptography.hazmat.primitives import serialization as _ser
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -58,13 +59,12 @@ print(json.dumps(out))
 '''
 
 
-def _tag_exists() -> bool:
-    return subprocess.run(["git", "rev-parse", "--verify", "-q", TAG + "^{commit}"],
-                          cwd=ROOT, capture_output=True).returncode == 0
+import old_release                                   # noqa: E402
+
+_SKIP = old_release.skip_reason(TAG)
 
 
-@unittest.skipUnless(_tag_exists(), f"git tag {TAG} is not in this clone "
-                     "(shallow checkout) -- run `git fetch --tags` to enable")
+@unittest.skipIf(bool(_SKIP), _SKIP)
 class Release_1_6_10_StillUpdates(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
