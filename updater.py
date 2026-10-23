@@ -93,6 +93,16 @@ _DEFAULT: dict[str, Any] = {
 UPDATE_REPO = "HitarthTrivedi/prism_gui"
 UPDATE_HOST = f"https://github.com/{UPDATE_REPO}/releases/latest/download"
 
+# Repositories to try, in order, when UPDATE_REPO does not answer or serves
+# something that fails verification. Same rules as UPDATE_REPO: a literal baked
+# into the build, never read from the environment, a config file or a server
+# response (tests/test_update_channel.py). Empty today. The bridge release sets
+# the organisation repo first and keeps the old repository here, so a client
+# survives either one being unavailable. Every file is still checked against
+# the signed manifest, so a fallback can fail or go stale but cannot install
+# anything the update key did not sign. See docs/UPDATE-SYSTEM.md.
+UPDATE_FALLBACK_REPOS: tuple[str, ...] = ()
+
 # The per-file assets do NOT live in the same release as the manifest and
 # the human-facing archives. GitHub caps a release at 1000 assets — a
 # real limit, hit for real shipping v1.4.0 (linux-x64 alone needs 966
@@ -431,11 +441,27 @@ def platform_tag() -> str:
     return f"{os_tag}-{arch}"
 
 
-def _manifest_url() -> str:
-    return f"{UPDATE_HOST}/manifest.{platform_tag()}.signed"
+def _repos() -> list[str]:
+    """Every repository to try, primary first, duplicates dropped."""
+    seen: list[str] = []
+    for repo in (UPDATE_REPO, *UPDATE_FALLBACK_REPOS):
+        if repo not in seen:
+            seen.append(repo)
+    return seen
 
 
-def _file_url(version: str, relpath: str, part: int = 1) -> str:
+def _host_for(repo: str | None) -> str:
+    if repo is None or repo == UPDATE_REPO:
+        return UPDATE_HOST
+    return f"https://github.com/{repo}/releases/latest/download"
+
+
+def _manifest_url(repo: str | None = None) -> str:
+    return f"{_host_for(repo)}/manifest.{platform_tag()}.signed"
+
+
+def _file_url(version: str, relpath: str, part: int = 1,
+              repo: str | None = None) -> str:
     # GitHub release assets can't contain "/" in their filename, so a
     # relative path is flattened for the wire and restored on write. This is
     # a hosting-layer detail, not a security one — the manifest's own `path`
@@ -457,7 +483,7 @@ def _file_url(version: str, relpath: str, part: int = 1) -> str:
     # already verified (see stage_update's `check.version`), never from
     # anywhere else — the tag is derived data, not a second trust input.
     tag = _assets_release_tag(version, platform_tag(), part)
-    return (f"https://github.com/{UPDATE_REPO}/releases/download/{tag}/"
+    return (f"https://github.com/{repo or UPDATE_REPO}/releases/download/{tag}/"
            f"{update_manifest.flat_name(platform_tag(), relpath)}")
 
 
@@ -473,32 +499,56 @@ def check_for_update(*, running: str | None = None,
     exists but fails verification) — not for "there is no update".
     """
     running = app_meta.VERSION if running is None else running
-    try:
-        raw = _get(_manifest_url(), timeout=MANIFEST_TIMEOUT, fetch=fetch,
-                  max_bytes=MANIFEST_MAX_BYTES)
-    except Exception:                                # noqa: BLE001 — no network is routine
-        return None
-
-    try:
-        token = raw.decode("utf-8") if isinstance(raw, (bytes, bytearray)) else raw
-        payload = update_manifest.verify(
-            token, public_keys=licensing.keys.update_public_keys())
-    except update_manifest.ManifestError as e:
-        raise UpdateError(f"Update manifest failed verification: {e}") from e
-
-    version = payload["version"]
-    # A build that already failed its first launch on this machine, and was
-    # rolled back, is not offered again. Now that a version counts as
-    # accepted only once it has STARTED (note_installed), nothing else would
-    # stop the same broken build being downloaded, swapped in, crashing and
-    # rolling back on every check. A newer build is offered as normal.
-    if version and version == str(_load().get("failed_version") or ""):
-        return None
+    failed = str(_load().get("failed_version") or "")
     highest = _highest_seen_version()
-    if highest and not newer(version, highest):
-        return None  # not newer than something we've already accepted — ignore
-    if not newer(version, running):
-        return None  # not newer than what's running — nothing to offer
+
+    def acceptable(version: str) -> bool:
+        # A build that already failed its first launch on this machine, and
+        # was rolled back, is not offered again. Now that a version counts as
+        # accepted only once it has STARTED (note_installed), nothing else
+        # would stop the same broken build being downloaded, swapped in,
+        # crashing and rolling back on every check. A newer build is offered
+        # as normal.
+        if version and version == failed:
+            return False
+        if highest and not newer(version, highest):
+            return False     # not newer than something we've already accepted
+        return newer(version, running)
+
+    # Ask each repository in turn. A host that is down is skipped; one whose
+    # manifest does not verify is skipped but remembered, so if NOTHING
+    # verifies the failure is still reported rather than looking like "no
+    # update". The first manifest that is both genuine and worth offering
+    # wins; a genuine but stale one (an out-of-date mirror) does not stop the
+    # next host being asked.
+    payload = None
+    bad: update_manifest.ManifestError | None = None
+    for repo in _repos():
+        try:
+            raw = _get(_manifest_url(repo), timeout=MANIFEST_TIMEOUT,
+                       fetch=fetch, max_bytes=MANIFEST_MAX_BYTES)
+        except Exception:                            # noqa: BLE001 — no network is routine
+            continue
+        try:
+            token = raw.decode("utf-8") if isinstance(raw, (bytes, bytearray)) else raw
+            candidate = update_manifest.verify(
+                token, public_keys=licensing.keys.update_public_keys())
+        except update_manifest.ManifestError as e:
+            bad = bad or e
+            continue
+        if payload is None or newer(candidate["version"], payload["version"]):
+            payload = candidate
+        if acceptable(candidate["version"]):
+            payload = candidate
+            break
+
+    if payload is None:
+        if bad is not None:
+            raise UpdateError(f"Update manifest failed verification: {bad}") from bad
+        return None
+    version = payload["version"]
+    if not acceptable(version):
+        return None
 
     return UpdateCheck(version=version, manifest=payload)
 
@@ -524,6 +574,46 @@ def _files_to_fetch(manifest: dict[str, Any], install_dir: str) -> list[dict[str
     not the ~210+ MB archive."""
     return [entry for entry in manifest["files"]
            if not _local_file_matches(install_dir, entry)]
+
+
+def _fetch_file(version: str, entry: dict[str, Any],
+                fetch: Callable[..., Any] | None) -> bytes:
+    """One file, verified against its manifest entry, from the first
+    repository that serves it correctly.
+
+    Verification happens PER HOST, inside the loop: a mirror that answers with
+    a truncated or altered file is treated like one that is down, and the next
+    host is asked, instead of the whole update failing on the first bad copy.
+    Only bytes whose size and sha256 match the signed manifest are returned.
+    """
+    import hashlib
+    problem: Exception | None = None
+    for repo in _repos():
+        url = _file_url(version, entry["path"], update_manifest.part_of(entry), repo)
+        try:
+            # max_bytes cuts the stream off the instant more than the
+            # manifest's declared size has arrived — see _get()'s docstring
+            # for why this is done during the read, not afterwards.
+            data = _get(url, timeout=FILE_TIMEOUT, fetch=fetch,
+                        max_bytes=entry["size"])
+        except Exception as e:                       # noqa: BLE001
+            problem = e
+            continue
+        # Exact-size check BEFORE trusting anything else about the payload —
+        # never rely on a Content-Length header alone; this checks the bytes
+        # actually received (max_bytes only rejects TOO MANY; a short or
+        # truncated download still needs catching here).
+        if len(data) != entry["size"]:
+            problem = UpdateError(f"{entry['path']}: downloaded {len(data)} "
+                                  f"bytes, manifest says {entry['size']}.")
+            continue
+        if hashlib.sha256(data).hexdigest() != entry["sha256"]:
+            problem = UpdateError(f"{entry['path']}: hash mismatch after download.")
+            continue
+        return data
+    if isinstance(problem, UpdateError):
+        raise problem
+    raise UpdateError(f"{entry['path']}: could not be downloaded ({problem}).")
 
 
 def stage_update(check: UpdateCheck, install_dir: str, *,
@@ -593,27 +683,7 @@ def stage_update(check: UpdateCheck, install_dir: str, *,
                 if entry.get("mode"):
                     os.chmod(dest, 0o644 | entry["mode"])
             elif entry["path"] in to_fetch:
-                url = _file_url(check.version, entry["path"],
-                                update_manifest.part_of(entry))
-                # max_bytes cuts the stream off the instant more than the
-                # manifest's declared size has arrived — see _get()'s
-                # docstring for why this is done during the read, not as a
-                # check on the fully-buffered result.
-                data = _get(url, timeout=FILE_TIMEOUT, fetch=fetch,
-                           max_bytes=entry["size"])
-                # Exact-size check BEFORE trusting anything else about the
-                # payload — never rely on a Content-Length header alone (a
-                # compromised or misconfigured host could lie about it); this
-                # checks the bytes actually received (max_bytes above only
-                # rejects TOO MANY; a short/truncated download still needs
-                # catching here).
-                if len(data) != entry["size"]:
-                    raise UpdateError(
-                        f"{entry['path']}: downloaded {len(data)} bytes, "
-                        f"manifest says {entry['size']}.")
-                import hashlib
-                if hashlib.sha256(data).hexdigest() != entry["sha256"]:
-                    raise UpdateError(f"{entry['path']}: hash mismatch after download.")
+                data = _fetch_file(check.version, entry, fetch)
                 with open(dest, "wb") as f:
                     f.write(data)
                 if entry.get("mode"):

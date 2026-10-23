@@ -58,11 +58,16 @@ for as long as they have not updated. So:
   `UPDATE_REPO` literal for the build and restores them afterwards (same
   pattern as `DEFAULT_SERVER`); it exits if a marker has moved, because an
   unbaked dev build would update from the production repo. The default dev
-  repo `HitarthTrivedi/prism_gui_dev` **must be created** before the first
-  dev build. `UPDATE_REPO` stays a plain literal in source, so the guard
+  repo `AlphaKore5/prism_gui_dev` (exists, empty) is where dev builds publish. `UPDATE_REPO` stays a plain literal in source, so the guard
   tests in `tests/test_update_channel.py` still hold.
-- Not built yet: second host (GitLab), `-dev.N` version suffix, dev publishing
-  in CI, the promote script.
+- **Host failover (built):** `updater.UPDATE_FALLBACK_REPOS` lists repositories
+  tried after `UPDATE_REPO`. Empty until the bridge release sets the org repo
+  first and keeps the old one second. A repo that is down, stale or serving
+  damaged bytes is skipped; each file is verified per host, so nothing the
+  update key did not sign is installed. GitLab (a different URL scheme) is not
+  built yet.
+- Not built yet: GitLab adapter, `-dev.N` version suffix, dev publishing in CI,
+  the promote script.
 
 ## 4. Changing something big (formats, layout, build engine, hosts)
 
