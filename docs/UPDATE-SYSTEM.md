@@ -170,3 +170,26 @@ Copy into the PR and tick each line, or write why it does not apply.
 - macOS in-app updating is held until the Apple Developer ID and a real Mac
   test; manifests are per platform, so Windows/Linux can move first.
 - Versions below 1.4.2 cannot self-update (first-launch rollback bug).
+
+## 11. End-to-end tests: what they prove and what they do not
+
+`tests/test_e2e_update.py` (harness: `tests/e2e_update_harness.py`) runs the real
+updater, manifest, swap and rollback code in real separate processes against a
+local server that copies GitHub's URL shapes and redirects. The "old" client is
+the actual `v1.6.10` code extracted from the tag. 18 scenarios: 1.6.10 updating
+to a release carrying every new policy field; changed-files-only downloads;
+primary host down, corrupt, dropped mid-file, forged manifest, everything
+unreachable; killed mid-download; a version that crashes on start being rolled
+back and not offered again; rollout, revoked and `min_updater`.
+
+Checked by breaking the code on purpose: removing the per-file hash check,
+disabling rollback, and ignoring fallback hosts each make these tests fail.
+
+**Not proved, do not claim:**
+- Windows or macOS behaviour (file locks, antivirus, Gatekeeper, the `.bat`
+  helper). The harness is Linux-only (`/bin/sh` wrapper).
+- The real `main.py`, Qt, or a PyInstaller/Nuitka bundle. The app is a ~60 line
+  stand-in; `TheStandInMatchesMain` only checks it makes the same updater calls.
+- The real GitHub (redirect on our own repo, rate limits, asset caps).
+- A full disk, a laptop sleeping mid-download, a proxy rewriting responses.
+Those need the real-hardware runs listed in section 10.
