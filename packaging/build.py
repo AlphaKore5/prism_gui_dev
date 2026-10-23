@@ -145,6 +145,22 @@ def build(engine: str = "pyinstaller"):
     if os.environ.get("PRISM_SERVER_URL"):
         with open(client_py, "r", encoding="utf-8") as f:
             original = f.read()
+    # A dev-channel build bakes CHANNEL and UPDATE_REPO the same way, and the
+    # working tree is restored afterwards for the same reason.
+    channel_py = os.path.join(GUI, "channel.py")
+    updater_py = os.path.join(GUI, "updater.py")
+    restore: dict[str, str] = {}
+    if requested_channel() == "dev":
+        for path in (channel_py, updater_py):
+            with open(path, "r", encoding="utf-8") as f:
+                restore[path] = f.read()
+        new_channel, new_updater = patch_channel(
+            restore[channel_py], restore[updater_py],
+            os.environ.get("PRISM_UPDATE_REPO", DEV_UPDATE_REPO))
+        for path, text in ((channel_py, new_channel), (updater_py, new_updater)):
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(text)
+        print("[prism] DEV channel baked in -- do not ship this build to customers")
     try:
         if engine == "nuitka":
             _bake_server_url(client_py)
@@ -157,6 +173,45 @@ def build(engine: str = "pyinstaller"):
         if original is not None:
             with open(client_py, "w", encoding="utf-8") as f:
                 f.write(original)
+        for path, text in restore.items():
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(text)
+
+
+def patch_channel(channel_src: str, updater_src: str, repo: str) -> tuple[str, str]:
+    """Return (channel.py, updater.py) source rewritten for a DEV build.
+
+    The repository keeps CHANNEL = "prod" and UPDATE_REPO as plain literals so
+    nothing can redirect a shipped build at runtime (tests/test_update_channel
+    .py guards both). A dev build gets its own values the same way
+    DEFAULT_SERVER is baked: rewrite the literal, build, restore. Fails loudly
+    when a marker has moved, because a silently unbaked dev build would update
+    from the PRODUCTION repository.
+    """
+    channel_old = 'CHANNEL = "prod"'
+    repo_old = 'UPDATE_REPO = "HitarthTrivedi/prism_gui"'
+    if channel_old not in channel_src:
+        sys.exit('packaging: channel.py no longer contains CHANNEL = "prod" '
+                 "-- refusing to build a dev channel that is not baked.")
+    if repo_old not in updater_src:
+        sys.exit("packaging: updater.py no longer contains the UPDATE_REPO "
+                 "literal -- refusing to build a dev channel that would "
+                 "update from the production repository.")
+    if "/" not in repo or repo.count("/") != 1 or " " in repo or '"' in repo:
+        sys.exit(f"packaging: PRISM_UPDATE_REPO must look like owner/name, "
+                 f"got {repo!r}")
+    return (channel_src.replace(channel_old, 'CHANNEL = "dev"', 1),
+            updater_src.replace(repo_old, f'UPDATE_REPO = "{repo}"', 1))
+
+
+DEV_UPDATE_REPO = "HitarthTrivedi/prism_gui_dev"      # create before the first dev build
+
+
+def requested_channel() -> str:
+    value = os.environ.get("PRISM_CHANNEL", "prod").strip().lower() or "prod"
+    if value not in ("prod", "dev"):
+        sys.exit(f"packaging: PRISM_CHANNEL must be prod or dev, got {value!r}")
+    return value
 
 
 def _bake_server_url(client_py: str) -> None:

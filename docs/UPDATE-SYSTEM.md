@@ -46,10 +46,23 @@ for as long as they have not updated. So:
   redirecting HOME covers them without editing the submodule.
 - A source run can use `PRISM_HOME=/abs/path`. A frozen prod build **ignores**
   it, so a customer's environment cannot move their licence folder.
-- Dev and prod trust different update keys and use different hosts. A prod
-  build must never contain the dev key in its trusted list.
-- Not built yet: dev/prod host constants, dev key trust for dev builds, the
-  build step that rewrites `CHANNEL`. See the plan.
+- **Keys:** `licensing/keys.py::update_public_keys()` — a frozen prod build
+  trusts only `UPDATE_PRODUCTION`; a frozen dev build trusts only
+  `UPDATE_DEVELOPMENT`; a source run trusts both. Neither can be updated from
+  the other's manifests. The checked-in dev private key is *not* protected, so
+  a dev-trusting binary must never reach a customer: `tests/test_channel_keys.py`
+  pins `CHANNEL = "prod"` in the repo. Before dev builds go beyond our own
+  machines, replace `udev1` with a key whose private half is a CI secret.
+- **Building a dev build:** `PRISM_CHANNEL=dev [PRISM_UPDATE_REPO=owner/name]
+  python packaging/build.py`. `packaging/build.py` rewrites `CHANNEL` and the
+  `UPDATE_REPO` literal for the build and restores them afterwards (same
+  pattern as `DEFAULT_SERVER`); it exits if a marker has moved, because an
+  unbaked dev build would update from the production repo. The default dev
+  repo `HitarthTrivedi/prism_gui_dev` **must be created** before the first
+  dev build. `UPDATE_REPO` stays a plain literal in source, so the guard
+  tests in `tests/test_update_channel.py` still hold.
+- Not built yet: second host (GitLab), `-dev.N` version suffix, dev publishing
+  in CI, the promote script.
 
 ## 4. Changing something big (formats, layout, build engine, hosts)
 

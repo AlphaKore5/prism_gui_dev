@@ -16,6 +16,7 @@ has not updated, which is the failure this map exists to prevent.
 """
 from __future__ import annotations
 
+import channel
 import paths
 
 # Production keys. Signed tokens issued by api.alphakore.in verify against
@@ -87,7 +88,17 @@ def update_public_keys() -> dict[str, str]:
     """The keys this build will accept an update manifest from. Same
     frozen/dev split as public_keys(), and the same fail-closed shape: an
     empty UPDATE_PRODUCTION means a frozen build accepts no manifest at all
-    until a real production key is generated and published here."""
+    until a real production key is generated and published here.
+
+    A frozen DEV-channel build (channel.CHANNEL, set only by the build) trusts
+    the development key and NOTHING else, and a frozen prod build trusts the
+    production key and nothing else. Neither can be updated from the other's
+    manifests. The one thing that makes a dev-trusting binary safe is that it
+    is never shipped to a customer: tests/test_channel_keys.py pins the repo's
+    CHANNEL to "prod", and packaging/build.py only flips it for an explicit
+    PRISM_CHANNEL=dev build."""
     if paths.is_frozen():
+        if channel.is_dev():
+            return dict(UPDATE_DEVELOPMENT)
         return dict(UPDATE_PRODUCTION)
     return {**UPDATE_PRODUCTION, **UPDATE_DEVELOPMENT}
