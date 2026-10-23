@@ -118,6 +118,13 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--allow-downgrade", action="store_true",
                    help="Bypass the monotonic-version check. For test fixtures only — "
                         "never pass this when signing a real release.")
+    p.add_argument("--rollout", type=int, default=None,
+                   help="Offer automatically to this percent of devices (0-100). "
+                        "Omit for everyone. Clients built before 1.6.11 ignore it.")
+    p.add_argument("--min-updater", type=int, default=None,
+                   help="Oldest updater level that may install this release.")
+    p.add_argument("--revoke", action="append", default=[], metavar="VERSION",
+                   help="Withdraw a version (repeatable): clients stop offering it.")
     args = p.parse_args(argv)
 
     if not args.key_hex:
@@ -136,6 +143,17 @@ def main(argv: list[str] | None = None) -> int:
                 f"machine signed for {_tracker_key(args.manifest_path)!r} ({last!r}). "
                 f"Pass --allow-downgrade only for test fixtures, never for a real "
                 f"release.")
+
+    if args.rollout is not None:
+        manifest["rollout"] = args.rollout
+    if args.min_updater is not None:
+        manifest["min_updater"] = args.min_updater
+    if args.revoke:
+        manifest["revoked"] = sorted(set(manifest.get("revoked", [])) | set(args.revoke))
+    try:
+        update_manifest.check_policy(manifest)
+    except update_manifest.ManifestError as e:
+        p.error(str(e))
 
     token = update_manifest.sign(manifest, args.key_hex, kid=args.kid,
                                  validity_days=args.validity_days)

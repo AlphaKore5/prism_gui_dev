@@ -427,8 +427,72 @@ def verify(token: str, *, public_keys: dict[str, str],
     for entry in files:
         _check_safe_path(entry.get("path") if isinstance(entry, dict) else None)
         part_of(entry)          # raises on a `part` that is not a plain 2..9
+    check_policy(payload)
 
     return payload
+
+
+# ── release policy: optional signed fields ──────────────────────────────────
+#
+# Added with the bridge release. A client built before it (1.6.10 and older)
+# ignores every key it does not know -- verify() above never looked at
+# anything beyond kid/expires/version/files -- so these ride in the same
+# PRSMUv1 payload without a new format. tests/test_update_compat_1_6_10.py runs
+# the actual 1.6.10 code against a manifest that carries them. They are inside
+# the signed payload, so a host cannot alter them.
+#
+#   rollout      0..100  share of devices that are offered this version
+#                        automatically. Absent means 100.
+#   min_updater  int     the oldest updater (updater.UPDATER_LEVEL) that can
+#                        safely install this release. Absent means 0.
+#   revoked      [str]   versions that must not be offered or installed.
+POLICY_KEYS = ("rollout", "min_updater", "revoked")
+MAX_REVOKED = 200
+
+
+def check_policy(payload: dict[str, Any]) -> None:
+    """Raise ManifestError for a policy field of the wrong type or range.
+
+    Strict on purpose: a rollout of "5" or 5.5 or 500 is a mistake at signing
+    time, and failing here means it is never published rather than quietly
+    read as something else by a client.
+    """
+    if "rollout" in payload:
+        r = payload["rollout"]
+        if isinstance(r, bool) or not isinstance(r, int) or not 0 <= r <= 100:
+            raise ManifestError("malformed", "Update manifest rollout must be a "
+                                              "whole number from 0 to 100.")
+    if "min_updater" in payload:
+        m = payload["min_updater"]
+        if isinstance(m, bool) or not isinstance(m, int) or m < 0:
+            raise ManifestError("malformed", "Update manifest min_updater must "
+                                              "be a whole number, 0 or more.")
+    if "revoked" in payload:
+        v = payload["revoked"]
+        if (not isinstance(v, list) or len(v) > MAX_REVOKED
+                or not all(isinstance(x, str) and 0 < len(x) <= 64 for x in v)):
+            raise ManifestError("malformed", "Update manifest revoked must be a "
+                                              "list of version strings.")
+
+
+def rollout_bucket(device_fingerprint: str, version: str) -> int:
+    """A stable 0..99 position for this device and this version.
+
+    Keyed on the version as well as the device so the same few machines are
+    not the first to receive every release. Stable across calls, so a device
+    that was outside a 5% rollout stays outside until it widens.
+    """
+    digest = hashlib.sha256(f"{device_fingerprint}|{version}".encode("utf-8")).digest()
+    return int.from_bytes(digest[:8], "big") % 100
+
+
+def in_rollout(payload: dict[str, Any], device_fingerprint: str) -> bool:
+    rollout = payload.get("rollout", 100)
+    if rollout >= 100:
+        return True
+    if not device_fingerprint:
+        return False         # cannot place an unknown device inside a partial rollout
+    return rollout_bucket(device_fingerprint, payload["version"]) < rollout
 
 
 def _check_safe_path(path: Any) -> None:

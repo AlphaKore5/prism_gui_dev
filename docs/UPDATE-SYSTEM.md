@@ -111,7 +111,30 @@ turn, and a signed `mirrors` list in the manifest that may only **add**
 `static` hosts. A host with a different URL scheme is new code and therefore
 a normal release.
 
-## 8. Rollout and patches (planned)
+## 8. Release policy fields (built) and rollout (partly built)
+
+Three optional, signed fields in the `PRSMUv1` payload; clients built before
+the bridge ignore them (proved by `tests/test_update_compat_1_6_10.py`, which
+runs the real v1.6.10 updater against them):
+
+| Field | Meaning | Client rule |
+|---|---|---|
+| `rollout` 0–100 | share of devices offered the release automatically | `check_for_update(honour_rollout=True)` places the device with `rollout_bucket(fingerprint, version)`; widening never removes a device. A customer pressing Download bypasses it. |
+| `min_updater` | oldest `updater.UPDATER_LEVEL` that may install it | a lower level raises `UpdaterTooOld`, so the existing download-page fallback runs |
+| `revoked` | versions to withdraw | never offered |
+
+Set them with `devtools/sign_manifest.py --rollout N --min-updater N --revoke V`.
+`check_policy()` rejects wrong types or ranges at signing time.
+
+Known coupling: 1.6.10 reads no `rollout`, and the licence lease's
+`latest_version` banner is unsigned and shown to everyone. While a release is
+below 100% the licence server must not advertise it as `latest_version`, or the
+banner's manual Download (which bypasses rollout) defeats the staging.
+
+Still to build: the periodic automatic check that passes `honour_rollout=True`,
+and the promote step that widens it.
+
+## 8b. Patches (planned)
 
 Dev first (our machines, dev key), then the same files promoted and re-signed
 with the prod key at 5%, then 25%, then 100% (`rollout` in the signed manifest;
@@ -126,7 +149,9 @@ Copy into the PR and tick each line, or write why it does not apply.
 - [ ] Old clients: what does the **oldest supported client** do when it meets
       this change? Tested old → new on **Windows and macOS**, not only Linux.
 - [ ] No manifest name reused for an incompatible layout.
-- [ ] New manifest fields are optional and ignorable by old clients.
+- [ ] New manifest fields are optional and ignorable by old clients, and
+      `tests/test_update_compat_1_6_10.py` passes (it needs the `v1.6.10` tag:
+      `git fetch --tags`; a skipped run proves nothing).
 - [ ] Trust rules in section 2 unchanged, or the change is justified here.
 - [ ] Dev key is not in any prod build's trusted keys.
 - [ ] Prod signing key was not placed in CI or the repo.

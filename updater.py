@@ -103,6 +103,12 @@ UPDATE_HOST = f"https://github.com/{UPDATE_REPO}/releases/latest/download"
 # anything the update key did not sign. See docs/UPDATE-SYSTEM.md.
 UPDATE_FALLBACK_REPOS: tuple[str, ...] = ()
 
+# How capable this build's updater is. A manifest may demand a minimum
+# (`min_updater`, signed). Raise this only when the updater itself gains an
+# ability that a future release will depend on -- see docs/UPDATE-SYSTEM.md.
+# 1.6.10 and older have no such number and behave as level 1.
+UPDATER_LEVEL = 2
+
 # The per-file assets do NOT live in the same release as the manifest and
 # the human-facing archives. GitHub caps a release at 1000 assets — a
 # real limit, hit for real shipping v1.4.0 (linux-x64 alone needs 966
@@ -239,6 +245,12 @@ class UpdateError(Exception):
     fetched, verified, or staged. Never a reason to crash Prism — every
     caller in main_window.py must catch this and fall back to the Phase 0
     "open the download page" behaviour."""
+
+
+class UpdaterTooOld(UpdateError):
+    """The newest release needs a newer updater than this build has. The
+    caller's existing fallback -- the download page -- is exactly right: the
+    customer installs the new version once and is current again."""
 
 
 @dataclass
@@ -487,8 +499,17 @@ def _file_url(version: str, relpath: str, part: int = 1,
            f"{update_manifest.flat_name(platform_tag(), relpath)}")
 
 
+def _device_fingerprint() -> str:
+    try:
+        from licensing import device
+        return device.fingerprint(licensing.user_dir())[0]
+    except Exception:                                # noqa: BLE001
+        return ""
+
+
 def check_for_update(*, running: str | None = None,
-                     fetch: Callable[..., Any] | None = None) -> UpdateCheck | None:
+                     fetch: Callable[..., Any] | None = None,
+                     honour_rollout: bool = False) -> UpdateCheck | None:
     """Fetch and verify the manifest; return it if it describes a version
     newer than what's running AND newer than anything this machine has ever
     accepted. Cheap and safe to call at every launch or on a timer — this
@@ -496,13 +517,19 @@ def check_for_update(*, running: str | None = None,
     an ordinary "no update" or "server unreachable" outcome (returns None).
 
     Raises UpdateError only for something worth logging (a manifest that
-    exists but fails verification) — not for "there is no update".
+    exists but fails verification) — not for "there is no update". The one
+    subclass, UpdaterTooOld, means a newer release exists that this build
+    cannot install itself.
+
+    `honour_rollout` is for AUTOMATIC offers: a release published at 5% is
+    then offered only to the devices inside that 5%. A customer who presses
+    Download has asked for the update, so the manual path leaves it False.
     """
     running = app_meta.VERSION if running is None else running
     failed = str(_load().get("failed_version") or "")
     highest = _highest_seen_version()
 
-    def acceptable(version: str) -> bool:
+    def acceptable(version: str, revoked: list | None = None) -> bool:
         # A build that already failed its first launch on this machine, and
         # was rolled back, is not offered again. Now that a version counts as
         # accepted only once it has STARTED (note_installed), nothing else
@@ -511,6 +538,8 @@ def check_for_update(*, running: str | None = None,
         # as normal.
         if version and version == failed:
             return False
+        if version in (revoked or ()):
+            return False     # withdrawn by the publisher (signed `revoked` list)
         if highest and not newer(version, highest):
             return False     # not newer than something we've already accepted
         return newer(version, running)
@@ -538,7 +567,7 @@ def check_for_update(*, running: str | None = None,
             continue
         if payload is None or newer(candidate["version"], payload["version"]):
             payload = candidate
-        if acceptable(candidate["version"]):
+        if acceptable(candidate["version"], candidate.get("revoked")):
             payload = candidate
             break
 
@@ -547,7 +576,14 @@ def check_for_update(*, running: str | None = None,
             raise UpdateError(f"Update manifest failed verification: {bad}") from bad
         return None
     version = payload["version"]
-    if not acceptable(version):
+    if not acceptable(version, payload.get("revoked")):
+        return None
+    if int(payload.get("min_updater", 0)) > UPDATER_LEVEL:
+        raise UpdaterTooOld(
+            f"Prism {version} needs a newer updater than this copy has. "
+            "Download it once from the Prism download page.")
+    if honour_rollout and not update_manifest.in_rollout(
+            payload, _device_fingerprint()):
         return None
 
     return UpdateCheck(version=version, manifest=payload)
