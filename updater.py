@@ -102,18 +102,20 @@ _DEFAULT: dict[str, Any] = {
 # (releases/latest/download/<asset>) always resolves to whatever the CI
 # workflow most recently published, the same way app_meta.DOWNLOAD_URL's
 # releases/latest page does today.
-UPDATE_REPO = "HitarthTrivedi/prism_gui"
+UPDATE_REPO = "AlphaKore5/prism_gui"
 UPDATE_HOST = f"https://github.com/{UPDATE_REPO}/releases/latest/download"
 
 # Repositories to try, in order, when UPDATE_REPO does not answer or serves
 # something that fails verification. Same rules as UPDATE_REPO: a literal baked
 # into the build, never read from the environment, a config file or a server
-# response (tests/test_update_channel.py). Empty today. The bridge release sets
-# the organisation repo first and keeps the old repository here, so a client
-# survives either one being unavailable. Every file is still checked against
+# response (tests/test_update_channel.py). The organisation repo is primary and
+# the repository every build up to 1.6.10 reads stays here, so a client survives
+# either one being unavailable. Releases are published to BOTH
+# (devtools/release_all.py), and the old repo must never be deleted, renamed or
+# reused: installed copies that predate this list can only ever ask it. Every file is still checked against
 # the signed manifest, so a fallback can fail or go stale but cannot install
 # anything the update key did not sign. See docs/UPDATE-SYSTEM.md.
-UPDATE_FALLBACK_REPOS: tuple[str, ...] = ()
+UPDATE_FALLBACK_REPOS: tuple[str, ...] = ("HitarthTrivedi/prism_gui",)
 
 # How capable this build's updater is. A manifest may demand a minimum
 # (`min_updater`, signed). Raise this only when the updater itself gains an

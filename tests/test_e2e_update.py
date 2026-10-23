@@ -103,6 +103,44 @@ class Updating(E2E):
 
 
 @NEEDS_TAG
+class TheRealRollout(E2E):
+    """The situation on the day the bridge ships: the old repository carries
+    the release, and the organisation repository may not carry anything yet."""
+
+    def test_1_6_10_updates_when_the_release_is_only_on_the_old_repository(self):
+        rel = self.release("1.6.11")
+        self.server.publish(rel, repos=(H.OLD_CLIENT_REPO,))
+        app = self.old_client()
+        app.run("--update")
+        self.assertTrue(app.wait_for("confirmed:1.6.11"), app.names())
+        self.assert_matches_manifest(app, rel)
+        self.assertEqual(self.server.hits("manifest", H.PRIMARY), [],
+                         "1.6.10 never asks the organisation repository")
+
+    def test_the_bridge_uses_the_old_repository_while_the_org_has_nothing(self):
+        app = self.new_client("1.6.11")
+        rel = self.release("1.6.12", payload="x\n")
+        self.server.publish(rel, repos=(H.OLD_CLIENT_REPO,))      # org: 404, not down
+        app.run("--update")
+        self.assertTrue(app.wait_for("confirmed:1.6.12"), app.names())
+        self.assertTrue(self.server.hits("manifest", H.PRIMARY), "the org was asked first")
+        self.assertTrue(self.server.hits("cdn", H.OLD_CLIENT_REPO))
+        self.assert_matches_manifest(app, rel)
+
+    def test_the_bridge_prefers_the_org_once_it_has_the_release(self):
+        app = self.new_client("1.6.11")
+        self.server.publish(self.release("1.6.12", payload="x\n"))   # both repos
+        app.run("--update")
+        self.assertTrue(app.wait_for("confirmed:1.6.12"), app.names())
+        self.assertEqual(self.server.hits("cdn", H.OLD_CLIENT_REPO), [],
+                         "nothing should come from the old repository when the org has it")
+
+    def test_the_shipped_source_lists_the_org_first_and_the_old_repo_second(self):
+        import updater
+        self.assertEqual(updater._repos(), [H.PRIMARY, H.OLD_CLIENT_REPO])
+
+
+@NEEDS_TAG
 class WhenHostsMisbehave(E2E):
     def test_primary_down_files_and_manifest_come_from_the_fallback(self):
         app = self.new_client("1.6.11")

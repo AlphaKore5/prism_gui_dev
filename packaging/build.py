@@ -189,7 +189,7 @@ def patch_channel(channel_src: str, updater_src: str, repo: str) -> tuple[str, s
     from the PRODUCTION repository.
     """
     channel_old = 'CHANNEL = "prod"'
-    repo_old = 'UPDATE_REPO = "HitarthTrivedi/prism_gui"'
+    repo_old = 'UPDATE_REPO = "AlphaKore5/prism_gui"'
     if channel_old not in channel_src:
         sys.exit('packaging: channel.py no longer contains CHANNEL = "prod" '
                  "-- refusing to build a dev channel that is not baked.")

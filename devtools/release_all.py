@@ -269,6 +269,14 @@ def do_platform(repo: str, tag: str, run_id: str, work: str,
         # _manifest_url() reads it from there via "latest/download".
         run(["gh", "release", "upload", tag, "-R", repo, "--clobber", signed])
 
+    publish_assets(repo, tag, platform_tag, signed, assets_dir)
+
+
+def publish_assets(repo: str, tag: str, platform_tag: str, signed: str,
+                   assets_dir: str) -> None:
+    """Create the per-platform assets release(s) in `repo` and upload every
+    file the signed manifest expects, confirming each part is complete."""
+    version = _version_from_tag(tag)
     expected_by_part = expected_flat_names(signed, platform_tag)
     parts = max(expected_by_part, default=1)
     for part in range(1, parts + 1):
@@ -295,13 +303,53 @@ def do_platform(repo: str, tag: str, run_id: str, work: str,
              f"(version {version})")
 
 
+#: Repositories that carry a copy of every release besides the one CI builds
+#: in. Builds from 1.6.11 on ask the first of these, then the repo above; builds
+#: up to 1.6.10 ask only the repo CI builds in (the old name), so BOTH must
+#: always be published. The old one is never deleted, renamed or reused.
+DEFAULT_MIRRORS = ("AlphaKore5/prism_gui",)
+
+
+def mirror_platform(mirror: str, tag: str, work: str, platform_tag: str,
+                    source_repo: str) -> None:
+    """Copy one platform's SIGNED manifest and per-file assets to `mirror`.
+
+    Nothing is re-signed: the manifest is byte-for-byte the one already on the
+    source release, so both repositories serve identical bytes (which is what
+    makes a client able to fall from one to the other). Order matters here and
+    is the reverse of the source repo's: the assets go up first and the
+    manifest LAST, so a client that finds the manifest never then finds its
+    files missing.
+    """
+    signed = os.path.join(work, f"manifest.{platform_tag}.signed")
+    assets_dir = os.path.join(work, f"update-assets-{platform_tag}")
+    if not os.path.isfile(signed) or not os.path.isdir(assets_dir):
+        raise RuntimeError(f"nothing to mirror for {platform_tag}: run the "
+                           f"source release first (missing {signed} or {assets_dir})")
+    if not _release_exists(mirror, tag):
+        run(["gh", "release", "create", tag, "-R", mirror, "--target", "main",
+             "--title", tag,
+             "--notes", f"Update files for {tag}, mirrored from {source_repo}. "
+                        f"Installers are on {source_repo}."])
+    publish_assets(mirror, tag, platform_tag, signed, assets_dir)
+    run(["gh", "release", "upload", tag, "-R", mirror, "--clobber", signed])
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(
         description=__doc__.splitlines()[0],
         formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("tag", help="Release tag, e.g. v1.4.0")
     p.add_argument("run_id", help="The CI run id that built this tag")
-    p.add_argument("--repo", default="HitarthTrivedi/prism_gui")
+    p.add_argument("--repo", default="HitarthTrivedi/prism_gui",
+                   help="The repository CI built the tag in. Stays the OLD "
+                        "name: every build up to 1.6.10 reads only this one.")
+    p.add_argument("--mirror", action="append", metavar="OWNER/REPO",
+                   help="Also publish to this repository (repeatable). "
+                        f"Default: {', '.join(DEFAULT_MIRRORS)}")
+    p.add_argument("--no-mirror", action="store_true",
+                   help="Publish to --repo only. Builds from 1.6.11 then "
+                        "reach the organisation repo's fallback only.")
     p.add_argument("--work-dir", default=None,
                    help="Where to download/sign into (default: a fresh "
                         "temp dir, left in place so a failure can be "
@@ -342,12 +390,32 @@ def main(argv: list[str] | None = None) -> int:
             print(f"✗ {platform_tag} failed: {e}\n", file=sys.stderr)
             failed.append(platform_tag)
 
+    mirrors = [] if args.no_mirror else list(args.mirror or DEFAULT_MIRRORS)
+    mirror_failed = []
+    for mirror in mirrors:
+        for platform_tag in done:       # only what the source release completed
+            print(f"── mirror {mirror}: {platform_tag} " + "─" * 10)
+            try:
+                mirror_platform(mirror, args.tag, work, platform_tag, args.repo)
+                print(f"✓ {mirror} {platform_tag} done\n")
+            except (subprocess.CalledProcessError, RuntimeError) as e:
+                print(f"✗ {mirror} {platform_tag} failed: {e}\n", file=sys.stderr)
+                mirror_failed.append(f"{mirror}:{platform_tag}")
+
     print("── summary " + "─" * 30)
     print(f"done:   {done or '(none)'}")
     print(f"failed: {failed or '(none)'}")
+    if mirrors:
+        print(f"mirror: {mirrors}  failed: {mirror_failed or '(none)'}")
     if failed:
         print(f"\nRe-run the same command to retry — work is kept at {work}")
-    return 1 if failed else 0
+        return 1
+    if mirror_failed:
+        print("\nThe source release is complete; the mirror is not. Builds "
+              "from 1.6.11 fall back to the source repo meanwhile. Re-run the "
+              "same command to finish the mirror.", file=sys.stderr)
+        return 2
+    return 0
 
 
 if __name__ == "__main__":

@@ -66,7 +66,7 @@ class BuildBakesDevChannel(unittest.TestCase):
                                         "someone/prism_dev")
         self.assertIn('CHANNEL = "dev"', c)
         self.assertIn('UPDATE_REPO = "someone/prism_dev"', u)
-        self.assertNotIn('UPDATE_REPO = "HitarthTrivedi/prism_gui"', u)
+        self.assertNotIn('UPDATE_REPO = "AlphaKore5/prism_gui"', u)
 
     def test_patch_leaves_inputs_untouched(self):
         self.build.patch_channel(self.channel_src, self.updater_src, "a/b")

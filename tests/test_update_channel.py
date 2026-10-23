@@ -48,7 +48,10 @@ import updater                                          # noqa: E402
 # The repository that hosts the releases every shipped build fetches from.
 # Changing this is a decision about the product, not a refactor: see the
 # module docstring, and docs/architecture/09-boundaries.md §5.
-REPO = "HitarthTrivedi/prism_gui"
+REPO = "AlphaKore5/prism_gui"
+# Every build up to 1.6.10 reads this one and nothing else. It must stay a real
+# repository, listed as a fallback, for as long as any of them are installed.
+OLD_REPO = "HitarthTrivedi/prism_gui"
 
 
 class TheUpdateChannelPointsAtTheRealRepository(unittest.TestCase):
@@ -62,6 +65,13 @@ class TheUpdateChannelPointsAtTheRealRepository(unittest.TestCase):
             "one makes every installed copy stop updating with no error "
             "anywhere. If the repository really did move, read this file's "
             "docstring first -- keeping the old one alive is part of it.")
+
+    def test_the_old_repository_stays_listed_as_a_fallback(self):
+        self.assertIn(OLD_REPO, updater.UPDATE_FALLBACK_REPOS,
+                      "builds before 1.6.11 only ever ask the old repository; "
+                      "dropping it from the fallback list strands nobody today "
+                      "but removes the way back if the organisation repo fails")
+        self.assertEqual(updater._repos()[0], REPO)
 
     def test_the_browser_fallback_names_it_too(self):
         """`app_meta.DOWNLOAD_URL` is where the Download button goes when the

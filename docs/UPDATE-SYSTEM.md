@@ -61,8 +61,8 @@ for as long as they have not updated. So:
   repo `AlphaKore5/prism_gui_dev` (created 2026-10-23, empty so far) is where dev builds publish.
   `UPDATE_REPO` stays a plain literal in source, so the guard tests in `tests/test_update_channel.py` still hold.
 - **Host failover (built):** `updater.UPDATE_FALLBACK_REPOS` lists repositories
-  tried after `UPDATE_REPO`. Empty until the bridge release sets the org repo
-  first and keeps the old one second. A repo that is down, stale or serving
+  tried after `UPDATE_REPO`. Since the bridge: `AlphaKore5/prism_gui` first, the old
+  `HitarthTrivedi/prism_gui` second. A repo that is down, stale or serving
   damaged bytes is skipped; each file is verified per host, so nothing the
   update key did not sign is installed. GitLab (a different URL scheme) is not
   built yet.
@@ -219,3 +219,28 @@ Those need the real-hardware runs listed in section 10.
   (`update-apply.log`); it is not reported, because the helper has no access to
   the queue.
 - Still to wire: the timer and the "ready" banner in `main_window.py`.
+
+## 13. Repositories and publishing (from the bridge release, 1.6.11)
+
+| Who | Asks |
+|---|---|
+| builds up to 1.6.10 | `HitarthTrivedi/prism_gui` only (baked in; cannot be changed) |
+| builds from 1.6.11 | `AlphaKore5/prism_gui`, then `HitarthTrivedi/prism_gui` |
+
+Therefore **every release is published to BOTH**, and the old repository is never
+deleted, renamed, reused or left to a redirect. Archive it only when telemetry
+shows no meaningful number of clients still use it, and even then do not delete.
+
+`devtools/release_all.py <tag> <run_id>` (CI builds in the old repo):
+1. signs and publishes to `--repo` (default the old name), exactly as before;
+2. then mirrors each completed platform to `--mirror` (default the org repo):
+   it creates the release if needed, uploads the per-file assets FIRST and the
+   signed manifest LAST, byte for byte the same file (nothing is re-signed), so a
+   client that finds the manifest never finds its files missing.
+Exit code 0 = both complete, 1 = the source release failed, 2 = the source is
+complete but a mirror is not (re-run the same command). `--no-mirror` skips it.
+
+Before the first real bridge release, check by hand: the org repo's Actions are
+still disabled (they were switched off on creation), `.gitmodules` still points
+at the old engine repo (switch it only when the org copy of `prism_terminal` is
+verified), and `tests/test_e2e_update.py` passes with the `v1.6.10` tag present.

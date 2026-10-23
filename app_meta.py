@@ -19,7 +19,7 @@ PUBLISHER = "Alphakore"
 # page always shows the newest build; the CI workflow publishes every tag
 # there.
 # TODO(alphakore): point at WEBSITE + "/prism/download" once that page exists.
-DOWNLOAD_URL = "https://github.com/HitarthTrivedi/prism_gui/releases/latest"
+DOWNLOAD_URL = "https://github.com/AlphaKore5/prism_gui/releases/latest"
 
 # Shown on every licence screen — when a trial ends, when an add-on is locked,
 # when activation fails. This is the only route a stuck customer has back to

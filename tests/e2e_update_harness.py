@@ -42,8 +42,9 @@ import update_manifest as UM
 import updater
 import flatten_update_assets
 
-PRIMARY = "HitarthTrivedi/prism_gui"
-FALLBACK = "AlphaKore5/prism_gui"
+PRIMARY = "AlphaKore5/prism_gui"            # updater.UPDATE_REPO in the source
+FALLBACK = "HitarthTrivedi/prism_gui"        # what every build up to 1.6.10 reads
+OLD_CLIENT_REPO = FALLBACK
 PROD_UPDATE_PUB = "49f27ccbfba0e52b62f1244ba63c2a54bf81fa3ff13d9d88be802dbc68496d4e"
 MODULES = ["app_meta.py", "paths.py", "updater.py", "update_manifest.py",
            "apply_update.py", "licensing"]
@@ -185,7 +186,7 @@ if "--update" in args or "--auto" in args:                      # main_window.py
 
 
 def build_tree(dest: str, version: str, src: str, *, test_pub: str,
-               repo: str = PRIMARY, fallbacks: tuple[str, ...] = (),
+               repo: str = PRIMARY, fallbacks: tuple[str, ...] | None = None,
                crash_on_start: bool = False, payload: str = "") -> str:
     """An installed 'Prism' folder: wrapper + _internal/ with real modules."""
     install = os.path.join(dest, "Prism")
@@ -215,9 +216,14 @@ def build_tree(dest: str, version: str, src: str, *, test_pub: str,
     patch(os.path.join("licensing", "keys.py"), PROD_UPDATE_PUB, test_pub)
     if repo != PRIMARY:
         patch("updater.py", f'UPDATE_REPO = "{PRIMARY}"', f'UPDATE_REPO = "{repo}"')
-    if fallbacks:
-        patch("updater.py", "UPDATE_FALLBACK_REPOS: tuple[str, ...] = ()",
-              f"UPDATE_FALLBACK_REPOS: tuple[str, ...] = {fallbacks!r}", must=False)
+    if fallbacks is not None:
+        path = os.path.join(internal, "updater.py")
+        text = open(path, encoding="utf-8").read()
+        text, n = re.subn(r"^UPDATE_FALLBACK_REPOS: tuple\[str, \.\.\.\] = .*$",
+                          f"UPDATE_FALLBACK_REPOS: tuple[str, ...] = {tuple(fallbacks)!r}",
+                          text, count=1, flags=re.M)
+        if n:                              # the 1.6.10 tree has no such list
+            open(path, "w", encoding="utf-8").write(text)
     open(os.path.join(internal, "launcher.py"), "w").write(LAUNCHER)
     open(os.path.join(internal, "payload.txt"), "w").write(payload or f"payload of {version}\n")
     if crash_on_start:
