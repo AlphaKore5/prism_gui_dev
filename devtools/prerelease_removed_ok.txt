@@ -15,3 +15,12 @@ tests/test_step_dialog.py::BuildThisWorksFromAnyFollowUpEvenReopenedOnes.test_th
 tests/test_step_dialog.py::TheConversationIsSavedToOneFilePerModel.test_on_suggested_seeds_the_popup_from_the_saved_file
 tests/test_step_dialog.py::TheWindowRoutesIt.test_the_rail_key_lands_on_the_step_screen
 tests/test_step_dialog.py::TheWindowRoutesIt.test_the_screens_button_opens_the_dialog_when_cadquery_is_there
+
+# BOQ follow-up round (557bbdc, 2026-10-23): the drawing button and the pricing
+# card changed behaviour, so three tests were renamed to say what they now check
+# (test_the_button_is_off_without_a_drawing_on_regardless_of_an_answer,
+# test_hidden_before_and_still_hidden_right_after_measuring); the fake run dialog
+# lost its exec() because the run window no longer blocks.
+tests/test_boq_dialog.py::TheDrawingGoesToAIOnlyAfterAYes.test_the_button_is_off_until_there_is_an_answer_and_a_drawing
+tests/test_boq_dialog.py::_FakeRunDialog.exec
+tests/test_boq_pricing.py::TheDialogShowsTheCardOnceMeasured.test_hidden_before_and_shown_after_the_measurement

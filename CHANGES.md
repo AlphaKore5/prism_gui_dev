@@ -10,6 +10,24 @@ Tests: **1966 passing** (6 skipped, 8 Sep 2026 after Round 16 landed on main —
 
 ---
 
+# 1.6.11 — The updater moves to the AlphaKore5 organisation (25 Oct 2026)
+
+- **Updates are fetched from the AlphaKore5 organisation first and the old
+  repository second.** Every file is checked against the signed manifest on
+  whichever host served it, so a host that is down or serves a wrong file costs
+  nothing more than a fallback.
+- **Updates now download quietly in the background** and show a "Restart now"
+  banner when ready. Nothing restarts while a task is running.
+- **Signed rollout, minimum-updater and revoke fields** let a release reach 5%,
+  25%, then everyone, and be withdrawn if it misbehaves. Older apps ignore them.
+- **Each update reports back how it went** (installed, rolled back, why it
+  failed) to the licence server, so a release can be judged by devices rather
+  than by guesses.
+- **Dev builds are separate**: their own signing key, their own update repository
+  and their own home folder, so testing an update can never touch real data.
+
+---
+
 # 1.6.10 — BOQ: its own agent lists, a live follow-up window, real output files (21 Oct 2026)
 
 - **BOQ's writer/research agent pickers no longer share the engine's CATEGORIES
