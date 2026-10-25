@@ -81,5 +81,38 @@ class IsolateHomeTests(unittest.TestCase):
         self.assertEqual(importlib.reload(channel).CHANNEL, "prod")
 
 
+class LicenceRequestsSayWhichChannel(unittest.TestCase):
+    """The licence server hands a dev build the dev version numbers only if the
+    build says it is dev. A prod build says so too, so the header is never
+    absent from a build that can send it."""
+
+    def sent_headers(self, which):
+        from licensing import client
+        seen = {}
+
+        class Reply:
+            status_code = 200
+            def json(self):
+                return {}
+
+        def fake_post(url, json=None, headers=None, timeout=None):
+            seen.update(headers or {})
+            return Reply()
+
+        with mock.patch.object(channel, "CHANNEL", which), \
+             mock.patch("requests.post", fake_post):
+            try:
+                client._post("/v1/lease", {}, app_version="1.6.12")
+            except Exception:                        # the reply is a stub; only the request matters
+                pass
+        return seen
+
+    def test_a_dev_build_says_dev(self):
+        self.assertEqual(self.sent_headers("dev").get("X-Prism-Channel"), "dev")
+
+    def test_a_prod_build_says_prod(self):
+        self.assertEqual(self.sent_headers("prod").get("X-Prism-Channel"), "prod")
+
+
 if __name__ == "__main__":
     unittest.main()

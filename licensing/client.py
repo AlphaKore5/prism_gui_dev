@@ -15,6 +15,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
+import channel
 import paths
 
 # Where a shipped build talks to. Baked in at build time and NOT overridable
@@ -142,6 +143,10 @@ def _post(endpoint: str, body: dict[str, Any], *, app_version: str,
     headers = {
         "X-Prism-Version": app_version,
         "X-Prism-Platform": sys.platform,
+        # Which release channel this build is, so the licence server can tell a
+        # dev build which version to offer without touching production's.
+        # A build older than 1.6.12 never sends it and is treated as prod.
+        "X-Prism-Channel": channel.CHANNEL,
     }
     response = None
     for attempt in range(retries + 1):
