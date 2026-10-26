@@ -126,6 +126,64 @@ class Main(unittest.TestCase):
         self.assertEqual([m for m, _ in self.mirrored], ["a/b", "c/d"])
 
 
+class SourcePublishOrder(unittest.TestCase):
+    """On the repository CI builds in, the signed manifest goes up AFTER every
+    file it lists. Otherwise a computer that checks mid-publish is offered a
+    version whose files are not there yet."""
+
+    def setUp(self):
+        self.work = tempfile.mkdtemp(prefix="order-")
+        self.addCleanup(__import__("shutil").rmtree, self.work, True)
+        self.plat = "linux-x64"
+        self.signed = os.path.join(self.work, f"manifest.{self.plat}.signed")
+        self.assets = os.path.join(self.work, f"update-assets-{self.plat}")
+        os.makedirs(self.assets)
+        open(os.path.join(self.assets, "f"), "w").write("x")
+        self.calls = []
+
+    def run_platform(self, *, on_release=False, publish_raises=False, force=False):
+        def fake_run(cmd, **kw):
+            self.calls.append(" ".join(str(c) for c in cmd[:3]) if cmd[0] != sys.executable else "sign")
+            if cmd[0] == sys.executable:                 # the signing step writes the file
+                open(self.signed, "w").write("PRSMUv1.x.y")
+
+        def fake_publish(*a, **k):
+            self.calls.append("assets")
+            if publish_raises:
+                raise RuntimeError("upload failed")
+
+        with mock.patch.object(R, "run", side_effect=fake_run), \
+             mock.patch.dict(os.environ, {"UPDATE_SIGNING_KEY_HEX": "00" * 32}), \
+             mock.patch.object(R, "already_signed", return_value=on_release), \
+             mock.patch.object(R, "publish_assets", side_effect=fake_publish):
+            R.do_platform("old/repo", "v1.6.12", "1", self.work, self.plat, "ubuntu-22.04", force)
+
+    def test_the_manifest_is_the_last_thing_sent(self):
+        self.run_platform()
+        self.assertIn("assets", self.calls)
+        self.assertEqual("gh release upload", self.calls[-1])
+        self.assertLess(self.calls.index("assets"), len(self.calls) - 1)
+
+    def test_a_failed_file_upload_leaves_the_manifest_unpublished(self):
+        with self.assertRaises(RuntimeError):
+            self.run_platform(publish_raises=True)
+        self.assertNotIn("gh release upload", self.calls)
+
+    def test_a_rerun_after_a_partial_upload_reuses_the_signed_file_and_does_not_re_sign(self):
+        open(self.signed, "w").write("PRSMUv1.signed.earlier")
+        self.run_platform()
+        self.assertNotIn("sign", self.calls)
+        self.assertEqual("gh release upload", self.calls[-1])
+        self.assertEqual("PRSMUv1.signed.earlier", open(self.signed).read())
+
+    def test_a_manifest_already_on_the_release_is_not_sent_again(self):
+        open(self.signed, "w").write("PRSMUv1.x.y")
+        self.run_platform(on_release=True)
+        self.assertNotIn("sign", self.calls)
+        self.assertNotIn("gh release upload", self.calls)
+        self.assertIn("assets", self.calls)
+
+
 if __name__ == "__main__":
     unittest.main()
 

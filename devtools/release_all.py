@@ -245,7 +245,13 @@ def do_platform(repo: str, tag: str, run_id: str, work: str,
     else:
         print(f"  {assets_dir} already downloaded, reusing local files")
 
-    if not force and already_signed(repo, tag, platform_tag):
+    # The signed manifest is published LAST, after every file it lists. A
+    # client that finds the manifest then never finds its files missing: before
+    # this order, a customer who pressed "Check for updates" mid-publish was
+    # offered a version whose files were still going up, and failed. The
+    # organisation mirror always did it this way (mirror_platform).
+    on_release = (not force) and already_signed(repo, tag, platform_tag)
+    if on_release:
         # sign_manifest.py's downgrade guard would refuse to re-sign this
         # SAME version — correctly; that is not a bug to route around here.
         # Reuse what's already on the release instead of trying to redo it,
@@ -257,6 +263,12 @@ def do_platform(repo: str, tag: str, run_id: str, work: str,
             run(["gh", "release", "download", tag, "-R", repo,
                 "-p", f"manifest.{platform_tag}.signed",
                 "-D", work, "--clobber"])
+    elif not force and os.path.isfile(signed):
+        # Signed by an earlier run that stopped while uploading files, so the
+        # manifest is not on the release yet. Signing again would be refused
+        # (same version) and is not needed: send the bytes already signed.
+        print(f"  manifest.{platform_tag}.signed signed by an earlier run — "
+             f"reusing it; files first, then the manifest")
     else:
         run(["gh", "release", "download", tag, "-R", repo,
             "-p", f"manifest.{platform_tag}.unsigned.json",
@@ -274,11 +286,12 @@ def do_platform(repo: str, tag: str, run_id: str, work: str,
         extra = ["--allow-downgrade"] if force else []
         run([sys.executable, os.path.join(HERE, "sign_manifest.py"),
             unsigned, "-o", signed, "--kid", kid] + extra)
-        # The signed manifest goes on the MAIN release — updater.py's
-        # _manifest_url() reads it from there via "latest/download".
-        run(["gh", "release", "upload", tag, "-R", repo, "--clobber", signed])
 
     publish_assets(repo, tag, platform_tag, signed, assets_dir, kid)
+    if not on_release:
+        # The signed manifest goes on the MAIN release — updater.py's
+        # _manifest_url() reads it from there via "latest/download". Last.
+        run(["gh", "release", "upload", tag, "-R", repo, "--clobber", signed])
 
 
 def publish_assets(repo: str, tag: str, platform_tag: str, signed: str,

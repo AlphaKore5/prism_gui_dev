@@ -103,6 +103,73 @@ class WouldARealOldClientTakeIt(unittest.TestCase):
         self.assertIn("policy fields it ignores", out)
 
 
+def _tag_with_quiet_updater() -> str:
+    """"" when the local v1.6.11 tag holds the build that has the quiet updater."""
+    shown = C.subprocess.run(["git", "show", "v1.6.11:updater.py"], cwd=H.ROOT,
+                             capture_output=True, text=True)
+    if shown.returncode != 0:
+        return "git tag v1.6.11 is not in this clone"
+    return "" if "UPDATER_LEVEL" in shown.stdout else "v1.6.11 here is not the quiet-updater build"
+
+
+@unittest.skipIf(bool(_SKIP) or bool(_tag_with_quiet_updater()),
+                 _SKIP or _tag_with_quiet_updater())
+class WouldTheDevBuildWithTheQuietUpdaterTakeIt(unittest.TestCase):
+    """A dev user on 1.6.11 must be offered 1.6.12 and be able to fetch it."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.sec, cls.pub = H.keypair()
+
+    def setUp(self):
+        self.work = tempfile.mkdtemp(prefix="devclient-")
+        self.addCleanup(shutil.rmtree, self.work, True)
+        self.server = H.FakeGitHub()
+        self.addCleanup(self.server.stop)
+
+    def run_as_1_6_11(self, repo):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            code = C.main(["--client-tag", "v1.6.11", "--repo", repo, "--platform", H.updater.platform_tag(),
+                           "--trust", "test", "--test-pub", self.pub, "--samples", "2",
+                           "--github-base", f"http://127.0.0.1:{self.server.port}",
+                           "--expect-version", "1.6.12"])
+        return code, buf.getvalue()
+
+    def test_1_6_11_is_offered_1_6_12_and_fetches_its_files(self):
+        rel = H.Release(self.work, "1.6.12", H.ROOT, sec=self.sec, pub=self.pub)
+        self.server.publish(rel, repos=(H.PRIMARY,))
+        code, out = self.run_as_1_6_11(H.PRIMARY)
+        self.assertEqual(0, code, out)
+        self.assertIn("would be offered 1.6.12", out)
+        self.assertIn("running 1.6.11", out)
+
+    def test_1_6_11_is_not_offered_a_release_published_somewhere_else(self):
+        rel = H.Release(self.work, "1.6.12", H.ROOT, sec=self.sec, pub=self.pub)
+        self.server.publish(rel, repos=(H.FALLBACK,))
+        code, out = self.run_as_1_6_11(H.PRIMARY)
+        self.assertEqual(1, code, out)
+        self.assertIn("nothing to offer", out)
+
+    def test_1_6_11_is_not_offered_its_own_version(self):
+        rel = H.Release(self.work, "1.6.11", H.ROOT, sec=self.sec, pub=self.pub)
+        self.server.publish(rel, repos=(H.PRIMARY,))
+        code, out = self.run_as_1_6_11(H.PRIMARY)
+        self.assertEqual(1, code, out)
+
+    def test_a_corrupted_file_is_caught_by_the_1_6_11_check_too(self):
+        rel = H.Release(self.work, "1.6.12", H.ROOT, sec=self.sec, pub=self.pub)
+        self.server.publish(rel, repos=(H.PRIMARY,))
+        self.server.fault(H.PRIMARY, "corrupt", sorted(os.listdir(rel.assets_dir))[0])
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            code = C.main(["--client-tag", "v1.6.11", "--repo", H.PRIMARY, "--platform", H.updater.platform_tag(),
+                           "--trust", "test", "--test-pub", self.pub, "--samples", "50",
+                           "--github-base", f"http://127.0.0.1:{self.server.port}"])
+        self.assertEqual(1, code, buf.getvalue())
+        self.assertIn("FAIL", buf.getvalue())
+
+
 class Guardrails(unittest.TestCase):
     def test_it_refuses_a_dev_key_against_the_production_repository(self):
         buf = io.StringIO()

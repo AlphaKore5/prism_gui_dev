@@ -18,6 +18,12 @@ nothing in CI, the signing step or the release script notices.
 Run it after `release_all.py` and BEFORE raising the latest-version banner or
 telling anyone to update. Exit 0 only if every platform checked passes.
 
+Any released build can be rehearsed with --client-tag, for instance the dev 1.6.11
+(which has the quiet updater) against the dev 1.6.12 release:
+
+    python3 devtools/check_as_old_client.py --client-tag v1.6.11 \\
+        --repo AlphaKore5/prism_gui_dev --trust dev --expect-version 1.6.12
+
 Rehearsal against the DEV repository (the real 1.6.10 code, dev address, dev key):
 
     python3 devtools/check_as_old_client.py --repo AlphaKore5/prism_gui_dev \\
@@ -46,14 +52,17 @@ OLD_MODULES = ["app_meta.py", "paths.py", "updater.py", "update_manifest.py",
 #: modules never mix with the current ones.
 DRIVER = r'''
 import hashlib, json, os, random, sys, urllib.request
-tree, platform, repo, samples, github_base, trust_json = sys.argv[1:7]
+tree, platform, repo, samples, github_base, trust_json, running = sys.argv[1:8]
 sys.path.insert(0, tree)
 import app_meta, licensing, update_manifest, updater
 
 out = {"running": app_meta.VERSION}
 updater.platform_tag = lambda: platform
 updater.UPDATE_REPO = repo
-updater.UPDATE_HOST = f"https://github.com/{repo}/releases/latest/download"
+if hasattr(updater, "UPDATE_HOST"):                       # 1.6.10: one fixed host
+    updater.UPDATE_HOST = f"https://github.com/{repo}/releases/latest/download"
+if hasattr(updater, "UPDATE_FALLBACK_REPOS"):             # 1.6.11 and later: judge ONE repository
+    updater.UPDATE_FALLBACK_REPOS = ()
 trust = json.loads(trust_json)
 if trust:
     licensing.keys.update_public_keys = lambda: dict(trust)
@@ -66,15 +75,15 @@ def fetch(url, timeout=30):
         return r.read()
 
 try:
-    check = updater.check_for_update(running="1.6.10", fetch=fetch)
+    check = updater.check_for_update(running=running, fetch=fetch)
 except Exception as e:
     out.update(ok=False, stage="manifest", error=f"{type(e).__name__}: {e}")
     print(json.dumps(out)); raise SystemExit(0)
 if check is None:
     out.update(ok=False, stage="offer",
-               error="the 1.6.10 updater found nothing to offer: no manifest at "
-                     f"{updater._manifest_url()}, a signature it does not accept, "
-                     "or a version that is not newer than 1.6.10")
+               error=f"the {running} updater found nothing to offer: no manifest at "
+                     f"{updater._manifest_url(repo) if hasattr(updater, 'UPDATE_FALLBACK_REPOS') else updater._manifest_url()}, "
+                     f"a signature it does not accept, or a version that is not newer than {running}")
     print(json.dumps(out)); raise SystemExit(0)
 
 files = check.manifest.get("files", [])
@@ -86,10 +95,14 @@ random.seed(1)
 bad, ok = [], 0
 for part, group in sorted(by_part.items()):
     for f in random.sample(group, min(int(samples), len(group))):
-        url = updater._file_url(check.version, f["path"], part)
         try:
-            data = updater._get(url, timeout=60, fetch=fetch, max_bytes=f["size"])
-            good = len(data) == f["size"] and hashlib.sha256(data).hexdigest() == f["sha256"]
+            if hasattr(updater, "_fetch_file"):               # 1.6.11 and later: its own per-host check
+                updater._fetch_file(check.version, f, fetch)
+                good = True
+            else:                                              # 1.6.10: the check lives inside stage_update
+                url = updater._file_url(check.version, f["path"], part)
+                data = updater._get(url, timeout=60, fetch=fetch, max_bytes=f["size"])
+                good = len(data) == f["size"] and hashlib.sha256(data).hexdigest() == f["sha256"]
         except Exception as e:
             good = False; bad.append(f"{f['path'][:60]}: {type(e).__name__}")
             continue
@@ -102,12 +115,19 @@ print(json.dumps(out))
 '''
 
 
-def extract_old_tree(dest: str) -> None:
-    import old_release
-    why = old_release.skip_reason(TAG)
-    if why:
-        raise SystemExit(f"cannot rehearse as 1.6.10: {why}")
-    data = subprocess.run(["git", "archive", TAG, *OLD_MODULES], cwd=ROOT,
+def extract_old_tree(dest: str, tag: str = TAG) -> None:
+    if tag == TAG:                       # the tag name alone is not trusted: see tests/old_release.py
+        import old_release
+        why = old_release.skip_reason(TAG)
+        if why:
+            raise SystemExit(f"cannot rehearse as 1.6.10: {why}")
+    listed = subprocess.run(["git", "ls-tree", "--name-only", tag], cwd=ROOT,
+                            capture_output=True, text=True)
+    if listed.returncode != 0:
+        raise SystemExit(f"git tag {tag} is not in this clone -- `git fetch --tags`")
+    have = set(listed.stdout.split())
+    modules = [m for m in OLD_MODULES + ["channel.py"] if m in have]
+    data = subprocess.run(["git", "archive", tag, *modules], cwd=ROOT,
                           capture_output=True, check=True).stdout
     subprocess.run(["tar", "-x", "-C", dest], input=data, check=True)
 
@@ -124,14 +144,14 @@ def trusted_keys(mode: str, extra_pub: str) -> dict:
 
 
 def check_platform(tree: str, platform: str, repo: str, samples: int,
-                   github_base: str, trust: dict, expect: str) -> dict:
+                   github_base: str, trust: dict, expect: str, running: str) -> dict:
     with tempfile.TemporaryDirectory(prefix="old-client-home-") as home:
         env = dict(os.environ, HOME=home, USERPROFILE=home, PYTHONDONTWRITEBYTECODE="1")
         for k in ("PRISM_HOME", "PRISM_CHANNEL"):
             env.pop(k, None)
         run = subprocess.run(
             [sys.executable, "-I", "-B", "-c", DRIVER, tree, platform, repo, str(samples),
-             github_base, json.dumps(trust)],
+             github_base, json.dumps(trust), running],
             capture_output=True, text=True, env=env, cwd=home)
     try:
         result = json.loads(run.stdout.strip().splitlines()[-1])
@@ -139,12 +159,17 @@ def check_platform(tree: str, platform: str, repo: str, samples: int,
         return {"ok": False, "stage": "driver", "error": (run.stderr or run.stdout)[-400:]}
     if result.get("ok") and expect and result.get("version") != expect:
         result.update(ok=False, stage="version",
-                      error=f"1.6.10 would be offered {result.get('version')}, expected {expect}")
+                      error=f"{running} would be offered {result.get('version')}, expected {expect}")
     return result
 
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    ap.add_argument("--client-tag", default=TAG,
+                    help="the released build to rehearse as (default v1.6.10, the customers on Hitarth's repo)")
+    ap.add_argument("--pretend-running", default="",
+                    help="rehearse a client that is running this older version than the tag says "
+                         "(to check an offer that is not newer than the tag itself)")
     ap.add_argument("--repo", default="HitarthTrivedi/prism_gui",
                     help="the repository to read (default: the one 1.6.10 reads)")
     ap.add_argument("--platform", action="append", choices=PLATFORMS,
@@ -158,18 +183,19 @@ def main(argv: list[str] | None = None) -> int:
                     help="replace https://github.com (a local fake, for the tests)")
     args = ap.parse_args(argv)
 
-    if args.repo == "HitarthTrivedi/prism_gui" and args.trust != "prod" and not args.github_base:
+    if args.repo in ("HitarthTrivedi/prism_gui", "AlphaKore5/prism_gui") and args.trust != "prod" and not args.github_base:
         print("refusing: the production repository is read with the production keys only")
         return 2
     platforms = args.platform or list(PLATFORMS)
     trust = trusted_keys(args.trust, args.test_pub)
     failed = 0
+    running = args.pretend_running or args.client_tag.lstrip("v")
     with tempfile.TemporaryDirectory(prefix="old-client-tree-") as tree:
-        extract_old_tree(tree)
-        print(f"Rehearsing as the released {TAG} against {args.repo} "
+        extract_old_tree(tree, args.client_tag)
+        print(f"Rehearsing as the released {args.client_tag} (running {running}) against {args.repo} "
               f"(keys: {args.trust}{', ' + args.github_base if args.github_base else ''})")
         for plat in platforms:
-            r = check_platform(tree, plat, args.repo, args.samples, args.github_base, trust, args.expect_version)
+            r = check_platform(tree, plat, args.repo, args.samples, args.github_base, trust, args.expect_version, running)
             if r.get("ok"):
                 pol = f"  policy fields it ignores: {r['policy']}" if r.get("policy") else ""
                 print(f"  PASS {plat}: would be offered {r['version']} ({r['files']} files, parts {r['parts']}); "
