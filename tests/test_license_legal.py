@@ -59,6 +59,56 @@ class LegalAcknowledgement(unittest.TestCase):
         self.assertTrue(dialog.privacy_check.isEnabled())
 
 
+class WhyActivateIsOff(unittest.TestCase):
+    """A greyed Activate button with no reason reads as a broken app. A customer
+    sent a key copied one character short; the button stayed off and nothing said
+    why. These pin the explanation for each way the button can be off."""
+
+    def _dialog(self):
+        return LegalAcknowledgement._dialog(self)
+
+    def _acknowledge(self, dialog):
+        dialog._terms_opened = dialog._privacy_opened = True
+        dialog.terms_check.setEnabled(True)
+        dialog.privacy_check.setEnabled(True)
+        dialog.terms_check.setChecked(True)
+        dialog.privacy_check.setChecked(True)
+
+    def test_a_key_one_character_short_says_so(self):
+        dialog = self._dialog()
+        self._acknowledge(dialog)
+        dialog.key_edit.setText(KEY[:-1])
+        self.assertFalse(dialog.activate_btn.isEnabled())
+        self.assertFalse(dialog.key_hint.isHidden())
+        self.assertIn("19 of 20", dialog.key_hint.text())
+
+    def test_a_complete_but_wrong_key_says_to_check_each_group(self):
+        dialog = self._dialog()
+        self._acknowledge(dialog)
+        dialog.key_edit.setText(KEY[:-1] + ("H" if KEY[-1] != "H" else "J"))
+        self.assertFalse(dialog.activate_btn.isEnabled())
+        self.assertIn("does not look right", dialog.key_hint.text())
+
+    def test_a_good_key_waiting_on_the_documents_says_that(self):
+        dialog = self._dialog()
+        dialog.key_edit.setText(KEY)
+        self.assertFalse(dialog.activate_btn.isEnabled())
+        self.assertIn("both documents", dialog.key_hint.text())
+
+    def test_nothing_is_said_when_there_is_nothing_to_say(self):
+        dialog = self._dialog()
+        self.assertTrue(dialog.key_hint.isHidden(), "empty field")
+        self._acknowledge(dialog)
+        dialog.key_edit.setText(KEY)
+        self.assertTrue(dialog.activate_btn.isEnabled())
+        self.assertTrue(dialog.key_hint.isHidden(), "Activate is on")
+
+    def test_a_short_key_pasted_without_dashes_counts_the_same(self):
+        dialog = self._dialog()
+        dialog.key_edit.setText(KEY.replace("-", "")[:-1])
+        self.assertIn("19 of 20", dialog.key_hint.text())
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
 

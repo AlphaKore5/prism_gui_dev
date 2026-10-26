@@ -179,6 +179,7 @@ class LicenseDialog(PrismDialog):
         self.body.setSpacing(theme.ROW_GAP)
         self.body.addWidget(self._explainer())
         self.body.addLayout(self._key_row())
+        self.body.addWidget(self._key_hint())
         self.body.addWidget(self._legal_acknowledgement())
         self.body.addWidget(self._message_label())
         self.body.addWidget(self._seats_panel())
@@ -407,6 +408,49 @@ class LicenseDialog(PrismDialog):
             self.activate_btn.setEnabled(
                 licensing.keyformat.is_well_formed(self.key_edit.text())
                 and self._legal_acknowledged())
+            self._show_key_hint()
+
+    def _key_hint(self) -> QLabel:
+        """One line under the key field saying why Activate is still off.
+
+        A greyed button with no reason reads as a broken app. The usual cause
+        is a key copied one character short, which the checksum catches offline
+        and which looks fine at a glance."""
+        self.key_hint = QLabel(self)
+        self.key_hint.setObjectName("licKeyHint")
+        self.key_hint.setWordWrap(True)
+        self.key_hint.setStyleSheet(f"color: {theme.NEUTRAL[600]};")
+        self.key_hint.setVisible(False)
+        return self.key_hint
+
+    def _activation_blocker(self) -> str:
+        """Why Activate is off, in words the customer can act on. "" = it is on."""
+        raw = self.key_edit.text()
+        kf = licensing.keyformat
+        body = kf.normalise(raw)[len(kf.PREFIX):]
+        if not body:
+            return ""
+        if not kf.is_well_formed(raw):
+            if len(body) < kf.BODY_LEN:
+                return i18n.t(
+                    "This key has {n} of {total} characters. A key is four groups "
+                    "of five. Check that the end was not cut off when you copied it."
+                ).format(n=len(body), total=kf.BODY_LEN)
+            return i18n.t(
+                "That key does not look right. Check each group against the "
+                "email, one character at a time.")
+        if not self._legal_acknowledged():
+            return i18n.t("Open both documents below and tick each box to switch "
+                          "Activate on.")
+        return ""
+
+    def _show_key_hint(self):
+        hint = getattr(self, "key_hint", None)
+        if hint is None:                 # a signal fired while the sheet was still being built
+            return
+        text = self._activation_blocker()
+        hint.setText(text)
+        hint.setVisible(bool(text))
 
     def _message_label(self) -> QLabel:
         self.message = QLabel(self)
