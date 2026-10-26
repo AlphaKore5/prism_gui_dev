@@ -254,5 +254,33 @@ set to the dev key in that shell): repo `AlphaKore5/prism_gui_dev`, key id
 `udev2`, no mirror. `--dev` refuses a production repository and a run without
 `--dev` refuses the dev repository, so the two cannot be mixed by a typo.
 Dev builds themselves come from `PRISM_CHANNEL=dev python packaging/build.py`
-(section 3). Not built yet: CI for dev builds in the dev repo (Actions are off),
-and the `1.6.10-dev` build of the old tag used to rehearse the 1.6.10 to bridge hop.
+(section 3). CI for dev builds in the dev repo now runs. Not built yet: the `1.6.10-dev` build of
+the old tag used to rehearse the 1.6.10 to bridge hop on a real machine.
+
+## 15. Will the customers still on 1.6.10 take this release?
+
+A 1.6.10 install has no quiet auto-download. It shows the banner, the customer
+clicks Update, and it downloads and restarts. It reads exactly one address,
+`https://github.com/HitarthTrivedi/prism_gui/releases/latest/download`, and trusts
+exactly one key (`u1`). A release that is only in the organisation repository, is
+not GitHub's "latest" release, is signed with another key, or has a file named
+differently is invisible to every one of those customers, and nothing in CI or the
+signing step notices.
+
+`devtools/check_as_old_client.py` runs the code of the released v1.6.10 tag,
+unchanged, against a published release and reports PASS or FAIL per platform: is the
+manifest found where 1.6.10 looks, does it verify with 1.6.10's keys, is it offered as
+newer, and do sampled files from every part match the size and hash 1.6.10 checks.
+It uses public download URLs only (no API quota) and a throwaway HOME.
+
+```
+python devtools/check_as_old_client.py --expect-version 1.6.12      # production, the real customers
+python devtools/check_as_old_client.py --repo AlphaKore5/prism_gui_dev --trust dev --expect-version 1.6.12   # rehearsal
+```
+
+Run it after `release_all.py` and **before** raising the latest-version banner in the
+console's Releases tab. A FAIL on any platform means customers on 1.6.10 on that
+platform will not see the update: fix it, do not raise the banner. A PASS proves the
+1.6.10 updater would find, verify and fetch the release; the swap itself, and the
+rollback if the new build will not start, are covered by `tests/test_e2e_update.py`
+and still need a real Windows and Mac run (the `1.6.10-dev` rehearsal build).
