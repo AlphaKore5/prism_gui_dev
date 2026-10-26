@@ -33,13 +33,14 @@ jobs:
   #     failed. That hang was a modal leaking out of an unclosed dialog and
   #     is fixed at source, so `python -m pytest` now runs clean.
   #
-  # continue-on-error DELIBERATELY, for now: a job that flaps during freeze
-  # week trains everyone to ignore it. Flip it to false once the suite has
-  # been green twice on Windows — that is the whole point of running it here.
+  # A red test now stops a release: `release` needs this job. It was
+  # continue-on-error until the suite had been green twice on Windows; it has
+  # been green on all three platforms on every run since 2026-10-23 (the dev
+  # repo's v1.6.10 and v1.6.11 tag runs included). Known, explained failures
+  # live in devtools/ci_known_failures.txt and do not fail the job.
   tests:
     name: Tests · ${{ matrix.label }}
     runs-on: ${{ matrix.os }}
-    continue-on-error: true
     strategy:
       fail-fast: false
       matrix:
@@ -379,7 +380,7 @@ jobs:
 
   release:
     name: Publish release
-    needs: build
+    needs: [build, tests]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
