@@ -8,7 +8,7 @@ from __future__ import annotations
 NAME = "Prism"
 # Reverse-DNS id: macOS uses it for the bundle, Linux for the .desktop file.
 BUNDLE_ID = "in.alphakore.prism"
-VERSION = "1.6.11"
+VERSION = "1.6.12"
 DESCRIPTION = "One task in, a whole pipeline of AI tools out."
 PUBLISHER = "Alphakore"
 

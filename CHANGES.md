@@ -10,6 +10,20 @@ Tests: **1966 passing** (6 skipped, 8 Sep 2026 after Round 16 landed on main —
 
 ---
 
+# 1.6.12 — Activation says what is wrong; builds say which channel they are (27 Oct 2026)
+
+- **The Activate button explains itself.** A key copied one character short used
+  to leave the button grey with no reason. The activation window now says how
+  many characters the key has, or that it does not look right, or that the two
+  documents still need opening. Three new strings, not yet translated.
+- **Licence requests carry the release channel** (`X-Prism-Channel`), so the
+  licence server can offer a dev build its own version numbers without touching
+  what production customers are told. Builds before this send nothing and count
+  as production.
+- **A release now waits for the tests** in CI; a red test stops it.
+
+---
+
 # 1.6.11 — The updater moves to the AlphaKore5 organisation (25 Oct 2026)
 
 - **Updates are fetched from the AlphaKore5 organisation first and the old
