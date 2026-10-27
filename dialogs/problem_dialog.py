@@ -132,8 +132,9 @@ class ProblemDialog(PrismDialog):
         import time
 
         import diagnostics
+        import paths
         suggested = os.path.join(
-            os.path.expanduser("~"),
+            paths.picker_start_dir(),
             f"prism-problem-{time.strftime('%Y%m%d-%H%M')}.txt")
         target, _ = QFileDialog.getSaveFileName(
             self, i18n.t("Save details"), suggested, "Text (*.txt)")

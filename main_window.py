@@ -319,6 +319,11 @@ class MainWindow(QMainWindow):
         self._fit_to_screen()
 
         self.cfg = CB.config.load()
+        try:
+            import output_folders
+            output_folders.apply(self.cfg)
+        except Exception:                                   # noqa: BLE001 - never stop the window opening
+            pass
         self.attachments: list[dict] = []
         self.pending_mentions: list[dict] = []   # [{"description","path","kind"}]
         self.routing: dict | None = None
@@ -2070,7 +2075,7 @@ class MainWindow(QMainWindow):
         except Exception:                               # noqa: BLE001
             places = []
 
-        start_in = ""
+        start_in = paths.picker_start_dir()
         if places:
             menu = QMenu(self)
             here = menu.addAction(i18n.t("This computer"))
@@ -2112,7 +2117,8 @@ class MainWindow(QMainWindow):
                     name=os.path.basename(picker.path)), 5000)
 
     def _attach_folder_dialog(self):
-        path = QFileDialog.getExistingDirectory(self, i18n.t("Attach a folder"))
+        path = QFileDialog.getExistingDirectory(
+            self, i18n.t("Attach a folder"), paths.picker_start_dir())
         if path:
             self._attach_path(path)
 
@@ -2255,9 +2261,10 @@ class MainWindow(QMainWindow):
             self._attach_path(m["path"])
 
     def _change_mention(self, index: int):
-        path = QFileDialog.getExistingDirectory(self, i18n.t("Pick the right folder…"))
+        start = paths.picker_start_dir()
+        path = QFileDialog.getExistingDirectory(self, i18n.t("Pick the right folder…"), start)
         if not path:
-            path, _ = QFileDialog.getOpenFileName(self, i18n.t("…or pick the right file"))
+            path, _ = QFileDialog.getOpenFileName(self, i18n.t("…or pick the right file"), start)
         if path:
             self._attach_path(path)
 

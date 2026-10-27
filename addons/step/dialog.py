@@ -1442,8 +1442,14 @@ class StepDialog(PrismDialog):
 
     # ── where the files go ───────────────────────────────────────────────
 
+    def _root_default(self) -> str:
+        """Where STEP work goes when nobody chose: the engine's own default,
+        except in a dev build, whose "~" is a hidden data folder."""
+        import output_folders
+        return output_folders.chosen({}, "step", self.sf.DEFAULT_OUT_ROOT)
+
     def _root(self) -> str:
-        return self.cfg.get("step_out_dir") or self.sf.DEFAULT_OUT_ROOT
+        return self.cfg.get("step_out_dir") or self._root_default()
 
     def _root_caption(self) -> str:
         return (i18n.t("Files go to {folder} — a folder per model, every "
@@ -1495,7 +1501,7 @@ class StepDialog(PrismDialog):
         if clicked is choose:
             return self._pick_root()
         if clicked is desktop:
-            self.cfg["step_out_dir"] = self.sf.DEFAULT_OUT_ROOT
+            self.cfg["step_out_dir"] = self._root_default()
             CB.config.save(self.cfg)
             self.root_label.setText(self._root_caption())
             self.root_default_btn.setVisible(True)

@@ -923,6 +923,111 @@ class SettingsPanel(QDialog):
 
 
 
+    def _dev_import_card(self, col):
+        import dev_import
+        boxes = {}
+        card = Card()
+        body = card.body((theme.CARD_PAD, theme.CARD_PAD, theme.CARD_PAD, theme.CARD_PAD), theme.SPACE_2)
+        body.addWidget(C.kicker(i18n.t("Bring my settings from my normal Prism")))
+        body.addWidget(C.label(
+            i18n.t("This is a development build, so it has its own empty settings: no Groq key (the "
+                   "microphone and every AI step need one), no browser logins, no History. Copy what you "
+                   "want from your normal Prism. Your normal Prism is only read, never changed."),
+            level="META", wrap=True))
+        for key, (label, _files, _folders) in dev_import.CHOICES.items():
+            box = QCheckBox(i18n.t(label))
+            box.setChecked(key == "settings")
+            boxes[key] = box
+            body.addWidget(box)
+        body.addWidget(self._buttons([C.button(i18n.t("Copy now"), "primary",
+                                               on_click=lambda: self._run_dev_import(boxes))]))
+        col.addWidget(card)
+
+    def _run_dev_import(self, boxes):
+        import dev_import
+        import output_folders
+        chosen = [key for key, box in boxes.items() if box.isChecked()]
+        if not chosen:
+            QMessageBox.information(self, i18n.t("Nothing chosen"), i18n.t("Tick what you want to copy."))
+            return
+        try:
+            result = dev_import.copy(chosen)
+        except (OSError, ValueError) as error:
+            QMessageBox.warning(self, i18n.t("Could not copy"), str(error))
+            return
+        fresh = CB.config.load()
+        self.cfg.clear()
+        self.cfg.update(fresh)
+        output_folders.apply(self.cfg)
+        done = ", ".join(result["copied"]) or i18n.t("nothing")
+        note = i18n.t("Copied: {done}. Restart Prism so everything picks it up.").format(done=done)
+        if result["missing"]:
+            note += " " + i18n.t("Not found in your normal Prism: {names}.").format(names=", ".join(result["missing"]))
+        self._after_save(note)
+
+    def _open_uninstall(self):
+        """Open the uninstall window. Refused while a task is running: the window
+        quits the app, and a half-made file is not worth losing."""
+        import main_window as _mw
+        window = self.window()
+        if window is not self and _mw._is_running(getattr(window, "_active_run", None)):
+            QMessageBox.information(
+                self, i18n.t("Uninstall Prism"),
+                i18n.t("A task is still running. Let it finish, or stop it, then uninstall."))
+            return
+        import output_folders
+        engine = getattr(CB.config, "ARTIFACTS_DIR", "")
+        candidates = [output_folders.chosen(self.cfg, "artifacts", engine),
+                      output_folders.chosen(self.cfg, "step"),
+                      output_folders.chosen(self.cfg, "gerber"),
+                      paths.user_folder("Prism Email"), paths.user_folder("Prism Inquiries"),
+                      paths.user_folder("Documents", "Prism Leads")]
+        from dialogs.uninstall_dialog import UninstallDialog
+        UninstallDialog(candidates, self).exec()
+
+    # ── where Prism saves what it makes ───────────────────────────────────
+    _OUTPUT_ROWS = (
+        ("artifacts", "Generated files",
+         "Reel videos, images, documents and everything else Prism makes for a task."),
+        ("step", "STEP files",
+         "Measurements, drawings and sheets made from your STEP models."),
+        ("gerber", "Gerber reports",
+         "Cleaned layers, comparison pages and reports made from Gerber jobs."),
+    )
+
+    def _output_folder_cards(self, col):
+        import output_folders
+        engine_default = {"artifacts": getattr(CB.config, "ARTIFACTS_DIR", ""), "step": "", "gerber": ""}
+        for kind, title, blurb in self._OUTPUT_ROWS:
+            field = QLineEdit(output_folders.configured(self.cfg, kind))
+            field.setPlaceholderText(output_folders.chosen({}, kind, engine_default.get(kind, "")))
+            field.setObjectName(f"outputFolder_{kind}")
+            browse = C.button(i18n.t("Choose…"), "secondary",
+                              on_click=lambda _=False, k=kind, f=field: self._pick_output_folder(k, f))
+            col.addWidget(self._field_card(
+                i18n.t(title), i18n.t(blurb), self._row([field]),
+                lambda k=kind, f=field: self._save_output_folder(k, f),
+                extra_buttons=[browse]))
+
+    def _pick_output_folder(self, kind: str, field: QLineEdit):
+        import output_folders
+        start = field.text().strip() or field.placeholderText() or paths.picker_start_dir()
+        chosen = QFileDialog.getExistingDirectory(
+            self, i18n.t("Choose a folder"), start if os.path.isdir(start) else paths.picker_start_dir())
+        if chosen:
+            field.setText(chosen)
+
+    def _save_output_folder(self, kind: str, field: QLineEdit):
+        import output_folders
+        text = field.text().strip()
+        ok, why = output_folders.check_folder(text)
+        if not ok:
+            QMessageBox.warning(self, i18n.t("That folder will not work"), i18n.t(why))
+            return
+        self.cfg[output_folders.KEY[kind]] = text
+        output_folders.apply(self.cfg)
+        self._after_save(i18n.t("Saved."))
+
     def _save_profile_line(self, field: QLineEdit):
         self.cfg["profile"] = field.text().strip()
         self._after_save(i18n.t("Saved."))
@@ -1768,7 +1873,7 @@ class SettingsPanel(QDialog):
         if current_bg and os.path.exists(os.path.dirname(current_bg)):
             suggested = os.path.dirname(current_bg)
         else:
-            suggested = os.path.expanduser("~")
+            suggested = paths.picker_start_dir()
         path, _ = QFileDialog.getOpenFileName(
             self,
             i18n.t("Select dashboard wallpaper"),
@@ -1814,6 +1919,26 @@ class SettingsPanel(QDialog):
             (i18n.t("Logs"), self._path(logs or "—")),
             (i18n.t("Log files on disk"), self._safe(self._log_size) or "—"),
         ]))
+
+        # ── where Prism saves the files it makes ──────────────────────────
+        col.addWidget(self._head(
+            i18n.t("Where Prism saves your files"),
+            i18n.t("Leave a box empty to use the usual folder on your Desktop. "
+                   "A folder you choose is created if it does not exist.")))
+        self._output_folder_cards(col)
+
+        # A development build starts as a brand-new install; offer to bring the
+        # normal Prism's settings across (read-only on the normal one).
+        import dev_import
+        if dev_import.applicable():
+            self._dev_import_card(col)
+
+        # Everything irreversible lives in the red card at the foot of the page.
+        col.addWidget(self._danger(
+            i18n.t("Uninstall Prism"),
+            i18n.t("Remove Prism from this computer. You choose whether to keep your settings, "
+                   "History and files, or remove everything. Nothing is removed until you confirm."),
+            [C.button(i18n.t("Uninstall…"), "destructive", on_click=self._open_uninstall)]))
 
 
 

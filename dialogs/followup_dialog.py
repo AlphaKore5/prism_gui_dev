@@ -435,7 +435,8 @@ class FollowupDialog(PrismDialog):
 
     # ── attachment management ─────────────────────────────────────────────
     def _add_files(self):
-        paths_selected, _ = QFileDialog.getOpenFileNames(self, i18n.t("Add files"))
+        paths_selected, _ = QFileDialog.getOpenFileNames(
+            self, i18n.t("Add files"), paths.picker_start_dir())
         for p in paths_selected:
             if p and p not in self._paths:
                 self._paths.append(p)

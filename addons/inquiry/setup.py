@@ -91,7 +91,8 @@ class _Picker(QWidget):
         row.addWidget(browse)
 
     def _browse(self):
-        start = self.edit.text().strip() or os.path.expanduser("~")
+        import paths
+        start = self.edit.text().strip() or paths.picker_start_dir()
         if self.directory:
             # Captions are translated at the call site. QFileDialog's statics
             # are deliberately never patched — doing that once broke every

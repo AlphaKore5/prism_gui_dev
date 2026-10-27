@@ -190,8 +190,9 @@ class ContactDialog(PrismDialog):
     def _save(self):
         from PySide6.QtWidgets import QFileDialog, QMessageBox
         import os
+        import paths
         suggested = os.path.join(
-            os.path.expanduser("~"),
+            paths.picker_start_dir(),
             f"prism-help-{time.strftime('%Y%m%d-%H%M')}.txt")
         target, _ = QFileDialog.getSaveFileName(
             self, i18n.t("Save this"), suggested, "Text (*.txt)")

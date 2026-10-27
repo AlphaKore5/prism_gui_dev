@@ -3967,8 +3967,8 @@ class LeadsWorkspace(QWidget):
     def __init__(self, leads_folder: str | None = None, sessions_folder: str = "",
                  searches_folder: str = "", parent=None):
         super().__init__(parent)
-        self._folder = leads_folder or os.path.join(
-            os.path.expanduser("~"), "Documents", "Prism Leads")
+        import paths
+        self._folder = leads_folder or paths.user_folder("Documents", "Prism Leads")
         self.leads = LeadsCockpit()
         for name in ("verifyRequested", "emailsRequested", "phonesRequested",
                      "exportRequested", "saveListRequested", "sequenceRequested",

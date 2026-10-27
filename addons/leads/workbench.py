@@ -3127,11 +3127,12 @@ class LeadsWorkbench(QWidget):
     def _autosave_dir(self) -> str:
         """Where a run's sheets land without asking — a predictable folder the
         user can always find, created on first use."""
-        d = os.path.join(os.path.expanduser("~"), "Documents", "Prism Leads")
+        import paths
+        d = paths.user_folder("Documents", "Prism Leads")
         try:
             os.makedirs(d, exist_ok=True)
         except Exception:                                   # noqa: BLE001
-            d = os.path.expanduser("~")
+            d = paths.real_home()
         return d
 
     def _export(self):

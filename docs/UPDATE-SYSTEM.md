@@ -40,10 +40,19 @@ for as long as they have not updated. So:
 
 - `channel.CHANNEL` is `"prod"` in the repo. A dev build rewrites that one
   line at build time. It is never read from the environment or a server.
-- A dev build keeps its data in `~/.prism-dev-home` (HOME/USERPROFILE are
-  redirected by `channel.isolate_home()` before anything imports). This is
-  because the engine and `prospector/` hard-code `expanduser("~")/.prism`;
-  redirecting HOME covers them without editing the submodule.
+- A dev build keeps its data in `~/.prism-dev-home`. `channel.isolate_home()`
+  replaces Python's `os.path.expanduser` so that `"~"` means that folder, before
+  anything imports. This is because the engine and `prospector/` hard-code
+  `expanduser("~")/.prism`; the hook covers them without editing the submodule.
+  It deliberately does **not** change `HOME` or `USERPROFILE` (it used to, and
+  Windows' Downloads, Documents and Desktop are defined through `%USERPROFILE%`,
+  so dev builds lost them: RELEASE_ISSUES.md ISS-009).
+- **Two kinds of folder, two rules.** Prism's private state (`~/.prism`) goes
+  through `"~"` and so lands in the dev folder. Anything a person is meant to open
+  (Desktop/Prism Artifacts, Prism Email, Documents/Prism Leads, Drive/OneDrive
+  discovery, the start folder of every file picker) must use `paths.real_home()`,
+  `paths.user_folder()`, `paths.desktop_dir()` or `paths.picker_start_dir()`.
+  In an ordinary build these return exactly what `expanduser("~")` did.
 - A source run can use `PRISM_HOME=/abs/path`. A frozen prod build **ignores**
   it, so a customer's environment cannot move their licence folder.
 - **Keys:** `licensing/keys.py::update_public_keys()` -- a frozen prod build

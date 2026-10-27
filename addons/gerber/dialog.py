@@ -37,7 +37,8 @@ from widgets.ask_panel import AskPanel
 # need to email a customer in the next five minutes. The measured Gerber
 # figures go somewhere they will actually be found again: a named folder
 # right on the Desktop.
-REPORTS_DIR = os.path.join(os.path.expanduser("~/Desktop"), "Prism Gerber")
+import paths as _paths
+REPORTS_DIR = os.path.join(_paths.desktop_dir(), "Prism Gerber")
 
 
 class GerberDialog(PrismDialog):
@@ -262,8 +263,16 @@ class GerberDialog(PrismDialog):
         own checking pile stays separate from cleaned-job folders. When
         that folder exists, outputs land in it; otherwise everything goes
         to Prism Gerber exactly as before."""
-        sub = os.path.join(REPORTS_DIR, "gerber data")
-        return sub if os.path.isdir(sub) else REPORTS_DIR
+        base = self._reports_dir()
+        sub = os.path.join(base, "gerber data")
+        return sub if os.path.isdir(sub) else base
+
+    def _reports_dir(self) -> str:
+        """Prism Gerber: the folder the person chose in Settings, else the
+        usual one on the Desktop."""
+        import output_folders
+        cfg = getattr(self, "cfg", None) or {}
+        return output_folders.chosen(cfg, "gerber", REPORTS_DIR)
 
     # ── files for the AI: the email and pricing, never the design ───────
 
@@ -733,7 +742,7 @@ class GerberDialog(PrismDialog):
         stem = "".join(c if c.isalnum() or c in "-_ " else "_"
                        for c in stem).strip()[:40] or "job"
         self._clean_stem = stem
-        out_dir = os.path.join(REPORTS_DIR,
+        out_dir = os.path.join(self._reports_dir(),
                                f"{stem} cleaned {time.strftime('%Y-%m-%d %H%M')}")
         self.progress.set_stage(1)
         self._set_busy(True, "Cleaning outside the border — nothing leaves "

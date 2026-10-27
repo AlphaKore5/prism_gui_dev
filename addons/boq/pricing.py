@@ -230,7 +230,8 @@ class PricingTable(QWidget):
         self._rebuild()
 
     def _pick_rates(self):
-        start = rate_list_path(self.cfg) or os.path.expanduser("~")
+        import paths
+        start = rate_list_path(self.cfg) or paths.picker_start_dir()
         path, _ = QFileDialog.getOpenFileName(
             self, i18n.t("Your rate list"), start,
             i18n.t("Price lists (*.csv *.xlsx *.xlsm *.pdf *.docx *.txt);;All files (*)"))

@@ -101,6 +101,53 @@ def _home_dir() -> str:
     return os.path.join(app_root(), ".prism-home")
 
 
+def real_home() -> str:
+    """The user's real home folder, even in a dev build whose "~" means its own
+    data folder (see channel.py). Use this for anything the person should be
+    able to open themselves; use user_dir() for Prism's own private state."""
+    import channel
+    return channel.real_home()
+
+
+def user_folder(*parts: str) -> str:
+    """A visible folder under the user's real home, e.g. user_folder("Prism Email").
+    In an ordinary build this is exactly what os.path.expanduser("~") gave."""
+    return os.path.join(real_home(), *parts)
+
+
+def desktop_dir() -> str:
+    """<real home>/Desktop. Deliberately the plain path, not the shell's answer,
+    so an ordinary build keeps writing exactly where it always did."""
+    return os.path.join(real_home(), "Desktop")
+
+
+def picker_start_dir() -> str:
+    """Where a file or folder chooser should open: the user's real Downloads,
+    else Documents, else their real home.
+
+    Never the folder the app happens to run from (a frozen build's working
+    directory is its install folder) and never a dev build's data folder: a
+    chooser that opens somewhere empty reads as "Prism cannot see my files".
+    Asks the operating system for the folder first, so a Downloads folder the
+    user moved is found; falls back to the real home channel.real_home() keeps.
+    """
+    try:
+        from PySide6.QtCore import QStandardPaths
+        for where in (QStandardPaths.DownloadLocation, QStandardPaths.DocumentsLocation):
+            folder = QStandardPaths.writableLocation(where)
+            if folder and os.path.isdir(folder):
+                return folder
+    except Exception:                                  # noqa: BLE001 - Qt missing or not started
+        pass
+    import channel
+    home = channel.real_home()
+    for name in ("Downloads", "Documents"):
+        folder = os.path.join(home, name)
+        if os.path.isdir(folder):
+            return folder
+    return home
+
+
 def ensure_user_dir() -> str:
     """Create ~/.prism owner-only, and tighten it if an older build did not.
 

@@ -36,7 +36,8 @@ import os
 import re
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
-DEFAULT_FOLDER = os.path.join(os.path.expanduser("~"), "Prism Inquiries")
+import paths
+DEFAULT_FOLDER = paths.user_folder("Prism Inquiries")
 
 # ── the working screen's tabs ────────────────────────────────────────────
 # Here rather than in addons/inquiry/dialog.py because addons/inquiry/panel.py

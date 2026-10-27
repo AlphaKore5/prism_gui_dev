@@ -16,7 +16,8 @@ import json
 import os
 import tempfile
 
-DEFAULT_DIR = os.path.join(os.path.expanduser("~"), "Prism Email")
+import paths
+DEFAULT_DIR = paths.user_folder("Prism Email")
 FILE = "sent.json"
 KEEP = 5000
 

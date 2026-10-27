@@ -61,7 +61,8 @@ def _google_accounts() -> list[tuple[str, str]]:
     user would otherwise have to answer by guessing.
     """
     found: list[tuple[str, str]] = []
-    home = os.path.expanduser("~")
+    import paths
+    home = paths.real_home()
 
     # macOS, Drive for Desktop v45+ — one folder per account, named with the
     # address, which is the only place the account is written down.
@@ -118,7 +119,8 @@ def _other_clouds() -> list[tuple[str, str]]:
     cloud, not on this laptop", and that is just as true of the other three.
     Excluding them would be an arbitrary loyalty to one vendor.
     """
-    home = os.path.expanduser("~")
+    import paths
+    home = paths.real_home()
     found: list[tuple[str, str]] = []
 
     cloud = os.path.join(home, "Library", "CloudStorage")

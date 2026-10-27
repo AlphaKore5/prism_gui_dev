@@ -4145,9 +4145,10 @@ class InquiryDialog(PipelineActions, PipelineScreen, QWidget):
                 self, i18n.t("Email inquiry automation"),
                 i18n.t("Set up a mailbox and a folder first."))
             return
+        import paths
         path, _ = QFileDialog.getOpenFileName(
             self, i18n.t("Choose the CSV you already kept"),
-            os.path.expanduser("~"), "CSV (*.csv)")
+            paths.picker_start_dir(), "CSV (*.csv)")
         if not path:
             return
         register = CB.get_register()
