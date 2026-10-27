@@ -1,11 +1,15 @@
 """Remove Prism from this computer, on purpose and without leaving a mess.
 
-Two choices, both asked for by the owner (2026-10-27):
+Two choices, exactly as the owner put it (2026-10-28): "uninstall should uninstall
+Prism only, and if the user wants, delete it with all Prism-stored files: logs and
+folders stored by Prism only."
 
-  SCOPE_APP  the program only. Settings, History and every file Prism made stay.
-  SCOPE_ALL  the program and Prism's own data folder (settings, licence, History,
-             the browser profile). The files Prism made for the person (Artifacts,
-             STEP, Gerber, Email, Inquiries, Leads) are removed only when asked.
+  SCOPE_APP  the program only (and the updater's leftovers beside it). Settings,
+             licence, History, logs and every file Prism made stay.
+  SCOPE_ALL  the program, Prism's own data folder (settings, licence, History, logs,
+             the browser profile) and every folder Prism created (Prism Artifacts,
+             Prism Step, Prism Gerber, Prism Email, Prism Inquiries, Prism Leads,
+             wherever Settings put them), with the files in them. Nothing else.
 
 A running program cannot delete itself, so this builds a small helper script,
 starts it detached, and the caller quits Prism. The helper waits for Prism to
@@ -18,9 +22,10 @@ Rules that keep this from ever deleting the wrong thing (each has a test):
   - The program folder is the one holding the running executable, found by
     updater.bundle_root(). The data folder is Prism's own (`.prism`, or a dev
     build's `.prism-dev-home`), by name.
-  - A folder of files the person made is removed only if its NAME starts with
-    "Prism". If they pointed Artifacts at their Documents folder, that folder
-    is left alone and reported as skipped.
+  - A folder of made files is removed only if its NAME starts with "Prism": it is
+    then a folder Prism created. If the person pointed Artifacts at their own
+    Documents folder, that folder is left alone and reported as skipped.
+  - The team's shared workspace is never removed, whatever its name.
   - Nothing is removed that is a drive root, a home folder, or a parent of one.
   - Paths containing quotes or line breaks are refused, because they go into a
     script.
@@ -108,14 +113,53 @@ def _looks_like_prisms_output(path: str) -> bool:
     return os.path.basename(os.path.abspath(path)).lower().startswith("prism")
 
 
+# ── the folders Prism creates ─────────────────────────────────────────────────
+def prism_folders(cfg: dict | None, config_module=None) -> tuple[list[str], list[str]]:
+    """(folders Prism may have created, folders that must never be removed).
+
+    Every place Prism writes made files: where the person pointed each one in
+    Settings, and the usual places, because a folder can hold files from before
+    the setting changed. Logs need nothing here: they live in the data folder."""
+    import output_folders
+    import paths
+    cfg = cfg or {}
+    engine = getattr(config_module, "ARTIFACTS_DIR", "") if config_module is not None else ""
+    fallback = getattr(config_module, "FALLBACK_ARTIFACTS_DIR", "") if config_module is not None else ""
+    found = [
+        output_folders.chosen(cfg, "artifacts", engine), engine, fallback,
+        output_folders.usual_dir("artifacts"), paths.user_folder("Prism Artifacts"),
+        output_folders.chosen(cfg, "step"), output_folders.usual_dir("step"),
+        output_folders.chosen(cfg, "gerber"), output_folders.usual_dir("gerber"),
+        str((cfg.get("email") or {}).get("folder") or ""), paths.user_folder("Prism Email"),
+        str((cfg.get("inquiry") or {}).get("folder") or ""), paths.user_folder("Prism Inquiries"),
+        paths.user_folder("Documents", "Prism Leads"),
+    ]
+    seen, out = set(), []
+    for folder in found:
+        if folder:
+            full = os.path.abspath(os.path.expanduser(folder))
+            if full not in seen:
+                seen.add(full)
+                out.append(full)
+    protected = [os.path.abspath(os.path.expanduser(str(cfg["workspace_root"])))] \
+        if cfg.get("workspace_root") else []
+    return out, protected
+
+
+def _overlaps(a: str, b: str) -> bool:
+    a, b = a.rstrip("\\/"), b.rstrip("\\/")
+    return a == b or a.startswith(b + os.sep) or b.startswith(a + os.sep)
+
+
 # ── building a plan ───────────────────────────────────────────────────────────
-def build_plan(scope: str, *, include_outputs: bool = False,
-               output_candidates: list[str] | None = None,
+def build_plan(scope: str, *, output_candidates: list[str] | None = None,
+               protect: list[str] | None = None,
                frozen: bool | None = None, executable: str | None = None,
                data_dir: str | None = None, home: str | None = None,
                platform: str | None = None) -> Plan:
     """What would be removed. Raises Refused when it must not run at all.
-    Every argument but `scope` and `include_outputs` exists so tests can point
+    `output_candidates` and `protect` come from prism_folders(); every other
+    argument exists so tests can point
     it at a temporary folder; the app passes none of them."""
     import paths
     import updater
@@ -178,19 +222,22 @@ def build_plan(scope: str, *, include_outputs: bool = False,
             raise Refused(f"Prism will not remove {mine}: "
                           f"{why or 'it is not recognisably Prism’s own data folder'}.")
         plan.data_dirs.append(mine)
-        if include_outputs:
-            for candidate in output_candidates or []:
-                if not candidate or not os.path.isdir(candidate):
-                    continue
-                full = os.path.abspath(candidate)
-                reason = refuse_reason(full)
-                if reason:
-                    plan.skipped.append((full, reason))
-                elif not _looks_like_prisms_output(full):
-                    plan.skipped.append((full, "you chose this folder yourself, and its name does not "
-                                               "start with “Prism”, so it may hold other things"))
-                elif full not in plan.output_dirs:
-                    plan.output_dirs.append(full)
+        for candidate in output_candidates or []:
+            if not candidate or not os.path.isdir(candidate):
+                continue
+            full = os.path.abspath(candidate)
+            reason = refuse_reason(full)
+            if reason:
+                plan.skipped.append((full, reason))
+            elif any(_overlaps(full, p) for p in (protect or [])):
+                plan.skipped.append((full, "this is your team's shared workspace, which other people use"))
+            elif not _looks_like_prisms_output(full):
+                plan.skipped.append((full, "you chose this folder yourself, and its name does not "
+                                           "start with “Prism”, so it may hold other things"))
+            elif _overlaps(full, plan.app_dir) or any(_overlaps(full, d) for d in plan.data_dirs):
+                continue                                  # already removed with the program or the data
+            elif full not in plan.output_dirs:
+                plan.output_dirs.append(full)
     return plan
 
 
@@ -289,7 +336,7 @@ def describe(plan: Plan) -> list[tuple[str, str]]:
     """(what, path) lines for the confirmation window."""
     rows = [("The Prism program", plan.app_dir)]
     rows += [("Left over from an earlier update", p) for p in plan.leftovers]
-    rows += [("Prism's settings, licence and History", p) for p in plan.data_dirs]
-    rows += [("Files Prism made for you", p) for p in plan.output_dirs]
+    rows += [("Prism's settings, licence, History and logs", p) for p in plan.data_dirs]
+    rows += [("A folder Prism created, with the files in it", p) for p in plan.output_dirs]
     rows += [("Launcher entry", p) for p in plan.extra_files]
     return rows

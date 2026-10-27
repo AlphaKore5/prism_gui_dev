@@ -19,12 +19,12 @@ _app = QApplication.instance() or QApplication([])
 
 
 def fake_builder(calls):
-    def build(scope, *, include_outputs=False, output_candidates=None):
-        calls.append((scope, include_outputs))
+    def build(scope, *, output_candidates=None, protect=None):
+        calls.append((scope, tuple(output_candidates or []), tuple(protect or [])))
         plan = U.Plan(scope, app_dir="/apps/Prism")
         if scope == U.SCOPE_ALL:
             plan.data_dirs = ["/home/x/.prism"]
-            if include_outputs:
+            if output_candidates:
                 plan.output_dirs = ["/home/x/Desktop/Prism Artifacts"]
                 plan.skipped = [("/home/x/Documents", "you chose this folder yourself")]
         return plan
@@ -34,39 +34,39 @@ def fake_builder(calls):
 class TheWindow(unittest.TestCase):
     def make(self, **kw):
         self.calls, self.started, self.quit = [], [], []
-        return UninstallDialog(["/x"], None, plan_builder=kw.get("builder") or fake_builder(self.calls),
+        return UninstallDialog(["/x"], None, protect=["/shared"],
+                               plan_builder=kw.get("builder") or fake_builder(self.calls),
                                starter=lambda plan: self.started.append(plan),
                                quitter=lambda: self.quit.append(1))
 
-    def test_it_opens_on_the_safe_choice_and_lists_only_the_program(self):
+    def test_it_opens_on_uninstall_prism_only_and_lists_only_the_program(self):
         d = self.make()
         self.assertTrue(d.app_only.isChecked())
+        self.assertEqual(d.app_only.text(), "Uninstall Prism")
         self.assertIn("/apps/Prism", d.list_label.text())
         self.assertNotIn(".prism", d.list_label.text())
-        self.assertFalse(d.with_files.isEnabled())
+        self.assertNotIn("Prism Artifacts", d.list_label.text())
 
-    def test_choosing_everything_lists_the_data_folder_and_unlocks_the_files_box(self):
+    def test_there_are_exactly_two_choices_and_no_extra_tick(self):
+        from PySide6.QtWidgets import QCheckBox, QRadioButton
+        d = self.make()
+        self.assertEqual(len(d.findChildren(QRadioButton)), 2)
+        self.assertEqual(d.findChildren(QCheckBox), [])
+        self.assertEqual(d.everything.text(), "Uninstall Prism and everything it stored")
+
+    def test_everything_lists_the_data_with_logs_the_folders_prism_created_and_what_is_left_alone(self):
         d = self.make()
         d.everything.setChecked(True)
-        self.assertIn("/home/x/.prism", d.list_label.text())
-        self.assertTrue(d.with_files.isEnabled())
-        self.assertNotIn("Prism Artifacts", d.list_label.text(), "made files stay unless asked")
-
-    def test_asking_for_files_adds_them_and_names_what_is_left_alone(self):
-        d = self.make()
-        d.everything.setChecked(True)
-        d.with_files.setChecked(True)
         text = d.list_label.text()
+        self.assertIn("/home/x/.prism", text)
+        self.assertIn("logs", text)
         self.assertIn("/home/x/Desktop/Prism Artifacts", text)
         self.assertIn("Left alone: /home/x/Documents", text)
 
-    def test_going_back_to_the_app_only_clears_the_files_box(self):
+    def test_the_window_passes_the_folders_and_the_protected_workspace_to_the_plan(self):
         d = self.make()
         d.everything.setChecked(True)
-        d.with_files.setChecked(True)
-        d.app_only.setChecked(True)
-        self.assertFalse(d.with_files.isChecked())
-        self.assertFalse(d.with_files.isEnabled())
+        self.assertEqual(self.calls[-1], (U.SCOPE_ALL, ("/x",), ("/shared",)))
 
     def test_remove_starts_the_plan_the_window_showed_and_then_quits(self):
         d = self.make()

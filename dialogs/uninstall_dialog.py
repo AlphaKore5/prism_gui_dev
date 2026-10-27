@@ -2,11 +2,11 @@
 deleted, then confirm. The deleting itself is uninstall.py; this window only
 asks and shows.
 
-Two choices (asked for by the owner), plus one extra that is off by default:
+Two choices, as the owner asked (2026-10-28):
 
-  · Remove the app only      settings, History and every file Prism made stay
-  · Remove everything        the app and Prism's own data (settings, licence, History)
-  · [ ] Also delete the files Prism made for me   Artifacts, STEP, Gerber ... folders
+  · Uninstall Prism                               the program only
+  · Uninstall Prism and everything it stored      also its settings, licence, History,
+                                                  logs and the folders Prism created
 
 Nothing is removed until the person presses Remove, and the list on screen is
 built from the same plan that will be run, so it cannot say one thing and do
@@ -15,7 +15,7 @@ another.
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (QApplication, QButtonGroup, QCheckBox, QFrame, QLabel, QRadioButton,
+from PySide6.QtWidgets import (QApplication, QButtonGroup, QFrame, QLabel, QRadioButton,
                                QVBoxLayout)
 
 import i18n
@@ -27,7 +27,7 @@ from widgets import controls as C
 
 class UninstallDialog(PrismDialog):
     def __init__(self, output_candidates: list[str] | None = None, parent=None,
-                 *, plan_builder=None, starter=None, quitter=None):
+                 *, protect: list[str] | None = None, plan_builder=None, starter=None, quitter=None):
         pad = C.IconPad("alert", theme.ERR, 38, theme.R_CONTROL, 19)
         super().__init__(i18n.t("Uninstall Prism"),
                          i18n.t("Choose what to remove from this computer."),
@@ -38,33 +38,27 @@ class UninstallDialog(PrismDialog):
         self._start = starter or uninstall.start
         self._quit = quitter or (lambda: QApplication.instance().quit())
         self._outputs = list(output_candidates or [])
+        self._protect = list(protect or [])
         self.plan = None
 
         body = self.body
-        self.app_only = QRadioButton(i18n.t("Remove the app only"))
+        self.app_only = QRadioButton(i18n.t("Uninstall Prism"))
         self.app_only.setChecked(True)
         body.addWidget(self.app_only)
         body.addWidget(C.label(
-            i18n.t("Takes the program off this computer. Your settings, licence, History and every file "
+            i18n.t("Removes the Prism program only. Your settings, licence, History, logs and every file "
                    "Prism made are kept, so installing Prism again picks up where you left off."),
             level="META", wrap=True))
-        self.everything = QRadioButton(i18n.t("Remove everything"))
+        self.everything = QRadioButton(i18n.t("Uninstall Prism and everything it stored"))
         body.addWidget(self.everything)
         body.addWidget(C.label(
-            i18n.t("Takes off the program and Prism's own data: settings, licence, History and the "
-                   "browser profile. This cannot be undone."), level="META", wrap=True))
+            i18n.t("Also removes Prism's settings, licence, History and logs, and the folders Prism created "
+                   "(Prism Artifacts, Prism Step, Prism Gerber, Prism Email, Prism Inquiries, Prism Leads) "
+                   "with the files in them. A folder you chose yourself with another name, and your team's "
+                   "shared workspace, are never touched. This cannot be undone."), level="META", wrap=True))
         self.group = QButtonGroup(self)
         self.group.addButton(self.app_only)
         self.group.addButton(self.everything)
-
-        self.with_files = QCheckBox(i18n.t("Also delete the files Prism made for me"))
-        self.with_files.setEnabled(False)
-        body.addWidget(self.with_files)
-        self.files_note = C.label(
-            i18n.t("Only folders named “Prism …” are removed (Prism Artifacts, Prism Step, Prism Gerber, "
-                   "Prism Email, Prism Inquiries, Prism Leads). A folder you chose yourself with another "
-                   "name is never touched."), level="META", wrap=True)
-        body.addWidget(self.files_note)
 
         box = QFrame()
         box.setObjectName("willRemove")
@@ -90,7 +84,6 @@ class UninstallDialog(PrismDialog):
         self.footer.set_primary(self.remove_btn)
 
         self.app_only.toggled.connect(self._refresh)
-        self.with_files.toggled.connect(self._refresh)
         self._refresh()
 
     # ── what is chosen ──────────────────────────────────────────────────────
@@ -98,14 +91,9 @@ class UninstallDialog(PrismDialog):
         return uninstall.SCOPE_ALL if self.everything.isChecked() else uninstall.SCOPE_APP
 
     def _refresh(self):
-        everything = self.everything.isChecked()
-        self.with_files.setEnabled(everything)
-        self.files_note.setVisible(everything)
-        if not everything:
-            self.with_files.setChecked(False)
         try:
-            self.plan = self._build_plan(self._scope(), include_outputs=self.with_files.isChecked(),
-                                         output_candidates=self._outputs)
+            self.plan = self._build_plan(self._scope(), output_candidates=self._outputs,
+                                         protect=self._protect)
         except uninstall.Refused as why:
             self.plan = None
             self.list_label.setText("")

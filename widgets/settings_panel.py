@@ -975,15 +975,10 @@ class SettingsPanel(QDialog):
                 self, i18n.t("Uninstall Prism"),
                 i18n.t("A task is still running. Let it finish, or stop it, then uninstall."))
             return
-        import output_folders
-        engine = getattr(CB.config, "ARTIFACTS_DIR", "")
-        candidates = [output_folders.chosen(self.cfg, "artifacts", engine),
-                      output_folders.chosen(self.cfg, "step"),
-                      output_folders.chosen(self.cfg, "gerber"),
-                      paths.user_folder("Prism Email"), paths.user_folder("Prism Inquiries"),
-                      paths.user_folder("Documents", "Prism Leads")]
+        import uninstall
+        candidates, protected = uninstall.prism_folders(self.cfg, CB.config)
         from dialogs.uninstall_dialog import UninstallDialog
-        UninstallDialog(candidates, self).exec()
+        UninstallDialog(candidates, self, protect=protected).exec()
 
     # ── where Prism saves what it makes ───────────────────────────────────
     _OUTPUT_ROWS = (

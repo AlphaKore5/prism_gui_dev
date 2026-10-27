@@ -67,23 +67,36 @@ class Planning(Rooms):
             U.build_plan(U.SCOPE_APP, frozen=False)
         self.assertIn("source", str(ctx.exception))
 
-    def test_the_program_only_never_lists_data_or_files(self):
-        plan = self.plan(U.SCOPE_APP)
+    def test_uninstall_prism_is_the_program_only_even_when_prisms_folders_exist(self):
+        plan = self.plan(U.SCOPE_APP, output_candidates=[self.artifacts])
         self.assertEqual(plan.app_dir, self.install)
         self.assertEqual((plan.data_dirs, plan.output_dirs), ([], []))
 
-    def test_everything_adds_prisms_own_data_and_nothing_made_for_the_person(self):
-        plan = self.plan(U.SCOPE_ALL)
-        self.assertEqual(plan.data_dirs, [self.data])
-        self.assertEqual(plan.output_dirs, [], "made files stay unless asked for")
+    def test_everything_is_the_program_the_data_with_logs_and_the_folders_prism_created(self):
+        os.makedirs(os.path.join(self.data, "logs"))
+        plan = self.plan(U.SCOPE_ALL, output_candidates=[self.artifacts])
+        self.assertEqual(plan.data_dirs, [self.data], "logs live inside the data folder")
+        self.assertEqual(plan.output_dirs, [self.artifacts])
 
-    def test_made_files_only_when_asked_and_only_folders_named_prism(self):
-        plan = self.plan(U.SCOPE_ALL, include_outputs=True,
-                         output_candidates=[self.artifacts, self.chosen])
+    def test_only_folders_prism_created_go_never_one_the_person_chose(self):
+        plan = self.plan(U.SCOPE_ALL, output_candidates=[self.artifacts, self.chosen])
         self.assertEqual(plan.output_dirs, [self.artifacts])
         skipped = dict(plan.skipped)
         self.assertIn(self.chosen, skipped)
         self.assertIn("Prism", skipped[self.chosen])
+
+    def test_the_teams_shared_workspace_is_never_removed_even_if_named_prism(self):
+        shared = os.path.join(self.home, "Prism Team")
+        os.makedirs(shared)
+        plan = self.plan(U.SCOPE_ALL, output_candidates=[self.artifacts, shared], protect=[shared])
+        self.assertNotIn(shared, plan.output_dirs)
+        self.assertIn("shared workspace", dict(plan.skipped)[shared])
+
+    def test_a_folder_inside_the_data_folder_is_not_listed_twice(self):
+        inside = os.path.join(self.data, "Prism Inner")
+        os.makedirs(inside)
+        plan = self.plan(U.SCOPE_ALL, output_candidates=[inside])
+        self.assertEqual(plan.output_dirs, [])
 
     def test_a_data_folder_that_is_not_prisms_is_refused(self):
         with self.assertRaises(U.Refused):
@@ -116,6 +129,25 @@ class Planning(Rooms):
             open(path, "w").write("x")
         plan = U.build_plan(U.SCOPE_APP, frozen=True, executable=self.exe, home=self.home, platform="linux")
         self.assertEqual(len(plan.extra_files), len(U.LINUX_LAUNCHER_FILES))
+
+
+class TheListOfPrismsFolders(unittest.TestCase):
+    """prism_folders() is the one list of places Prism writes made files."""
+
+    def test_settings_choices_and_usual_places_are_all_listed_and_the_workspace_protected(self):
+        import types
+        from unittest import mock
+        engine = types.SimpleNamespace(ARTIFACTS_DIR="/x/Desktop/Prism Artifacts", FALLBACK_ARTIFACTS_DIR="/x/Prism Artifacts")
+        cfg = {"gerber_out_dir": "/work/Prism Gerber 2026", "email": {"folder": "/mail/Prism Email"},
+               "inquiry": {"folder": "/inq/Prism Inquiries"}, "workspace_root": "/shared/Prism Team"}
+        with mock.patch.dict(os.environ, {"PRISM_REAL_HOME": "/x"}):
+            found, protected = U.prism_folders(cfg, engine)
+        for expected in ("/x/Desktop/Prism Artifacts", "/x/Prism Artifacts", "/work/Prism Gerber 2026",
+                         "/x/Desktop/Prism Gerber", "/x/Desktop/Prism Step", "/mail/Prism Email", "/x/Prism Email",
+                         "/inq/Prism Inquiries", "/x/Prism Inquiries", "/x/Documents/Prism Leads"):
+            self.assertIn(os.path.abspath(expected), found, expected)
+        self.assertEqual(len(found), len(set(found)), "no duplicates")
+        self.assertEqual(protected, [os.path.abspath("/shared/Prism Team")])
 
 
 class TheProgramFolderMustBePrismsAlone(Rooms):
@@ -156,7 +188,7 @@ class TheProgramFolderMustBePrismsAlone(Rooms):
 
 class TheScripts(Rooms):
     def test_the_script_names_exactly_the_plan_and_nothing_else(self):
-        plan = self.plan(U.SCOPE_ALL, include_outputs=True, output_candidates=[self.artifacts])
+        plan = self.plan(U.SCOPE_ALL, output_candidates=[self.artifacts])
         text = U.posix_script(plan, 4242, "/tmp/log")
         rm_lines = [l for l in text.splitlines() if l.startswith("rm -rf")]
         self.assertEqual(len(rm_lines), 1)
@@ -208,17 +240,13 @@ class ReallyRunningTheHelper(Rooms):
         self.assertFalse(os.path.exists(script), "the helper removes itself")
         self.assertTrue(os.path.exists(log))
 
-    def test_everything_removes_program_and_data_but_not_made_files_or_neighbours(self):
-        self.run_helper(self.plan(U.SCOPE_ALL))
-        self.assertEqual(self.alive(self.install, self.data, self.artifacts, self.chosen,
-                                    os.path.join(self.apps, "OtherApp"), os.path.join(self.home, "Pictures")),
-                         [False, False, True, True, True, True])
-
-    def test_everything_and_made_files_removes_prisms_folders_but_never_a_folder_the_person_chose(self):
-        plan = self.plan(U.SCOPE_ALL, include_outputs=True, output_candidates=[self.artifacts, self.chosen])
+    def test_everything_removes_prisms_things_and_nothing_else(self):
+        plan = self.plan(U.SCOPE_ALL, output_candidates=[self.artifacts, self.chosen])
         self.run_helper(plan)
-        self.assertEqual(self.alive(self.install, self.data, self.artifacts, self.chosen,
-                                    os.path.join(self.chosen, "taxes.pdf")), [False, False, False, True, True])
+        self.assertEqual(self.alive(self.install, self.data, self.artifacts,
+                                    self.chosen, os.path.join(self.chosen, "taxes.pdf"),
+                                    os.path.join(self.apps, "OtherApp"), os.path.join(self.home, "Pictures")),
+                         [False, False, False, True, True, True, True])
 
     def test_the_updaters_leftovers_are_really_removed_and_neighbours_survive(self):
         old = self.install + ".old"

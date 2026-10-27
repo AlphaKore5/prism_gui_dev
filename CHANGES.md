@@ -19,11 +19,14 @@ Tests: **1966 passing** (6 skipped, 8 Sep 2026 after Round 16 landed on main —
   instead of whatever folder Prism was started from.
 - **Choose where Prism saves your files** (Settings > Privacy & data): generated files,
   STEP files and Gerber reports each have a folder box; empty means the usual place.
-- **Uninstall** (Settings > Privacy & data): remove the app only, or everything, with a
-  separate off-by-default tick for the files Prism made. Only folders named "Prism ..." are
-  ever removed, and the program folder is removed only if it holds nothing but Prism (a copy
-  dropped straight onto the Desktop is refused, not deleted). Not yet run on a real Windows
-  machine: try it on a spare one first.
+- **Uninstall** (Settings > Privacy & data), two choices. "Uninstall Prism" removes the
+  program only; settings, licence, History, logs and every file Prism made stay. "Uninstall
+  Prism and everything it stored" also removes Prism's data folder (settings, licence,
+  History, logs, browser logins) and the folders Prism created, named "Prism ..."; a folder
+  you chose yourself and the shared workspace folder are left alone and listed as such. The
+  program folder is removed only if it holds nothing but Prism (a copy dropped straight onto
+  the Desktop is refused, not deleted). Not yet run on a real Windows machine: try it on a
+  spare one first.
 - **Dev builds only:** a card to bring settings, the Groq key, browser logins, History and
   tools across from your normal Prism, which is only read, never changed.
 - Not part of this app, listed so it is not lost: the licence server (deployed separately, not yet)

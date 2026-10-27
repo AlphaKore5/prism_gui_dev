@@ -121,7 +121,7 @@ something you did not run.
 - [ ] History and the last brief/research are still there after an update and a restart.
 - [ ] Settings > Check for updates, download, restart, version changed, data untouched.
 - [ ] Settings > Privacy & data: each "where Prism saves" folder can be chosen and is used; on a spare
-      machine only, Uninstall (app only / everything) really removes what it lists and nothing else (ISS-016).
+      machine only, Uninstall (Prism only / Prism and everything it stored) really removes what it lists and nothing else (ISS-016).
 
 **Publishing**
 - [ ] Files first, signed manifest **last** (ISS-004). A manifest with missing files is a customer error.
@@ -196,9 +196,12 @@ something you did not run.
   was run for real on throwaway folders; the Windows batch file was only generated and read in tests.
 - **Risks to check on a spare Windows machine, never the owner's own:** the batch waits for the process to exit, removes
   the install folder (a zip folder, or `C:\Program Files\...` which needs admin and will simply fail), retries, removes
-  itself, and leaves `%TEMP%\prism-uninstall.log`. Check all three outcomes: app only, everything, everything plus files.
+  itself, and leaves `%TEMP%\prism-uninstall.log`. Check both choices: "Uninstall Prism" (program only) and "Uninstall Prism and everything it stored" (program, data
+  folder with logs, and the Prism-named folders Prism created).
 - **Safety rules under test:** refuses from source; only names the running program's folder, Prism's data folder
-  (`.prism` / `.prism-dev-home`) and folders named "Prism ..."; never a drive root, a home folder or its parent.
+  (`.prism` / `.prism-dev-home`) and folders named "Prism ..."; never a drive root, a home folder or its parent;
+  never a folder the user chose that is not Prism-named, and never the shared workspace folder (owner's rule
+  2026-10-28: app-only removes Prism only; "everything" removes only what Prism itself stored).
 - **Do not announce Uninstall to customers until a Windows run is recorded here.**
 
 ### ISS-015 — My own edit deleted two routes; the tests caught it (2026-10-27) — FIXED
