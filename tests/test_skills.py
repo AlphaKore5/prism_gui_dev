@@ -935,7 +935,12 @@ class TheLoaderIsHonestAboutBadInput(unittest.TestCase):
         self._write("moving", "---\ntitle: A\ndescription: second version of "
                     "this skill, long enough to be a real description.\n"
                     "stages: [content]\n---\nsecond")
-        os.utime(os.path.join(self.user, "moving", "SKILL.md"), None)
+        # A real edit lands seconds later. Two writes here can fall in one
+        # Windows clock tick and share an mtime (CI 28 Oct 2026), so move
+        # the timestamp on explicitly instead of trusting the clock.
+        path = os.path.join(self.user, "moving", "SKILL.md")
+        later = os.stat(path).st_mtime_ns + 2_000_000_000
+        os.utime(path, ns=(later, later))
         self.assertEqual(SK.get("moving").body, "second")
 
     def test_transport_decides_whether_a_skill_is_typed(self):

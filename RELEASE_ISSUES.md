@@ -60,6 +60,8 @@ If I am about to do the left-hand thing, I stop.
 | Trusted `gh api rate_limit`, which reported a healthy count while calls were refused; waited on the wrong time. (ISS-005) | The response headers are the truth (`x-ratelimit-reset`). |
 | Said "BOQ is tested" after running only the test files a teammate's commit touched; the failing BOQ check lived in another file (ISS-019). | An area is tested only after the FULL suite ran on the combined code. Never choose the test set by the diff alone. |
 | Wrote a test that calls `/bin/sh` without a Windows skip, and changed a path's spelling (`/` to `\`) behind a test that compared strings; both only failed on the Windows runner, and I pushed the next commit before reading that run (ISS-020). | Windows first means reading the Windows CI job before the next push, and writing tests that either run on Windows or say why they skip. A green Linux suite proves nothing for customers. |
+| Called a running check "stalled" after measuring the wrong process (the parent waits; children do the downloads) and killed it (2026-10-28). | Before stopping a job, find the process doing the work (`pgrep -P`, `/proc/<pid>/io` of the child) and watch it for a minute. A quiet parent proves nothing. |
+| Started a Docker container while a browser test was running; Chrome cancelled requests on the network change and the test failed (2026-10-28). | Do not change the machine (containers, networks) during a test run, or rerun what overlapped. |
 | Ran full suites while still editing, so a result mixed old and new code. | Run the final suite on the finished commit, on the combined code, with the engine at the recorded commit. |
 
 **E. Release mechanics**
@@ -148,6 +150,20 @@ something you did not run.
 ---
 
 ## Issue log (newest first)
+
+### ISS-021 — Licence-server tests could reach the live database; the server had no CI (2026-10-28) — FIXED locally, not pushed
+- **Found by:** the system review with the installed skills (report: `artifacts/system-review-2026-10-28/report.html`).
+- **Live database:** `license_server/.env` holds the live Supabase URL. The tests only *defaulted* `DATABASE_URL`, so a
+  shell that had exported it (`source .env`, `run-local.sh`) kept it; one test drops every table, another resets what
+  Production offers. Proven with a test that starts Python with a live-looking URL (red on the old code). Now the suite
+  always uses a scratch database, `TEST_DATABASE_URL` is the only override, and the table-dropping test refuses anything else.
+- **No CI:** Render deployed every licence-server push untested. Added `.github/workflows/tests.yml` (SQLite and
+  Postgres 16 like Supabase: migrations, RLS on every table, downgrade/upgrade, whole suite) and
+  `autoDeployTrigger: checksPass`. **Owner step:** Render dashboard > Settings > Auto-Deploy > After CI Checks Pass.
+- **Also fixed:** `devices.channel` migration gets `lock_timeout` (proven on Postgres: gives up after 6 s instead of
+  queuing licence checks); `device_sightings` gets RLS; fleet list order stable on Postgres (a test relied on SQLite's
+  order); the two public webhooks no longer block the event loop on a slow prism-wa (proven: loop ran once in 0.5 s
+  before, freely after) and stop reading a body past 512 KB (before: read 640 MB, then refused).
 
 ### ISS-020 — Three new failures on the Windows test runner only (2026-10-28) — FIXED in code, Windows CI rerun pending
 - **Seen:** CI on c9fc339: Linux and macOS green, Windows red with 3 new failures (6029 tests, 5 failing incl. the 2 known PDF ones).

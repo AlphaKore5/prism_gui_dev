@@ -36,8 +36,16 @@ Landing work:
 - `git config merge.renameLimit 999999`, `git fetch`, then **rebase** onto
   `origin/main`. Never merge, never force-push a shared branch.
 - Push `prism_terminal` before `prism_gui` and bump the gitlink.
-- Before every push: `python3 -m pytest` and
-  `QT_QPA_PLATFORM=offscreen PRISM_SELFTEST=1 python3 main.py`.
+- Before every push: the full suite, one process per file as CI runs it,
+  `QT_QPA_PLATFORM=offscreen .venv/bin/python devtools/suite_runner.py --timeout 300`
+  (summary line `N tests in M files`; a single `pytest` over all ~6,000 tests stalls
+  this machine), and `QT_QPA_PLATFORM=offscreen PRISM_SELFTEST=1 .venv/bin/python main.py`
+  with `HOME` pointed at a sandbox.
+- Windows first: a green Linux run proves nothing for customers. Read the
+  `Tests · Windows` job of the last push before pushing again; a test that cannot run
+  on Windows says why it skips.
+- Write test logs and anything that must survive a session restart to
+  `~/prism-test-logs/`, never the session scratch folder (a restart wipes it).
 - After adding UI copy: `python3 devtools/extract_strings.py`, and read
   what it removed, not only what it added.
 - Update the golden lists in the guard tests (`GOLDEN_RAIL`, `GOLDEN_HOME`,
