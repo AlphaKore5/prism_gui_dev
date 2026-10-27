@@ -129,8 +129,10 @@ class TheReportsGoSomewhereFindable(unittest.TestCase):
         # redirected the live attribute to a scratch folder by the time any
         # test runs (see its comment for why), so this checks what the app
         # actually ships with, captured before that redirect happened.
-        desktop = os.path.expanduser("~/Desktop")
-        self.assertTrue(_REAL_REPORTS_DIR.startswith(desktop + os.sep))
+        # normpath: expanduser("~/Desktop") is "C:\Users\x/Desktop" on Windows,
+        # the same folder as "C:\Users\x\Desktop" but not the same string.
+        desktop = os.path.normpath(os.path.expanduser("~/Desktop"))
+        self.assertTrue(os.path.normpath(_REAL_REPORTS_DIR).startswith(desktop + os.sep))
         self.assertEqual(os.path.basename(_REAL_REPORTS_DIR), "Prism Gerber")
 
 

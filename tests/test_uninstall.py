@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -197,6 +198,7 @@ class TheScripts(Rooms):
         for keep in (self.chosen, self.home, self.apps, os.path.join(self.apps, "OtherApp")):
             self.assertNotIn(f" {keep} ", f" {rm_lines[0]} ")
 
+    @unittest.skipIf(sys.platform == "win32", "checks the POSIX helper with /bin/sh")
     def test_paths_with_spaces_and_quotes_stay_one_argument(self):
         weird = os.path.join(self.tmp, "my Prism 'beta'")
         os.makedirs(weird)
@@ -214,7 +216,10 @@ class TheScripts(Rooms):
     def test_the_windows_script_waits_retries_escapes_and_removes_itself(self):
         plan = U.Plan(U.SCOPE_ALL, app_dir=r"C:\Apps\Prism 100%", data_dirs=[r"C:\Users\a\.prism"])
         text = U.windows_script(plan, 777, r"C:\Temp\log.txt")
-        self.assertIn('tasklist /FI "PID eq 777"', text)
+        self.assertIn('tasklist.exe /FI "PID eq 777"', text)
+        self.assertEqual(text.split("\r\n")[1], "chcp 65001 >nul", "a non-English user name must survive")
+        for tool in ("tasklist", "find", "ping"):
+            self.assertNotIn(f" {tool} ", f" {text} ", f"{tool} must be called by its full Windows path")
         self.assertIn('rmdir /s /q "C:\\Apps\\Prism 100%%"', text, "% must be doubled in a batch file")
         self.assertIn('rmdir /s /q "C:\\Users\\a\\.prism"', text)
         self.assertIn("LSS 5", text, "removal is retried")
@@ -261,6 +266,62 @@ class ReallyRunningTheHelper(Rooms):
                     U.Plan(U.SCOPE_APP, app_dir=self.install, data_dirs=["/"])):
             with self.assertRaises(U.Refused):
                 U.start(bad, pid=1, script_dir=self.tmp, runner=lambda *a, **k: None)
+
+
+@unittest.skipUnless(sys.platform == "win32", "runs the real Windows helper")
+class ReallyRunningTheWindowsHelper(unittest.TestCase):
+    """ISS-016: the batch file had only ever been read, never run. This runs it
+    the way the app does (start() with its real flags), on throwaway folders
+    whose names carry a space, a % and a non-English letter, while a stand-in
+    for Prism is still running, so the wait is real too."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="uninstall-win-")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        t = self.tmp
+        self.home = os.path.join(t, "Users", "Jos\u00e9")
+        self.install = os.path.join(t, "Apps", "Prism 100% \u00e9t\u00e9")
+        self.exe = os.path.join(self.install, "Prism.exe")
+        self.data = os.path.join(self.home, ".prism")
+        self.artifacts = os.path.join(self.home, "Desktop", "Prism Artifacts")
+        self.chosen = os.path.join(self.home, "Documents")
+        self.neighbour = os.path.join(t, "Apps", "OtherApp")
+        for d in (os.path.join(self.install, "_internal"), self.data, self.artifacts, self.chosen, self.neighbour):
+            os.makedirs(d)
+        for f in (self.exe, os.path.join(self.install, "_internal", "python312.dll"),
+                  os.path.join(self.data, "config.json"), os.path.join(self.artifacts, "deck.pptx"),
+                  os.path.join(self.chosen, "taxes.pdf"), os.path.join(self.neighbour, "other.exe")):
+            open(f, "w").write("x")
+
+    def run_for_real(self, scope, **kw):
+        plan = U.build_plan(scope, frozen=True, executable=self.exe, data_dir=self.data,
+                            home=self.home, platform="win32", **kw)
+        scripts = os.path.join(self.tmp, "scripts")
+        os.makedirs(scripts)
+        prism = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(4)"])
+        self.addCleanup(prism.kill)
+        script = U.start(plan, pid=prism.pid, script_dir=scripts)
+        log = os.path.join(scripts, "prism-uninstall.log")
+        self.assertTrue(os.path.isdir(self.install), "nothing may go while Prism is still running")
+        prism.wait(timeout=30)
+        for _ in range(240):
+            if os.path.exists(log) and not os.path.exists(script):
+                break
+            time.sleep(0.5)
+        self.assertTrue(os.path.exists(log), "the helper finished and wrote its log")
+        self.assertFalse(os.path.exists(script), "the helper removed itself")
+
+    def test_prism_only_removes_the_program_and_nothing_else(self):
+        self.run_for_real(U.SCOPE_APP)
+        self.assertEqual([os.path.exists(p) for p in (self.install, self.data, self.artifacts,
+                                                       self.chosen, self.neighbour)],
+                         [False, True, True, True, True])
+
+    def test_everything_removes_prisms_things_and_spares_the_rest(self):
+        self.run_for_real(U.SCOPE_ALL, output_candidates=[self.artifacts, self.chosen])
+        self.assertEqual([os.path.exists(p) for p in (self.install, self.data, self.artifacts,
+                                                       os.path.join(self.chosen, "taxes.pdf"), self.neighbour)],
+                         [False, False, False, True, True])
 
 
 if __name__ == "__main__":

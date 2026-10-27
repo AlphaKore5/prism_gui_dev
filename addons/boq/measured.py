@@ -44,7 +44,7 @@ import os
 import time
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QBrush, QColor
+from PySide6.QtGui import QBrush, QColor, QPainter
 from PySide6.QtWidgets import (
     QAbstractItemView, QComboBox, QDialog, QHBoxLayout, QHeaderView, QLabel,
     QListWidget, QListWidgetItem, QStyle, QStyledItemDelegate, QTableWidget,
@@ -94,10 +94,23 @@ class _TintDelegate(QStyledItemDelegate):
         painter.setPen(color)
         font = index.data(Qt.FontRole)
         painter.setFont(font if font else option.font)
+        text = str(index.data(Qt.DisplayRole) or "")
+        if text == "●":
+            # The Trust dot is drawn, not typed: a font without U+25CF (Qt's
+            # offscreen Windows runner, CI 27 Oct 2026) drew nothing at all
+            # and the cell showed only its tint.
+            d = max(6, min(10, option.rect.height() - 6))
+            painter.setRenderHint(QPainter.Antialiasing)
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(color)
+            c = option.rect.center()
+            painter.drawEllipse(c.x() - d // 2, c.y() - d // 2, d, d)
+            painter.restore()
+            return
         align = index.data(Qt.TextAlignmentRole)
         align = int(align) if align is not None else int(Qt.AlignLeft | Qt.AlignVCenter)
         rect = option.rect.adjusted(8, 0, -8, 0)
-        painter.drawText(rect, align, str(index.data(Qt.DisplayRole) or ""))
+        painter.drawText(rect, align, text)
         painter.restore()
 
 KIND_LENGTH = "Length"

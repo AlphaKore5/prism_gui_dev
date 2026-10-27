@@ -267,16 +267,22 @@ def windows_script(plan: Plan, pid: int, log_path: str) -> str:
     the shell hold files for a moment after a program exits."""
     def q(path: str) -> str:
         return path.replace("%", "%%")
+    # The file is UTF-8 and cmd reads a batch file in the console's code page,
+    # so a path like C:\Users\José would be misread; chcp 65001 first.
+    # Windows' own tools by full path: a Git or MSYS `find` earlier on PATH
+    # would make a running Prism look gone.
+    sys32 = r"%SystemRoot%\System32"
     out = [
         "@echo off",
+        "chcp 65001 >nul",
         "rem Written by Prism's uninstaller. Waits for Prism to exit, removes what the plan lists, then itself.",
         "set /a waited=0",
         ":wait",
-        f'tasklist /FI "PID eq {int(pid)}" 2>nul | find "{int(pid)}" >nul',
+        f'{sys32}\\tasklist.exe /FI "PID eq {int(pid)}" 2>nul | {sys32}\\find.exe "{int(pid)}" >nul',
         "if not errorlevel 1 (",
         "  set /a waited+=1",
         "  if %waited% LSS 120 (",
-        "    ping -n 2 127.0.0.1 >nul",
+        f"    {sys32}\\ping.exe -n 2 127.0.0.1 >nul",
         "    goto wait",
         "  )",
         ")",
@@ -289,7 +295,7 @@ def windows_script(plan: Plan, pid: int, log_path: str) -> str:
             f'if exist "{q(path)}" (',
             f"  set /a tries{i}+=1",
             f"  if %tries{i}% LSS 5 (",
-            "    ping -n 3 127.0.0.1 >nul",
+            f"    {sys32}\\ping.exe -n 3 127.0.0.1 >nul",
             f"    goto again{i}",
             "  )",
             ")",
@@ -317,7 +323,9 @@ def start(plan: Plan, *, pid: int | None = None, runner=subprocess.Popen, script
         script = os.path.join(folder, f"prism-uninstall-{pid}.bat")
         with open(script, "w", encoding="utf-8", newline="") as f:
             f.write(windows_script(plan, pid, log_path))
-        flags = 0x08000000 | 0x00000008          # CREATE_NO_WINDOW | DETACHED_PROCESS
+        # CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP: a hidden console, not none
+        # (DETACHED_PROCESS), because chcp needs one. A child outlives Prism either way.
+        flags = 0x08000000 | 0x00000200
         # cwd: Windows will not delete a folder that is any process's working folder, and a
         # double-clicked Prism's working folder is usually its own program folder.
         runner(["cmd", "/c", script], creationflags=flags, close_fds=True, cwd=folder,

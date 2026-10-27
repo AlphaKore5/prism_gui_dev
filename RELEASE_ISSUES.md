@@ -59,6 +59,7 @@ If I am about to do the left-hand thing, I stop.
 | Wrote tests asserting the wrong status code (422 instead of 400) and fake objects missing a method the real one has. | Read how the real code answers before asserting. Failures in my own test are my test's fault until proven otherwise. |
 | Trusted `gh api rate_limit`, which reported a healthy count while calls were refused; waited on the wrong time. (ISS-005) | The response headers are the truth (`x-ratelimit-reset`). |
 | Said "BOQ is tested" after running only the test files a teammate's commit touched; the failing BOQ check lived in another file (ISS-019). | An area is tested only after the FULL suite ran on the combined code. Never choose the test set by the diff alone. |
+| Wrote a test that calls `/bin/sh` without a Windows skip, and changed a path's spelling (`/` to `\`) behind a test that compared strings; both only failed on the Windows runner, and I pushed the next commit before reading that run (ISS-020). | Windows first means reading the Windows CI job before the next push, and writing tests that either run on Windows or say why they skip. A green Linux suite proves nothing for customers. |
 | Ran full suites while still editing, so a result mixed old and new code. | Run the final suite on the finished commit, on the combined code, with the engine at the recorded commit. |
 
 **E. Release mechanics**
@@ -148,6 +149,21 @@ something you did not run.
 
 ## Issue log (newest first)
 
+### ISS-020 — Three new failures on the Windows test runner only (2026-10-28) — FIXED in code, Windows CI rerun pending
+- **Seen:** CI on c9fc339: Linux and macOS green, Windows red with 3 new failures (6029 tests, 5 failing incl. the 2 known PDF ones).
+- **1. BOQ Trust dot (Hitarth's test, my diagnosis):** the sampled pixel was the row tint, not the red dot. The dot was the
+  text "●"; Qt's offscreen Windows runner has no font with that glyph, so nothing was drawn. *Likely* fine in the real
+  Windows app (Segoe UI has it), but not proven, so the dot is now painted as a circle in `_TintDelegate` (no font
+  involved). The pixel test was re-checked against a black dot and still fails, as it should.
+- **2. Gerber "folder on the Desktop" (my change):** `desktop_dir()` builds `C:\Users\x\Desktop`; the test compared it as a
+  string with `expanduser("~/Desktop")` = `C:\Users\x/Desktop`. Same folder on disk. Test now compares normalised paths.
+- **3. Uninstall (my test):** a check ran `/bin/sh`, which Windows does not have. Skipped on Windows. Reading the Windows
+  helper again turned up two real problems, fixed in the same commit: it was UTF-8 but cmd reads batch files in the
+  console code page (a user name like José would be misread, so nothing removed), now `chcp 65001` with a hidden console
+  instead of none; and `tasklist`/`find`/`ping` by bare name (a Git/MSYS `find` on PATH breaks the wait), now full paths.
+- **New:** `ReallyRunningTheWindowsHelper` runs the real batch file via `start()` on the Windows runner, on folders named
+  with a space, `%` and `é`, while a stand-in Prism is still running. This is the first real Windows run of it (ISS-016).
+
 ### ISS-019 — CI went red on the combined dev code; I had called BOQ "tested" (2026-10-28) — FIXED
 - **Seen:** CI's Linux tests failed on the 1.6.13 candidate: `test_skills.py::...test_the_bill_of_materials_and_quantities_answer_is_checked`.
   The full local run also failed `test_whatsapp_workspace.py::test_the_time_ladder...`.
@@ -193,7 +209,8 @@ something you did not run.
 
 ### ISS-016 — Uninstall's Windows helper has never run on Windows (2026-10-27) — OPEN, UNVERIFIED
 - **What exists:** Settings > Privacy & data > Uninstall (`uninstall.py`, `dialogs/uninstall_dialog.py`). The POSIX helper
-  was run for real on throwaway folders; the Windows batch file was only generated and read in tests.
+  was run for real on throwaway folders; the Windows batch file was only generated and read in tests. From ISS-020 the Windows CI runner runs it for real on
+  throwaway folders; that is a server, not a customer's PC, so a spare-machine run is still needed.
 - **Risks to check on a spare Windows machine, never the owner's own:** the batch waits for the process to exit, removes
   the install folder (a zip folder, or `C:\Program Files\...` which needs admin and will simply fail), retries, removes
   itself, and leaves `%TEMP%\prism-uninstall.log`. Check both choices: "Uninstall Prism" (program only) and "Uninstall Prism and everything it stored" (program, data
