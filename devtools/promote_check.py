@@ -103,16 +103,34 @@ def check_tree_clean() -> Result:
     return Result(PASS, "clean tree", "everything is committed, and the engine folder is at the recorded commit")
 
 
+#: Paths that are not part of the shipped app. A commit that touches only these after the dev release
+#: leaves the tested code unchanged, so it does not break "promote what was tested".
+NON_SHIPPING = ("docs/", "devtools/", "tests/", "RELEASE_ISSUES.md", "CLAUDE.md", "CHANGES.md", "BOQ-CHANGES-TODO.md", ".github/")
+
+
+def shipped_changes(paths: list[str]) -> list[str]:
+    return [p for p in paths if not any(p == n or p.startswith(n) for n in NON_SHIPPING)]
+
+
 def check_dev_tag(version: str) -> Result:
-    """The dev release of THIS version was built from THIS commit."""
+    """The dev release of THIS version was built from THIS commit, or from an earlier one that differs
+    only in files that do not ship (docs, tests, tools)."""
     head = _run("git", "rev-parse", "HEAD").stdout.strip()
     out = _run("git", "ls-remote", f"https://github.com/{DEV_REPO}.git", f"refs/tags/v{version}", f"refs/tags/v{version}^{{}}")
-    shas = {line.split()[0] for line in out.stdout.splitlines() if line.strip()}
+    shas = [line.split()[0] for line in out.stdout.splitlines() if line.strip()]
     if not shas:
         return Result(FAIL, "dev release", f"no tag v{version} on the dev repo: this commit has not been through a dev release, and only what was tested is promoted")
     if head in shas:
         return Result(PASS, "dev release", f"v{version} on the dev repo is exactly this commit ({head[:8]})")
-    return Result(FAIL, "dev release", f"the dev tag v{version} is a different commit from HEAD ({head[:8]}); promote what was tested")
+    for sha in shas:
+        if _run("git", "merge-base", "--is-ancestor", sha, "HEAD").returncode != 0:
+            continue
+        changed = _run("git", "diff", "--name-only", sha, "HEAD").stdout.split()
+        shipped = shipped_changes(changed)
+        if not shipped:
+            return Result(PASS, "dev release", f"v{version} was built from {sha[:8]}; since then only docs, tests and tools changed ({len(changed)} files), nothing that ships")
+        return Result(FAIL, "dev release", f"code that ships changed since the dev release v{version} ({sha[:8]}): {', '.join(shipped[:4])}. Promote what was tested")
+    return Result(FAIL, "dev release", f"the dev tag v{version} is not an ancestor of HEAD ({head[:8]}); promote what was tested")
 
 
 def check_engine_commit() -> Result:

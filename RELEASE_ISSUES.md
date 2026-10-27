@@ -13,6 +13,68 @@ stop and say so.
 
 ---
 
+## Claude's own mistakes: read these as rules
+
+Written 2026-10-27 at the owner's request ("add all of your mistake so you won't repeat"), from a full
+review of that day's work. Each is something I actually did. The rule on the right is what I do instead.
+If I am about to do the left-hand thing, I stop.
+
+**A. Saying what the state is without checking it now**
+| What I did | Rule |
+|---|---|
+| Said two known failures "now pass" and offered to delete them. They pass on Linux and still fail on the Windows runner. The test runner printed the same "now pass" hint again later. | A pass on Linux says nothing about a Windows-only entry. Never remove a known-failure line on a Linux result. |
+| Told the owner the licence-server commits were "only local" after they had pushed them. | Before any sentence about pushed, deployed or live, run the command that shows it (`git status -sb`, `git log origin/main`, a request to the live URL). |
+| Called an early snapshot of a half-published release a "FAIL" of the code. | Read what was being read (which release was "latest", how complete) before calling a result good or bad. |
+| Reported "357 failures" before reading the first error. They were all "unable to open database file". | Read the first traceback before quoting a count. |
+| Said a cause ("missing Groq key" for the mic) with more confidence than the evidence allowed; the owner remembered a local model. | Label every cause PROVEN, LIKELY or A GUESS. Ask what the owner remembers before building a theory on code alone. |
+| Said fixes were done when they existed only in my working folder, not in a published build the testers could install. | "Fixed" means: in a build, installed, and checked on the machine that had the problem. Otherwise say "fixed in code, not shipped". |
+
+**B. Design that only worked for the newest client, or hid its caveat**
+| What I did | Rule |
+|---|---|
+| Built a Development version box that older dev builds (1.6.10, 1.6.11) could never use, and put the caveat in small grey text. The owner had to change Production to test dev. (ISS-008, ISS-013) | Design for the oldest, weakest client first. Put every caveat in the control itself. |
+| Changed `HOME` and `USERPROFILE` for dev builds to isolate data. Windows lost Downloads, Documents and Desktop in the file picker. (ISS-009) | Never change a global the operating system also reads. Use the narrowest hook, and say which platform I could not test. |
+| Computed visible default folders (Desktop, Documents, "Prism ..." folders) from `~`, so on dev builds they pointed into a hidden folder. | A folder a person should open uses the real home. Only Prism's private state uses the isolated one. |
+| Left a dev build as a brand-new install (no Groq key, no browser logins, no folders, no History) and let testers read it as bugs. | Whenever a build starts empty, say so and give a way to bring settings across. |
+| Labelled a dev build "1.6.10" that held newer code, so it did not behave like the real 1.6.10. | A version number and its behaviour must match, or the label says otherwise. |
+
+**C. Careless edits that cost data or trust**
+| What I did | Rule |
+|---|---|
+| Used `git add -A` and rolled back a teammate's engine update; pushed it. (ISS-017) | Stage files by name. `git diff --cached --stat` before every commit. Update the submodule right after a rebase. |
+| Replaced a slice of `admin.py` by index range and deleted two routes. (ISS-015) | Edit by exact anchor. Run that file's tests straight after. |
+| Detected my own patch by an attribute a test mock answers for everything. (ISS-014) | Compare identity, not attributes. Run the FULL suite after a cross-cutting change. |
+| Pushed the dev repo's `v1.6.10` tag at current code, which made the old-client tests vacuous for weeks. (ISS-003) | Trust a tag by its contents, never its name. |
+| Changed a CI workflow (release now waits for tests) without being able to lint it. | Install actionlint before editing a workflow, or say "validated as YAML only". |
+
+**D. Testing and tools**
+| What I did | Rule |
+|---|---|
+| Shipped a redesigned console with no browser test. The first browser test found a contrast failure within minutes. (ISS-007) | Every UI change ships with a test that runs the real thing. |
+| Wrote a new test that mutated shared fixture data (a lease recorded another version), breaking an older test. | A test must leave shared data as it found it, or use its own. |
+| Wrote tests asserting the wrong status code (422 instead of 400) and fake objects missing a method the real one has. | Read how the real code answers before asserting. Failures in my own test are my test's fault until proven otherwise. |
+| Trusted `gh api rate_limit`, which reported a healthy count while calls were refused; waited on the wrong time. (ISS-005) | The response headers are the truth (`x-ratelimit-reset`). |
+| Ran full suites while still editing, so a result mixed old and new code. | Run the final suite on the finished commit, on the combined code, with the engine at the recorded commit. |
+
+**E. Release mechanics**
+| What I did | Rule |
+|---|---|
+| Published the signed list before its files. (ISS-004) | Files first, signed list last. |
+| Kept work (signed outputs, work folders, databases, the source of a published page) in a scratch folder that a session restart wiped; lost a signed file and had to re-sign. (ISS-010, ISS-011) | Anything that must survive goes in the project folder, not a scratch folder. `mkdir -p` in the same command that uses it. |
+| Started long background jobs and did not notice a restart had killed them. | After any restart, list what was running and re-check each before reporting. |
+| Did not fetch before pushing to a repo a teammate also uses; the push was rejected. | `git fetch` and look at what is new before every push, and rebase, never force. |
+| Ran my earlier test runs without the engine commit the teammate's code needed, so his newest code was never exercised. | After a teammate's push, rerun everything on the combined code. |
+
+**F. Before I say "done" (every time)**
+1. Did I run it myself, here, just now? What exactly did I not run (Windows, Mac, a real customer machine)?
+2. Is anything staged or pushed that I did not intend (`git diff --cached --stat`, `git status -sb`)?
+3. Could this reach a real customer, or the Production number? If yes, is there a confirmation and a test?
+4. Is every claim about state (pushed, live, passing, proven) checked now, not remembered?
+5. Is the cause I named proven, likely, or a guess, and does my wording say which?
+6. Did I write the new mistake into this file before moving on?
+
+---
+
 ## The owner's promotion rule (2026-10-27)
 
 Until the owner says **"move to prod"**, everything is built so that the moment they do, customers on

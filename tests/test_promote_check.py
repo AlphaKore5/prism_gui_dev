@@ -70,13 +70,35 @@ class TheRepoChecks(unittest.TestCase):
             run.return_value = mock.Mock(stdout="", returncode=0)
             self.assertEqual(P.check_dev_tag("1.6.99").status, P.FAIL)
 
-    def test_a_dev_tag_on_a_different_commit_blocks(self):
+    def later(self, changed, ancestor=True):
         def fake(*cmd, **kw):
             if cmd[:2] == ("git", "rev-parse"):
                 return mock.Mock(stdout="aaaa1111\n", returncode=0)
-            return mock.Mock(stdout="bbbb2222\trefs/tags/v1.6.99\n", returncode=0)
-        with mock.patch.object(P, "_run", side_effect=fake):
+            if cmd[:2] == ("git", "ls-remote"):
+                return mock.Mock(stdout="bbbb2222\trefs/tags/v1.6.99\n", returncode=0)
+            if cmd[:2] == ("git", "merge-base"):
+                return mock.Mock(stdout="", returncode=0 if ancestor else 1)
+            return mock.Mock(stdout="\n".join(changed), returncode=0)         # git diff --name-only
+        return mock.patch.object(P, "_run", side_effect=fake)
+
+    def test_a_dev_tag_on_an_unrelated_commit_blocks(self):
+        with self.later(["main_window.py"], ancestor=False):
             self.assertEqual(P.check_dev_tag("1.6.99").status, P.FAIL)
+
+    def test_later_commits_that_changed_shipped_code_block(self):
+        with self.later(["docs/x.md", "main_window.py"]):
+            result = P.check_dev_tag("1.6.99")
+        self.assertEqual(result.status, P.FAIL)
+        self.assertIn("main_window.py", result.detail)
+
+    def test_later_commits_that_only_touched_docs_tests_and_tools_pass(self):
+        with self.later(["docs/x.md", "tests/test_a.py", "devtools/promote_check.py", "RELEASE_ISSUES.md"]):
+            result = P.check_dev_tag("1.6.99")
+        self.assertEqual(result.status, P.PASS)
+        self.assertIn("nothing that ships", result.detail)
+
+    def test_the_engine_pointer_counts_as_shipped(self):
+        self.assertEqual(P.shipped_changes(["prism_terminal", "docs/a.md"]), ["prism_terminal"])
 
     def test_a_dev_tag_on_this_commit_passes(self):
         def fake(*cmd, **kw):
