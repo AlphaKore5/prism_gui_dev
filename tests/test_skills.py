@@ -604,10 +604,14 @@ class TheAddOnsHandTheirSkillsToTheCheck(unittest.TestCase):
         self.assertIn('kwargs["stage_skills"] = self.stage_skills', src)
 
     def test_the_bill_of_materials_and_quantities_answer_is_checked(self):
+        # The BOQ dialog passes its skills through _run_stage's worker_kwargs since Hitarth's
+        # BOQ round (c0c1f09, 2026-10-27), not as a direct keyword. Same protection, new form:
+        # the format stage asks for its skills, AND _run_stage hands worker_kwargs to the worker
+        # (the old wording-only check could not see whether they ever reached it).
         src = self._src("addons", "boq", "dialog.py")
-        self.assertIn('stage_skills={"format": [s.key for s in '
-                      'CB.skills.for_feature(', src)
+        self.assertIn('"stage_skills": {"format": [s.key for s in CB.skills.for_feature(', src)
         self.assertIn('f"{self.mode}.format")]}', src)
+        self.assertIn("**self._rs_worker_kwargs)", src)
 
     def test_the_feature_keys_the_dialog_asks_for_are_claimed(self):
         SK.reload()

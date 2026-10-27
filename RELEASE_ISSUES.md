@@ -58,6 +58,7 @@ If I am about to do the left-hand thing, I stop.
 | Wrote a new test that mutated shared fixture data (a lease recorded another version), breaking an older test. | A test must leave shared data as it found it, or use its own. |
 | Wrote tests asserting the wrong status code (422 instead of 400) and fake objects missing a method the real one has. | Read how the real code answers before asserting. Failures in my own test are my test's fault until proven otherwise. |
 | Trusted `gh api rate_limit`, which reported a healthy count while calls were refused; waited on the wrong time. (ISS-005) | The response headers are the truth (`x-ratelimit-reset`). |
+| Said "BOQ is tested" after running only the test files a teammate's commit touched; the failing BOQ check lived in another file (ISS-019). | An area is tested only after the FULL suite ran on the combined code. Never choose the test set by the diff alone. |
 | Ran full suites while still editing, so a result mixed old and new code. | Run the final suite on the finished commit, on the combined code, with the engine at the recorded commit. |
 
 **E. Release mechanics**
@@ -146,6 +147,20 @@ something you did not run.
 ---
 
 ## Issue log (newest first)
+
+### ISS-019 — CI went red on the combined dev code; I had called BOQ "tested" (2026-10-28) — FIXED
+- **Seen:** CI's Linux tests failed on the 1.6.13 candidate: `test_skills.py::...test_the_bill_of_materials_and_quantities_answer_is_checked`.
+  The full local run also failed `test_whatsapp_workspace.py::test_the_time_ladder...`.
+- **Causes:** (1) Hitarth's BOQ round moved the skills hand-off into `_run_stage(worker_kwargs=...)`; behaviour is the
+  same (checked: `_run_stage` unpacks `worker_kwargs` into the worker, which takes `stage_skills`), but the guard test
+  matched the old source text. (2) The WhatsApp test expected a clock time for "5 minutes ago", which is "Yesterday"
+  in the first five minutes after midnight; my run ended at midnight.
+- **Fix:** the guard test checks the new form AND that the kwargs reach the worker (stronger than before); the time
+  test expects what the calendar says. Both pass, the midnight case proven at 00:03.
+- **My mistake:** I had told the owner "all BOQ-related tests pass (295)", having chosen tests by the files the
+  teammate's commit touched. The BOQ check that failed lives in `test_skills.py`. **Rule:** an area is "tested" only
+  after the FULL suite has run on the combined code; never pick the test set by the diff alone.
+- **Lesson for guard tests:** a test that matches source text breaks on harmless refactors; check behaviour where possible.
 
 ### ISS-018 — Review of my own work found three defects before anyone hit them (2026-10-28) — FIXED in code
 - **Uninstall could delete a shared folder.** "The program folder" was simply the folder holding the executable. If

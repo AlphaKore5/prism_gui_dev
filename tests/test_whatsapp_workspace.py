@@ -44,7 +44,13 @@ def _isolated_state():
 # ── time ─────────────────────────────────────────────────────────────────────
 
 def test_the_time_ladder_goes_clock_yesterday_weekday_date():
-    assert ":" in chat.short_time(_iso(minutes=5))
+    # Five minutes ago is "Yesterday" during the first five minutes after midnight; the test
+    # used to fail then (seen 2026-10-28 00:0x). Expect what the calendar says.
+    now = datetime.now().astimezone()
+    if (now - timedelta(minutes=5)).date() == now.date():
+        assert ":" in chat.short_time(_iso(minutes=5))
+    else:
+        assert chat.short_time(_iso(minutes=5)) == "Yesterday"
     assert chat.short_time(_iso(days=1, hours=1)) in ("Yesterday", chat.short_time(_iso(days=1, hours=1)))
     assert chat.short_time(_iso(days=3)) == (datetime.now().astimezone() - timedelta(days=3)).strftime("%a")
     old = chat.short_time(_iso(days=40))
