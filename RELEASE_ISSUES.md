@@ -13,6 +13,13 @@ stop and say so.
 
 ---
 
+## The owner's promotion rule (2026-10-27)
+
+Until the owner says **"move to prod"**, everything is built so that the moment they do, customers on
+1.6.10 see the download badge and can update. So: never ship anything to dev that a 1.6.10 client could not
+take as production; run `python3 devtools/promote_check.py` at the end of every dev release; promote exactly
+the commit that was tested. The steps and the reasons are in `docs/PROMOTING-TO-PROD.md`.
+
 ## Pre-release checklist
 
 Tick every line for real. If you cannot, say which one and why. Never write "done" for
@@ -61,6 +68,9 @@ something you did not run.
 - [ ] `tests/test_console_ui.py` run (real browser: every tab, phone width, contrast, key copy, versions).
 - [ ] Anything that reaches real customers asks first and says how many (ISS-008).
 - [ ] After a deploy, check the live service from outside. State what was and was not checked.
+
+**Promotion readiness**
+- [ ] `python3 devtools/promote_check.py` (add `--dev-proof` once the dev release is published): no FAIL.
 
 **Reporting**
 - [ ] Say what is proven, what is simulated, and what no one has run on a real Windows or Mac machine.
