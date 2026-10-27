@@ -90,10 +90,17 @@ def prod_tags() -> list[str]:
 
 def check_tree_clean() -> Result:
     status = _run("git", "status", "--porcelain", "--untracked-files=no").stdout
-    dirty = [l for l in status.splitlines() if not l.strip().endswith("prism_terminal")]
+    lines = [l for l in status.splitlines() if l.strip()]
+    engine = [l for l in lines if l.strip().endswith("prism_terminal")]
+    dirty = [l for l in lines if l not in engine]
+    if engine:
+        # RELEASE_ISSUES.md ISS-017: a checkout of the engine that differs from the commit git records
+        # is what let `git add -A` silently roll the engine back and break another person's BOQ work.
+        return Result(FAIL, "engine checkout", "your engine folder is not at the commit git records. Run "
+                                               "`git submodule update --init prism_terminal`, and stage files by name, never `git add -A`")
     if dirty:
         return Result(FAIL, "clean tree", f"{len(dirty)} uncommitted change(s); promote a commit, not a working folder")
-    return Result(PASS, "clean tree", "everything is committed")
+    return Result(PASS, "clean tree", "everything is committed, and the engine folder is at the recorded commit")
 
 
 def check_dev_tag(version: str) -> Result:

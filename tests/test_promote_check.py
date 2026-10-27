@@ -95,6 +95,29 @@ class TheRepoChecks(unittest.TestCase):
             self.assertEqual(P.check_engine_commit().status, P.FAIL)
 
 
+class TheEngineFolder(unittest.TestCase):
+    """RELEASE_ISSUES.md ISS-017: an engine checkout that differs from the recorded commit once got
+    committed with `git add -A` and rolled another person's engine update back."""
+
+    def status(self, text):
+        return mock.patch.object(P, "_run", return_value=mock.Mock(stdout=text, returncode=0))
+
+    def test_a_modified_engine_folder_blocks_with_the_fix_in_the_message(self):
+        with self.status(" M prism_terminal\n"):
+            result = P.check_tree_clean()
+        self.assertEqual(result.status, P.FAIL)
+        self.assertIn("git submodule update", result.detail)
+        self.assertIn("git add -A", result.detail)
+
+    def test_ordinary_uncommitted_files_block(self):
+        with self.status(" M main_window.py\n"):
+            self.assertEqual(P.check_tree_clean().status, P.FAIL)
+
+    def test_a_clean_tree_passes(self):
+        with self.status(""):
+            self.assertEqual(P.check_tree_clean().status, P.PASS)
+
+
 class TheReport(unittest.TestCase):
     def test_the_plan_names_the_version_and_who_must_act(self):
         text = P.plan_text("1.6.99")

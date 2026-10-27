@@ -26,6 +26,8 @@ Tick every line for real. If you cannot, say which one and why. Never write "don
 something you did not run.
 
 **Before building**
+- [ ] Stage files by name (never `git add -A`); `git diff --cached --stat` shows no `prism_terminal` line unless the engine
+      change is intended; after a rebase run `git submodule update --init prism_terminal` first (ISS-017).
 - [ ] `git log v1.6.10..HEAD` read. Know every change that is about to ship, including
       other people's (Hitarth's BOQ work shipped inside the updater release, unannounced).
 - [ ] Which channel is this? Dev builds are `PRISM_CHANNEL=dev`, prod are not. Never
@@ -78,6 +80,19 @@ something you did not run.
 ---
 
 ## Issue log (newest first)
+
+### ISS-017 — My commit rolled back Hitarth's engine update (2026-10-27) — FIXED, caught within the hour
+- **Seen:** after rebasing onto Hitarth's BOQ commit (which moved the `prism_terminal` engine pointer to `4d8ad52`), my
+  next commit recorded the OLD engine (`bd8fa50`) and I pushed it to the dev repo. His BOQ code needs the newer engine;
+  the dev build and CI would have run it against the wrong one.
+- **Cause:** I used `git add -A` while my local engine folder was still at the old commit, so the submodule's
+  working-tree state was committed. The rebase had even shown ` M prism_terminal`, and my own gate ignored that line.
+- **Fix:** a new commit restored the pointer (no history rewrite); my local engine is updated
+  (`git submodule update --init prism_terminal`); `promote_check` now FAILS on a modified engine folder.
+- **Rules:** stage files by name, never `git add -A`. Run `git diff --cached --stat` before every commit and expect NO
+  `prism_terminal` line unless the engine change is intended. After a rebase or pull, update the submodule before anything else.
+- **Also learned:** my full-suite runs before the rebase never exercised his newest BOQ code, because my engine was behind.
+  A teammate's push means re-run the suite on the combined code, with the engine at the recorded commit.
 
 ### ISS-016 — Uninstall's Windows helper has never run on Windows (2026-10-27) — OPEN, UNVERIFIED
 - **What exists:** Settings > Privacy & data > Uninstall (`uninstall.py`, `dialogs/uninstall_dialog.py`). The POSIX helper
