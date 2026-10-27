@@ -1,5 +1,5 @@
 """The Uninstall window: what it shows is the plan that will run, the extra
-"delete my files" box is off until everything is chosen, and Remove does
+two choices are the only ones, and Remove does
 nothing irreversible without first starting the plan and quitting. Nothing here
 deletes anything: the plan builder, the starter and the quitter are replaced."""
 import os
@@ -19,8 +19,8 @@ _app = QApplication.instance() or QApplication([])
 
 
 def fake_builder(calls):
-    def build(scope, *, output_candidates=None, protect=None):
-        calls.append((scope, tuple(output_candidates or []), tuple(protect or [])))
+    def build(scope, *, output_candidates=None, chosen=None, protect=None):
+        calls.append((scope, tuple(output_candidates or []), tuple(chosen or []), tuple(protect or [])))
         plan = U.Plan(scope, app_dir="/apps/Prism")
         if scope == U.SCOPE_ALL:
             plan.data_dirs = ["/home/x/.prism"]
@@ -34,7 +34,7 @@ def fake_builder(calls):
 class TheWindow(unittest.TestCase):
     def make(self, **kw):
         self.calls, self.started, self.quit = [], [], []
-        return UninstallDialog(["/x"], None, protect=["/shared"],
+        return UninstallDialog(["/x"], None, chosen=["/mine/Prism Photos"], protect=["/shared"],
                                plan_builder=kw.get("builder") or fake_builder(self.calls),
                                starter=lambda plan: self.started.append(plan),
                                quitter=lambda: self.quit.append(1))
@@ -63,10 +63,20 @@ class TheWindow(unittest.TestCase):
         self.assertIn("/home/x/Desktop/Prism Artifacts", text)
         self.assertIn("Left alone: /home/x/Documents", text)
 
-    def test_the_window_passes_the_folders_and_the_protected_workspace_to_the_plan(self):
+    def test_the_window_passes_prisms_folders_the_persons_and_the_workspace_to_the_plan(self):
         d = self.make()
         d.everything.setChecked(True)
-        self.assertEqual(self.calls[-1], (U.SCOPE_ALL, ("/x",), ("/shared",)))
+        self.assertEqual(self.calls[-1], (U.SCOPE_ALL, ("/x",), ("/mine/Prism Photos",), ("/shared",)))
+
+    def test_the_window_shows_when_the_saved_licence_key_goes_too(self):
+        def build(scope, **kw):
+            plan = U.Plan(scope, app_dir="/apps/Prism", data_dirs=["/home/x/.prism"])
+            plan.forget_licence = scope == U.SCOPE_ALL
+            return plan
+        d = self.make(builder=build)
+        self.assertNotIn("credential store", d.list_label.text())
+        d.everything.setChecked(True)
+        self.assertIn("credential store", d.list_label.text())
 
     def test_remove_starts_the_plan_the_window_showed_and_then_quits(self):
         d = self.make()

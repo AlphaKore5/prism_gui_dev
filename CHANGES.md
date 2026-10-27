@@ -22,11 +22,14 @@ Tests: **1966 passing** (6 skipped, 8 Sep 2026 after Round 16 landed on main —
 - **Uninstall** (Settings > Privacy & data), two choices. "Uninstall Prism" removes the
   program only; settings, licence, History, logs and every file Prism made stay. "Uninstall
   Prism and everything it stored" also removes Prism's data folder (settings, licence,
-  History, logs, browser logins) and the folders Prism created, named "Prism ..."; a folder
-  you chose yourself and the shared workspace folder are left alone and listed as such. The
-  program folder is removed only if it holds nothing but Prism (a copy dropped straight onto
-  the Desktop is refused, not deleted). Not yet run on a real Windows machine: try it on a
-  spare one first.
+  History, logs, browser logins), the licence key saved in the system's credential store,
+  and the "Prism ..." folders Prism created on its own in their usual places. A folder you
+  chose in Settings is never removed, whatever it is called, and neither is the shared
+  workspace; both are listed as left alone. A development build removes only its own data
+  folder (the made-file folders and saved key belong to the normal Prism too). If Prism is
+  still running when the remover stops waiting, nothing is removed. The program folder is
+  removed only if it holds nothing but Prism (a copy dropped straight onto the Desktop is
+  refused, not deleted). Not yet run on a real Windows PC: try it on a spare one first.
 - **Dev builds only:** a card to bring settings, the Groq key, browser logins, History and
   tools across from your normal Prism, which is only read, never changed.
 - Not part of this app, listed so it is not lost: the licence server (deployed separately, not yet)

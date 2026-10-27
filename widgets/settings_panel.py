@@ -976,9 +976,9 @@ class SettingsPanel(QDialog):
                 i18n.t("A task is still running. Let it finish, or stop it, then uninstall."))
             return
         import uninstall
-        candidates, protected = uninstall.prism_folders(self.cfg, CB.config)
+        own, chosen, protected = uninstall.prism_folders(self.cfg, CB.config)
         from dialogs.uninstall_dialog import UninstallDialog
-        UninstallDialog(candidates, self, protect=protected).exec()
+        UninstallDialog(own, self, chosen=chosen, protect=protected).exec()
 
     # ── where Prism saves what it makes ───────────────────────────────────
     _OUTPUT_ROWS = (

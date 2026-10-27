@@ -77,6 +77,13 @@ def check_folder(path: str) -> tuple[bool, str]:
     return True, ""
 
 
+def engine_default(config_module) -> str:
+    """Where the engine puts generated files when nobody chose: its ARTIFACTS_DIR
+    as it was before apply() first replaced it (on Windows that may be a
+    OneDrive Desktop, which only the engine knows how to find)."""
+    return getattr(config_module, "PRISM_DEFAULT_ARTIFACTS_DIR", None) or getattr(config_module, "ARTIFACTS_DIR", "")
+
+
 def apply(cfg: dict | None, config_module=None) -> str:
     """Tell the engine where generated files go. Safe to call again whenever
     the setting changes. Returns the folder now in force for artifacts.
@@ -86,8 +93,11 @@ def apply(cfg: dict | None, config_module=None) -> str:
     if config_module is None:
         import core_bridge as CB
         config_module = CB.config
-    target = chosen(cfg, "artifacts", getattr(config_module, "ARTIFACTS_DIR", ""))
+    target = chosen(cfg, "artifacts", engine_default(config_module))
     if target and target != getattr(config_module, "ARTIFACTS_DIR", ""):
+        # Keep the engine's own default: Uninstall needs it to tell Prism's folder from the person's.
+        if not hasattr(config_module, "PRISM_DEFAULT_ARTIFACTS_DIR"):
+            config_module.PRISM_DEFAULT_ARTIFACTS_DIR = getattr(config_module, "ARTIFACTS_DIR", "")
         config_module.ARTIFACTS_DIR = target
         cache = getattr(config_module, "_root_cache", None)
         if isinstance(cache, dict):

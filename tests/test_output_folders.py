@@ -97,6 +97,19 @@ class Applying(Base):
         self.assertEqual(engine.ARTIFACTS_DIR, mine)
         self.assertEqual(engine._root_cache, {"for": None, "root": None})
 
+    def test_the_engines_own_folder_is_remembered_after_a_choice(self):
+        # Uninstall tells Prism's folder from the person's by it (on Windows it may be a OneDrive Desktop).
+        engine = self.engine("/old")
+        O.apply({"artifacts_dir": os.path.join(self.tmp, "mine")}, engine)
+        self.assertEqual(O.engine_default(engine), "/old")
+
+    def test_clearing_the_choice_goes_back_to_the_engines_own_folder(self):
+        engine = self.engine("/old")
+        with mock.patch.object(channel, "CHANNEL", "prod"):
+            O.apply({"artifacts_dir": os.path.join(self.tmp, "mine")}, engine)
+            O.apply({}, engine)
+        self.assertEqual(engine.ARTIFACTS_DIR, "/old")
+
     def test_nothing_changes_in_an_ordinary_build_with_no_choice(self):
         engine = self.engine("/old")
         with mock.patch.object(channel, "CHANNEL", "prod"):

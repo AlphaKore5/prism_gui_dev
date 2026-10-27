@@ -14,6 +14,23 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import channel  # noqa: E402
 import uninstall as U  # noqa: E402
+from licensing import secretstore  # noqa: E402
+
+#: Every forget_key() the code under test makes. An "everything" plan removes the
+#: licence key from the credential store; a test must never remove the real one.
+FORGOTTEN = []
+_keyring_guard = None
+
+
+def setUpModule():
+    global _keyring_guard
+    from unittest import mock
+    _keyring_guard = mock.patch.object(secretstore, "forget_key", lambda: FORGOTTEN.append(1))
+    _keyring_guard.start()
+
+
+def tearDownModule():
+    _keyring_guard.stop()
 
 
 class Rooms(unittest.TestCase):
@@ -104,16 +121,6 @@ class Planning(Rooms):
             U.build_plan(U.SCOPE_ALL, frozen=True, executable=self.exe, data_dir=self.chosen,
                          home=self.home, platform="darwin")
 
-    def test_a_dev_build_removes_its_whole_data_folder(self):
-        dev = os.path.join(self.home, channel.DEV_HOME_NAME)
-        os.makedirs(os.path.join(dev, ".prism"))
-        old = os.environ.get("PRISM_HOME_ISOLATED")
-        os.environ["PRISM_HOME_ISOLATED"] = dev
-        self.addCleanup(lambda: os.environ.pop("PRISM_HOME_ISOLATED", None) if old is None
-                        else os.environ.__setitem__("PRISM_HOME_ISOLATED", old))
-        plan = U.build_plan(U.SCOPE_ALL, frozen=True, executable=self.exe, home=self.home, platform="darwin")
-        self.assertEqual(plan.data_dirs, [dev])
-
     def test_a_mac_app_bundle_is_removed_as_a_whole(self):
         bundle = os.path.join(self.apps, "Prism.app")
         macos = os.path.join(bundle, "Contents", "MacOS")
@@ -133,22 +140,122 @@ class Planning(Rooms):
 
 
 class TheListOfPrismsFolders(unittest.TestCase):
-    """prism_folders() is the one list of places Prism writes made files."""
+    """prism_folders(): Prism's own folders, the person's choices, and the workspace."""
 
-    def test_settings_choices_and_usual_places_are_all_listed_and_the_workspace_protected(self):
-        import types
+    def folders(self, cfg, engine):
         from unittest import mock
+        with mock.patch.dict(os.environ, {"PRISM_REAL_HOME": "/x"}):
+            return U.prism_folders(cfg, engine)
+
+    def test_prisms_own_places_and_the_persons_choices_are_kept_apart(self):
+        import types
         engine = types.SimpleNamespace(ARTIFACTS_DIR="/x/Desktop/Prism Artifacts", FALLBACK_ARTIFACTS_DIR="/x/Prism Artifacts")
         cfg = {"gerber_out_dir": "/work/Prism Gerber 2026", "email": {"folder": "/mail/Prism Email"},
-               "inquiry": {"folder": "/inq/Prism Inquiries"}, "workspace_root": "/shared/Prism Team"}
-        with mock.patch.dict(os.environ, {"PRISM_REAL_HOME": "/x"}):
-            found, protected = U.prism_folders(cfg, engine)
-        for expected in ("/x/Desktop/Prism Artifacts", "/x/Prism Artifacts", "/work/Prism Gerber 2026",
-                         "/x/Desktop/Prism Gerber", "/x/Desktop/Prism Step", "/mail/Prism Email", "/x/Prism Email",
-                         "/inq/Prism Inquiries", "/x/Prism Inquiries", "/x/Documents/Prism Leads"):
-            self.assertIn(os.path.abspath(expected), found, expected)
-        self.assertEqual(len(found), len(set(found)), "no duplicates")
-        self.assertEqual(protected, [os.path.abspath("/shared/Prism Team")])
+               "inquiry": {"folder": "/inq/Prism Inquiries"}, "workspace_root": " /shared/Prism Team "}
+        own, chosen, protected = self.folders(cfg, engine)
+        for expected in ("/x/Desktop/Prism Artifacts", "/x/Prism Artifacts", "/x/Desktop/Prism Gerber",
+                         "/x/Desktop/Prism Step", "/x/Prism Email", "/x/Prism Inquiries", "/x/Documents/Prism Leads"):
+            self.assertIn(os.path.abspath(expected), own, expected)
+        self.assertEqual(sorted(chosen), sorted(os.path.abspath(p) for p in
+                                                ("/work/Prism Gerber 2026", "/mail/Prism Email", "/inq/Prism Inquiries")))
+        self.assertEqual(len(own), len(set(own)), "no duplicates")
+        self.assertEqual(protected, [os.path.abspath("/shared/Prism Team")], "spaces around the setting ignored")
+
+    def test_a_choice_that_is_the_usual_place_counts_as_prisms_own(self):
+        import types
+        engine = types.SimpleNamespace(ARTIFACTS_DIR="/x/Desktop/Prism Artifacts", FALLBACK_ARTIFACTS_DIR="")
+        own, chosen, _ = self.folders({"email": {"folder": "/x/Prism Email"}}, engine)
+        self.assertIn(os.path.abspath("/x/Prism Email"), own)
+        self.assertEqual(chosen, [])
+
+    def test_after_a_choice_the_engines_own_folder_is_still_prisms_and_the_choice_is_the_persons(self):
+        import types
+        engine = types.SimpleNamespace(ARTIFACTS_DIR="/mine/Prism Photos", FALLBACK_ARTIFACTS_DIR="",
+                                       PRISM_DEFAULT_ARTIFACTS_DIR="/x/OneDrive/Desktop/Prism Artifacts")
+        own, chosen, _ = self.folders({"artifacts_dir": "/mine/Prism Photos"}, engine)
+        self.assertIn(os.path.abspath("/x/OneDrive/Desktop/Prism Artifacts"), own)
+        self.assertNotIn(os.path.abspath("/mine/Prism Photos"), own)
+        self.assertIn(os.path.abspath("/mine/Prism Photos"), chosen)
+
+
+class WhatEverythingNeverTakes(Rooms):
+    """Found in review (2026-10-28). "Everything" means what Prism stored, and only that."""
+
+    def test_a_folder_the_person_chose_is_never_removed_even_when_named_prism(self):
+        photos = os.path.join(self.home, "Prism Photos")
+        os.makedirs(photos)
+        open(os.path.join(photos, "wedding.jpg"), "w").write("x")
+        plan = self.plan(U.SCOPE_ALL, output_candidates=[self.artifacts], chosen=[photos])
+        self.assertEqual(plan.output_dirs, [self.artifacts])
+        self.assertIn("you chose this folder", dict(plan.skipped)[photos])
+
+    def test_the_workspace_is_recognised_through_a_link(self):
+        shared = os.path.join(self.home, "Prism Team")
+        os.makedirs(shared)
+        link = os.path.join(self.home, "Prism Team link")
+        os.symlink(shared, link, target_is_directory=True)
+        plan = self.plan(U.SCOPE_ALL, output_candidates=[link], protect=[shared])
+        self.assertEqual(plan.output_dirs, [])
+        self.assertIn("shared workspace", dict(plan.skipped)[link])
+
+    def test_a_workspace_inside_the_data_folder_stops_everything(self):
+        inside = os.path.join(self.data, "workspace")
+        os.makedirs(inside)
+        with self.assertRaises(U.Refused) as ctx:
+            self.plan(U.SCOPE_ALL, protect=[inside])
+        self.assertIn("shared workspace", str(ctx.exception))
+
+    def test_a_prism_folder_holding_the_data_folder_is_reported_not_silently_dropped(self):
+        holder = os.path.join(self.tmp, "home", "Prism Everything")
+        data = os.path.join(holder, ".prism")
+        os.makedirs(data)
+        plan = U.build_plan(U.SCOPE_ALL, frozen=True, executable=self.exe, data_dir=data, home=self.home,
+                            platform="darwin", output_candidates=[holder])
+        self.assertIn("data folder", dict(plan.skipped)[holder])
+
+    def test_the_saved_licence_key_is_removed_only_by_everything_and_only_once_the_helper_runs(self):
+        everything = self.plan(U.SCOPE_ALL)
+        self.assertTrue(everything.forget_licence)
+        self.assertIn("credential store", " ".join(what for what, _ in U.describe(everything)))
+        self.assertFalse(self.plan(U.SCOPE_APP).forget_licence)
+        calls = []
+
+        def broken_runner(*a, **k):
+            raise OSError("cannot start")
+        with self.assertRaises(OSError):
+            U.start(everything, pid=1, script_dir=self.tmp, runner=broken_runner, forget=lambda: calls.append(1))
+        self.assertEqual(calls, [], "if the helper never started, Prism stays and keeps its key")
+        U.start(everything, pid=1, script_dir=self.tmp, runner=lambda *a, **k: None, forget=lambda: calls.append(1))
+        self.assertEqual(calls, [1])
+
+
+class ADevelopmentBuild(Rooms):
+    """A dev build's "~" is its own data folder (channel.py). Found in review: that made
+    "everything" refuse ("that is the user's home folder"), and once fixed it would have
+    removed the normal Prism's folders and saved key, which this build shares."""
+
+    def setUp(self):
+        super().setUp()
+        self.dev = os.path.join(self.home, channel.DEV_HOME_NAME)
+        os.makedirs(os.path.join(self.dev, ".prism"))
+        channel._install_hook(self.dev)
+        self.addCleanup(channel.remove_hook)
+        from unittest import mock
+        patcher = mock.patch.dict(os.environ, {"PRISM_HOME_ISOLATED": self.dev})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_everything_removes_the_dev_data_folder_with_the_hook_installed(self):
+        self.assertEqual(os.path.expanduser("~"), self.dev, "the real dev-build hook is in place")
+        plan = U.build_plan(U.SCOPE_ALL, frozen=True, executable=self.exe, home=self.home, platform="darwin")
+        self.assertEqual(plan.data_dirs, [self.dev])
+
+    def test_it_leaves_the_shared_folders_and_the_saved_key_to_the_normal_prism(self):
+        plan = U.build_plan(U.SCOPE_ALL, frozen=True, executable=self.exe, home=self.home, platform="darwin",
+                            output_candidates=[self.artifacts])
+        self.assertEqual(plan.output_dirs, [])
+        self.assertIn("development build", dict(plan.skipped)[self.artifacts])
+        self.assertFalse(plan.forget_licence)
 
 
 class TheProgramFolderMustBePrismsAlone(Rooms):
@@ -225,6 +332,10 @@ class TheScripts(Rooms):
         self.assertIn("LSS 5", text, "removal is retried")
         self.assertIn('del "%~f0"', text)
         self.assertNotIn("\n", text.replace("\r\n", ""), "batch files need CRLF")
+        lines = text.split("\r\n")
+        give_up = lines.index("if not errorlevel 1 goto stillrunning")
+        self.assertLess(give_up, min(i for i, l in enumerate(lines) if "rmdir" in l),
+                        "the still-running check comes before any removal")
 
 
 @unittest.skipIf(sys.platform == "win32", "runs the POSIX helper")
@@ -260,6 +371,19 @@ class ReallyRunningTheHelper(Rooms):
         self.run_helper(self.plan(U.SCOPE_APP))
         self.assertEqual(self.alive(self.install, old, staging, os.path.join(self.apps, "OtherApp"), self.data),
                          [False, False, False, True, True])
+
+    def test_nothing_is_removed_while_prism_is_still_running(self):
+        folder = os.path.join(self.tmp, "scripts")
+        os.makedirs(folder)
+        started = []
+        prism = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        self.addCleanup(prism.kill)
+        U.start(self.plan(U.SCOPE_ALL, output_candidates=[self.artifacts]), pid=prism.pid, script_dir=folder,
+                wait=1, runner=lambda argv, **kw: started.append(argv), forget=lambda: None)
+        subprocess.run(started[0], timeout=30)
+        self.assertEqual(self.alive(self.install, self.data, self.artifacts), [True, True, True])
+        with open(os.path.join(folder, "prism-uninstall.log")) as f:
+            self.assertIn("still running", f.read())
 
     def test_start_refuses_a_plan_that_names_a_dangerous_folder(self):
         for bad in (U.Plan(U.SCOPE_APP, app_dir=os.path.dirname(os.path.abspath(os.path.expanduser('~')))),
@@ -300,9 +424,11 @@ class ReallyRunningTheWindowsHelper(unittest.TestCase):
         os.makedirs(scripts)
         prism = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(4)"])
         self.addCleanup(prism.kill)
-        script = U.start(plan, pid=prism.pid, script_dir=scripts)
+        script = U.start(plan, pid=prism.pid, script_dir=scripts, forget=lambda: None)
         log = os.path.join(scripts, "prism-uninstall.log")
-        self.assertTrue(os.path.isdir(self.install), "nothing may go while Prism is still running")
+        time.sleep(2)                                   # the helper is up and polling by now
+        self.assertTrue(prism.poll() is None and os.path.isdir(self.install),
+                        "nothing may go while Prism is still running")
         prism.wait(timeout=30)
         for _ in range(240):
             if os.path.exists(log) and not os.path.exists(script):
@@ -316,6 +442,23 @@ class ReallyRunningTheWindowsHelper(unittest.TestCase):
         self.assertEqual([os.path.exists(p) for p in (self.install, self.data, self.artifacts,
                                                        self.chosen, self.neighbour)],
                          [False, True, True, True, True])
+
+    def test_nothing_is_removed_if_prism_is_still_running_when_the_wait_ends(self):
+        plan = U.build_plan(U.SCOPE_ALL, frozen=True, executable=self.exe, data_dir=self.data,
+                            home=self.home, platform="win32", output_candidates=[self.artifacts])
+        scripts = os.path.join(self.tmp, "scripts")
+        os.makedirs(scripts)
+        prism = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+        self.addCleanup(prism.kill)
+        script = U.start(plan, pid=prism.pid, script_dir=scripts, wait=2, forget=lambda: None)
+        log = os.path.join(scripts, "prism-uninstall.log")
+        for _ in range(120):
+            if os.path.exists(log) and not os.path.exists(script):
+                break
+            time.sleep(0.5)
+        with open(log, encoding="utf-8", errors="replace") as f:
+            self.assertIn("still running", f.read())
+        self.assertEqual([os.path.exists(p) for p in (self.install, self.data, self.artifacts)], [True, True, True])
 
     def test_everything_removes_prisms_things_and_spares_the_rest(self):
         self.run_for_real(U.SCOPE_ALL, output_candidates=[self.artifacts, self.chosen])

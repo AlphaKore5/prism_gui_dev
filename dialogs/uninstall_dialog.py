@@ -27,7 +27,8 @@ from widgets import controls as C
 
 class UninstallDialog(PrismDialog):
     def __init__(self, output_candidates: list[str] | None = None, parent=None,
-                 *, protect: list[str] | None = None, plan_builder=None, starter=None, quitter=None):
+                 *, chosen: list[str] | None = None, protect: list[str] | None = None,
+                 plan_builder=None, starter=None, quitter=None):
         pad = C.IconPad("alert", theme.ERR, 38, theme.R_CONTROL, 19)
         super().__init__(i18n.t("Uninstall Prism"),
                          i18n.t("Choose what to remove from this computer."),
@@ -38,6 +39,7 @@ class UninstallDialog(PrismDialog):
         self._start = starter or uninstall.start
         self._quit = quitter or (lambda: QApplication.instance().quit())
         self._outputs = list(output_candidates or [])
+        self._chosen = list(chosen or [])
         self._protect = list(protect or [])
         self.plan = None
 
@@ -53,9 +55,9 @@ class UninstallDialog(PrismDialog):
         body.addWidget(self.everything)
         body.addWidget(C.label(
             i18n.t("Also removes Prism's settings, licence, History and logs, and the folders Prism created "
-                   "(Prism Artifacts, Prism Step, Prism Gerber, Prism Email, Prism Inquiries, Prism Leads) "
-                   "with the files in them. A folder you chose yourself with another name, and your team's "
-                   "shared workspace, are never touched. This cannot be undone."), level="META", wrap=True))
+                   "on its own (Prism Artifacts, Prism Step, Prism Gerber, Prism Email, Prism Inquiries, "
+                   "Prism Leads) with the files in them. A folder you chose yourself in Settings, and your "
+                   "team's shared workspace, are never touched. This cannot be undone."), level="META", wrap=True))
         self.group = QButtonGroup(self)
         self.group.addButton(self.app_only)
         self.group.addButton(self.everything)
@@ -93,7 +95,7 @@ class UninstallDialog(PrismDialog):
     def _refresh(self):
         try:
             self.plan = self._build_plan(self._scope(), output_candidates=self._outputs,
-                                         protect=self._protect)
+                                         chosen=self._chosen, protect=self._protect)
         except uninstall.Refused as why:
             self.plan = None
             self.list_label.setText("")

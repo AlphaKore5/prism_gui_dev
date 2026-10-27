@@ -1446,7 +1446,7 @@
   "Also ask ChatGPT for a styled copy (optional)": [
    "addons/step/dialog.py"
   ],
-  "Also removes Prism's settings, licence, History and logs, and the folders Prism created (Prism Artifacts, Prism Step, Prism Gerber, Prism Email, Prism Inquiries, Prism Leads) with the files in them. A folder you chose yourself with another name, and your team's shared workspace, are never touched. This cannot be undone.": [
+  "Also removes Prism's settings, licence, History and logs, and the folders Prism created on its own (Prism Artifacts, Prism Step, Prism Gerber, Prism Email, Prism Inquiries, Prism Leads) with the files in them. A folder you chose yourself in Settings, and your team's shared workspace, are never touched. This cannot be undone.": [
    "dialogs/uninstall_dialog.py"
   ],
   "Also set up: {who}. You choose which one a message goes out from when you send it.": [

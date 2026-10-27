@@ -151,6 +151,23 @@ something you did not run.
 
 ## Issue log (newest first)
 
+### ISS-022 — Review found Uninstall could delete a person's own folder (2026-10-28) — FIXED before tagging 1.6.13
+- **Found by:** the two-axis code review (standards + spec) run on today's diffs, before the dev tag.
+- **What was wrong, all confirmed in the code:** "everything" removed any folder named "Prism..." that the person had
+  chosen in Settings (their own "Prism Photos" would have gone, with their files); the shared-workspace check compared
+  raw strings (case and links on Windows/macOS defeated it); a dev build always refused "everything" (its "~" is its
+  data folder) and, once that was fixed, would have removed the normal Prism's folders; the saved licence key in the
+  credential store was never removed although the window said "licence"; after 2 minutes the helper deleted even if
+  Prism was still running.
+- **Fix:** only Prism's own usual folders are candidates (the engine's original default is remembered, so a OneDrive
+  Desktop still counts); every folder the person chose is listed as left alone; paths compared after realpath and
+  normcase; a workspace inside the data folder stops "everything"; dev builds remove only their own data folder and keep
+  the shared key; the key is removed only once the helper has started; still running means nothing is removed (both
+  scripts). Six mutations, one per rule, each fail the tests. Tests never touch the real credential store
+  (module-wide guard in tests/test_uninstall.py).
+- **Lesson:** I wrote the first version and its tests from the same picture of the problem; the tests proved my picture,
+  not the owner's rule. A spec review against the owner's own words found what my tests could not.
+
 ### ISS-021 — Licence-server tests could reach the live database; the server had no CI (2026-10-28) — FIXED locally, not pushed
 - **Found by:** the system review with the installed skills (report: `artifacts/system-review-2026-10-28/report.html`).
 - **Live database:** `license_server/.env` holds the live Supabase URL. The tests only *defaulted* `DATABASE_URL`, so a
@@ -231,6 +248,8 @@ something you did not run.
   the install folder (a zip folder, or `C:\Program Files\...` which needs admin and will simply fail), retries, removes
   itself, and leaves `%TEMP%\prism-uninstall.log`. Check both choices: "Uninstall Prism" (program only) and "Uninstall Prism and everything it stored" (program, data
   folder with logs, and the Prism-named folders Prism created).
+- **Rules since ISS-022:** a folder the person chose is never removed; dev builds remove only their own data folder;
+  nothing is removed while Prism still runs.
 - **Safety rules under test:** refuses from source; only names the running program's folder, Prism's data folder
   (`.prism` / `.prism-dev-home`) and folders named "Prism ..."; never a drive root, a home folder or its parent;
   never a folder the user chose that is not Prism-named, and never the shared workspace folder (owner's rule
