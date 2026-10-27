@@ -29,3 +29,36 @@ tests/test_boq_pricing.py::TheDialogShowsTheCardOnceMeasured.test_hidden_before_
 # renamed to say what they now check: the data folder is separate and the real home is remembered.
 tests/test_channel.py::IsolateHomeTests.test_dev_build_gets_its_own_home_by_default
 tests/test_channel.py::IsolateHomeTests.test_isolation_is_idempotent
+
+# Hitarth's c0c1f09 (2026-10-27) dropped Groq-inhouse from BOQ, confirmed with the owner (addons/boq/agents.py:
+# "Groq-inhouse is ALSO dropped here, confirmed with the owner directly"). Its worker and tests went with it.
+addons/boq/workers.py::BoqGroqWorker
+addons/boq/workers.py::BoqGroqWorker.__init__
+addons/boq/workers.py::BoqGroqWorker.run
+tests/test_boq_dialog.py::AFollowUpOrVerifyActuallyProducesAndSurfacesAFile.test_a_format_request_is_never_sent_to_groq
+tests/test_boq_dialog.py::GroqInHouseIsADirectCallNotABrowserAgent
+tests/test_boq_dialog.py::GroqInHouseIsADirectCallNotABrowserAgent._Capture
+tests/test_boq_dialog.py::GroqInHouseIsADirectCallNotABrowserAgent._Capture.__init__
+tests/test_boq_dialog.py::GroqInHouseIsADirectCallNotABrowserAgent._Capture.connect
+tests/test_boq_dialog.py::GroqInHouseIsADirectCallNotABrowserAgent._Capture.start
+tests/test_boq_dialog.py::GroqInHouseIsADirectCallNotABrowserAgent.setUp
+tests/test_boq_dialog.py::GroqInHouseIsADirectCallNotABrowserAgent.test_a_file_free_followup_reaches_boqgroqworker_with_its_own_stage
+tests/test_boq_dialog.py::GroqInHouseIsADirectCallNotABrowserAgent.test_a_priced_reference_blocks_groq_at_write_time
+tests/test_boq_dialog.py::GroqInHouseIsADirectCallNotABrowserAgent.test_a_template_blocks_groq_before_anything_starts
+tests/test_boq_dialog.py::GroqInHouseIsADirectCallNotABrowserAgent.test_a_typed_followup_with_an_attached_file_is_refused_for_groq
+tests/test_boq_dialog.py::GroqInHouseIsADirectCallNotABrowserAgent.test_groq_needs_its_own_key_even_if_some_other_agent_is_configured
+tests/test_boq_dialog.py::GroqInHouseIsADirectCallNotABrowserAgent.test_recheck_refuses_groq_before_the_consent_popup_even_shows
+tests/test_boq_dialog.py::GroqInHouseIsADirectCallNotABrowserAgent.test_the_initial_write_goes_through_boqgroqworker_not_automationworker
+
+# Same commit, item 26: HVAC is now chosen with the industry picker, not by the word "hvac" in the ask box.
+# The picker's tests are tests/test_boq_industries.py and test_boq_dialog.py (industry_combo).
+tests/test_boq_dialog.py::TheHvacFlagComesOnlyFromTheAskBox
+tests/test_boq_dialog.py::TheHvacFlagComesOnlyFromTheAskBox._Capture
+tests/test_boq_dialog.py::TheHvacFlagComesOnlyFromTheAskBox._Capture.__init__
+tests/test_boq_dialog.py::TheHvacFlagComesOnlyFromTheAskBox._Capture.connect
+tests/test_boq_dialog.py::TheHvacFlagComesOnlyFromTheAskBox._Capture.start
+tests/test_boq_dialog.py::TheHvacFlagComesOnlyFromTheAskBox._measure_with
+tests/test_boq_dialog.py::TheHvacFlagComesOnlyFromTheAskBox.test_a_different_trade_leaves_it_off
+tests/test_boq_dialog.py::TheHvacFlagComesOnlyFromTheAskBox.test_hvac_is_not_case_sensitive
+tests/test_boq_dialog.py::TheHvacFlagComesOnlyFromTheAskBox.test_no_request_text_yet_leaves_it_off
+tests/test_boq_dialog.py::TheHvacFlagComesOnlyFromTheAskBox.test_the_word_hvac_turns_it_on
