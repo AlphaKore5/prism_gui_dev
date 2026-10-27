@@ -49,6 +49,17 @@ playwright
 ezdxf     # BOQ reads DXF geometry directly (pulls in numpy)
 pillow    # Prism Reel draws every frame with PIL
 
+# BOQ's per-industry PDF-takeoff (addons/boq/industries.py, item 26) --
+# today only HVAC's (hvac_takeoff/hvac_takeoff.py). pdfplumber reads the
+# PDF's own vector geometry and text layer; pypdfium2 is pdfplumber's own
+# rendering backend for the OCR pass (rapidocr-onnxruntime and pillow are
+# both already required above, for core/ocr.py and Prism Reel). Same
+# "not optional for a build" reasoning as everything else in this
+# section: a build missing either ships an Industry dropdown with an HVAC
+# PDF-takeoff button that cannot open on any customer machine.
+pdfplumber>=0.11
+pypdfium2>=4
+
 # STEP reads the 3D model with this (it carries OCP, the OpenCascade
 # bindings — the actual geometry engine, not a thin wrapper). Unlike
 # shapely below, there is no silent degrade: core_bridge.step_available()

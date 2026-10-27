@@ -51,6 +51,7 @@ from PySide6.QtWidgets import (
 )
 
 import dashboard_data as DATA
+import festivals
 import i18n
 import identity
 import paths
@@ -563,6 +564,13 @@ class HomePanel(QWidget):
         self._active: list[dict] = []
         self._rows: list[dict] = []
         self._home_attachments: list[str] = []
+        # (festival name, "post"/"reel") already answered (Yes or No) this
+        # session -- refresh() rebuilds the whole screen from scratch, so
+        # without remembering this here a dismissed tip would just come
+        # straight back on the next refresh (every stage_started repaint
+        # included, by way of set_active -> nothing, but also History/Home
+        # navigation, which does call refresh()).
+        self._festival_dismissed: set[tuple[str, str]] = set()
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -738,6 +746,9 @@ class HomePanel(QWidget):
         greet_row.addWidget(motto, alignment=Qt.AlignRight | Qt.AlignVCenter)
         left_col.addLayout(greet_row)
 
+        tips = self._festival_tips()
+        if tips:
+            left_col.addLayout(tips)
         left_col.addWidget(self._prompt_card())
         left_col.addLayout(self._try_chips_row())
 
@@ -749,6 +760,79 @@ class HomePanel(QWidget):
         hero.addWidget(tour_card, stretch=38)
 
         return hero
+
+    # ── festival tip (27 Oct 2026) ─────────────────────────────────────────
+    def _festival_tips(self, today=None) -> QVBoxLayout | None:
+        """Up to two yellow tip rows -- "make a post" and "make a reel" --
+        for the single NEAREST upcoming festival (festivals.upcoming()
+        can return several at once in a busy week; showing all of them
+        would turn this into a second feed above the composer, so only
+        the closest one gets a tip, same as the owner's own "a small tip"
+        framing implies). Each kind is independently dismissable and
+        independently answerable -- saying yes to the post must not also
+        answer the reel question, since they are two different asks.
+
+        `today` is a plain pass-through to festivals.upcoming() -- tests
+        use it directly rather than mocking datetime.date.today(), which
+        CPython refuses to patch at all ("cannot set 'today' attribute of
+        immutable type 'datetime.date'")."""
+        upcoming = festivals.upcoming(3, today=today)
+        if not upcoming:
+            return None
+        f = upcoming[0]
+        rows = [self._festival_tip_row(f, kind) for kind in ("post", "reel")
+                if (f["name"], kind) not in self._festival_dismissed]
+        if not rows:
+            return None
+        col = QVBoxLayout()
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(theme.SPACE_2)
+        for row in rows:
+            col.addWidget(row)
+        return col
+
+    def _festival_tip_row(self, f: dict, kind: str) -> QFrame:
+        bar = QFrame()
+        bar.setObjectName("festivalTip")
+        bar.setStyleSheet(
+            f"QFrame#festivalTip {{ background: {theme.WARN_BG}; "
+            f"border-radius: {theme.R_CONTROL}px; }}")
+        row = QHBoxLayout(bar)
+        row.setContentsMargins(theme.SPACE_3, theme.SPACE_2,
+                               theme.SPACE_3, theme.SPACE_2)
+        row.setSpacing(theme.SPACE_2)
+
+        prompt = festivals.post_prompt(f) if kind == "post" else festivals.reel_prompt(f)
+        question = (i18n.t("{name} is coming up {when} — want to make a "
+                           "{kind} about it?").format(
+            name=f["name"], when=festivals.when_phrase(f),
+            kind=i18n.t("post") if kind == "post" else i18n.t("reel")))
+        label = QLabel(question)
+        label.setWordWrap(True)
+        label.setStyleSheet(f"color: {theme.WARN_INK}; font-weight: 600;")
+        row.addWidget(label, stretch=1)
+
+        yes_btn = C.button(i18n.t("Yes"), "secondary", small=True,
+                           on_click=lambda *_, f=f, k=kind, p=prompt:
+                               self._on_festival_answer(f, k, True, p))
+        row.addWidget(yes_btn)
+        no_btn = C.button(i18n.t("No"), "tertiary", small=True,
+                          on_click=lambda *_, f=f, k=kind:
+                              self._on_festival_answer(f, k, False, ""))
+        row.addWidget(no_btn)
+        return bar
+
+    def _on_festival_answer(self, f: dict, kind: str, yes: bool, prompt: str):
+        self._festival_dismissed.add((f["name"], kind))
+        # refresh() rebuilds the whole screen wholesale -- including a
+        # brand new self._prompt_input -- so the prefill has to happen
+        # AFTER it, on the box that actually ends up on screen, not the
+        # one about to be torn down.
+        self.refresh()
+        if yes:
+            self._prompt_input.setText(prompt)
+            self._prompt_input.setFocus()
+            self._prompt_input.selectAll()
 
     def _prompt_card(self) -> QWidget:
         card = QFrame()

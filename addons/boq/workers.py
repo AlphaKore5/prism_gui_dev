@@ -1,46 +1,43 @@
-"""BOQ's own worker for the "Groq (in-house)" writer choice.
+"""BOQ's own background workers.
 
-Every other writer in addons/boq/agents.py:WRITER is a browser-driven agent,
-run through workers.AutomationWorker's custom_stages. Groq is the one
-exception -- a direct API call (core.router.groq_chat), the same call STEP's
-Ask already makes (addons/step/workers.py:StepAskWorker), using the one Groq
-key the whole app shares (cfg["api_key"]). It cannot go through
-AutomationWorker, which only knows how to drive a browser -- and it has no
-file upload at all, so it is only ever started once the caller has checked
-there is no template, notes file or attachment this particular prompt text
-doesn't already cover (addons/boq/dialog.py's two "Groq ... can't read"
-guards, for the initial write and for a follow-up/recheck respectively).
-
-`stage` names the step this answer belongs to ("format" for the first
-write-up, "recheck" or "followup" afterwards) -- whatever
-addons/boq/dialog.py would have passed as the AutomationWorker custom_stages
-key for the same call. done emits in the SAME (responses, links) shape
-AutomationWorker.done does -- links always {}, since a direct API call has
-no browser conversation to open -- so the dialog's _on_written/
-_on_followed_up need no branching to consume either worker's result.
+A PDF-takeoff extraction (addons/boq/industries.py's `extract`) reads and
+OCRs a real tender PDF -- seconds on a small sheet, real time on a large,
+multi-page one -- so it runs off the GUI thread the same way every other
+blocking call in this app does (see workers.py's own docstring: "every
+worker's job is ONLY to call into [its target] and turn the result into a
+Qt signal; no decision-making lives here").
 """
 from __future__ import annotations
 
 from PySide6.QtCore import Signal
 
-import core_bridge as CB
+from addons.boq import industries
 from workers import _Worker
 
 
-class BoqGroqWorker(_Worker):
-    done = Signal(dict, dict)
+class HvacTakeoffWorker(_Worker):
+    """Runs one industry's PDF-takeoff extraction (today, only HVAC has
+    one) off the GUI thread. `industry` is threaded through rather than
+    hardcoded so a second industry's own extractor plugs into this same
+    worker later, not a copy of it."""
+
+    done = Signal(dict)
     failed = Signal(str)
 
-    def __init__(self, cfg: dict, prompt: str, stage: str = "format"):
+    def __init__(self, industry: str, pdf_path: str, layer_map: dict,
+                 pt_per_ft: float, use_ocr: bool = True):
         super().__init__()
-        self.cfg, self.prompt, self.stage = cfg, prompt, stage
+        self.industry = industry
+        self.pdf_path = pdf_path
+        self.layer_map = layer_map
+        self.pt_per_ft = pt_per_ft
+        self.use_ocr = use_ocr
 
     def run(self):
         try:
-            text = CB.router.groq_chat(
-                self.cfg.get("api_key", ""),
-                self.cfg.get("model", "llama-3.3-70b-versatile"),
-                self.prompt, temperature=0.4, timeout=90).strip()
-            self.done.emit({self.stage: [text]}, {})
-        except Exception as e:                            # noqa: BLE001
+            result = industries.extract(
+                self.industry, self.pdf_path, self.layer_map, self.pt_per_ft,
+                use_ocr=self.use_ocr)
+            self.done.emit(result)
+        except Exception as e:                           # noqa: BLE001
             self.failed.emit(str(e))

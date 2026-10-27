@@ -121,8 +121,11 @@ class TheCoordinatesSpeak(unittest.TestCase):
         t = MeasuredTable()
         t.set_quantities(self.q)
         self.assertIn("meters (inferred from the coordinates)", t.header.text())
-        self.assertIn("Look-alike layers BOUNDARY WALL and Boundrary Wall", t.warn.text())
-        self.assertIn("2 of 3 PUMP HOUSE blocks are", t.warn.text())
+        # 23 Oct 2026: warnings live in the collapsed bulleted dropdown now,
+        # not one ever-growing label -- see warning_lines()/warn_list.
+        lines = " ".join(t.warning_lines())
+        self.assertIn("Look-alike layers BOUNDARY WALL and Boundrary Wall", lines)
+        self.assertIn("2 of 3 PUMP HOUSE blocks are", lines)
 
     def test_a_drawing_with_a_recorded_unit_is_not_second_guessed(self):
         path = os.path.join(tempfile.mkdtemp(prefix="prism-site-"), "mm.dxf")

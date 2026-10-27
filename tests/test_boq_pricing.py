@@ -106,6 +106,45 @@ class TheGridFollowsTheMeasurement(unittest.TestCase):
         self.assertIn("price columns", t.warn.text())
         self.assertEqual(len(t.boq().unpriced()), 5)
 
+    def test_the_unpriced_tint_actually_renders_under_the_real_stylesheet(self):
+        """Item 16 (2026-10-23) fixed this exact invisible-colour bug for
+        addons/boq/measured.py's table and flagged pricing.py as very
+        likely having the identical one, unverified. Verified now: real
+        style.qss's `QTableWidget::item { color: #09090b; ... }` makes
+        Qt's style paint over an item's own Qt.BackgroundRole brush
+        entirely, not only its text colour -- so the unpriced-row warning
+        tint (`cell.setBackground(tint)`, used nowhere else in this file)
+        would render as plain white, not warm yellow, in the real running
+        app. Loads the REAL style.qss and samples an actual rendered
+        pixel, the same way measured.py's own test does, so a regression
+        here fails the same way the owner's original screenshot did."""
+        from PySide6.QtWidgets import QApplication
+        app = QApplication.instance()
+        qss_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "style.qss")
+        with open(qss_path, encoding="utf-8") as f:
+            qss = f.read()
+        previous = app.styleSheet()
+        app.setStyleSheet(qss.replace("%ASSETS%", "."))
+        try:
+            t = pricing.PricingTable({})
+            t.set_quantities(Q)       # no rate list loaded -- every row unpriced
+            t.resize(900, 300)
+            t.show()
+            app.processEvents()
+            rect = t.table.visualItemRect(t.table.item(0, pricing.COL_RATE))
+            local_pt = t.mapFromGlobal(
+                t.table.viewport().mapToGlobal(rect.center()))
+            pixel = t.grab().toImage().pixelColor(local_pt)
+            # theme.WARN_BG (rgba(202,138,4,0.14)) composited on white is a
+            # warm near-white, clearly red/green-forward and short of 255
+            # on blue -- plain white (the bug) is 255 on every channel.
+            self.assertLess(pixel.blue(), 240, pixel.name())
+            self.assertGreater(pixel.red(), pixel.blue(), pixel.name())
+        finally:
+            app.setStyleSheet(previous)
+
     def test_a_rate_typed_into_the_grid_makes_the_amount_and_the_totals(self):
         t = pricing.PricingTable({})
         t.set_quantities(Q)

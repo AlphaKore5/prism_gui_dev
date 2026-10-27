@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
 import core_bridge as CB
 import i18n
 import theme
+from addons.boq.measured import _TintDelegate
 from widgets import controls as C
 
 # Column order in the grid. Rate, Unit, Description and Section are editable;
@@ -117,6 +118,15 @@ class PricingTable(QWidget):
         self.table.setSelectionBehavior(QAbstractItemView.SelectItems)
         self.table.setAlternatingRowColors(True)
         self.table.setSortingEnabled(False)
+        # Same fix as addons/boq/measured.py's own table (item 16): the
+        # real style.qss forces `QTableWidget::item { color: #09090b; }`,
+        # which Qt's style sheet engine paints over every item regardless
+        # of its own Qt.BackgroundRole/ForegroundRole -- so the unpriced-row
+        # warning tint set below (`cell.setBackground(tint)`) would be
+        # silently invisible in the real running app, exactly like item
+        # 16's Trust dots were, unless something bypasses style.qss's own
+        # paint path. _TintDelegate does.
+        self.table.setItemDelegate(_TintDelegate(self.table))
         head = self.table.horizontalHeader()
         head.setSectionResizeMode(COL_DESC, QHeaderView.Stretch)
         for column in (COL_SECTION, COL_ITEM, COL_UNIT, COL_QTY, COL_RATE,

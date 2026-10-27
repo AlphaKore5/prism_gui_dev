@@ -14,6 +14,7 @@ and nothing is sent anywhere.
 """
 from __future__ import annotations
 
+import math
 import os
 import sys
 import tempfile
@@ -71,7 +72,15 @@ class ADoubleLineDuctIsOneRunNotTwo(unittest.TestCase):
         reconstructed here so the fix this bug needs is pinned for good,
         without keeping a client's real file in the test suite. Prism's
         own buggy reading was 78,819.8 mm; an AI reading the real drawing
-        directly measured 38.80 m."""
+        directly measured 38.80 m.
+
+        23 Oct 2026: rule 2 (HVAC_DRAWING_RULES.md) stopped counting the
+        reducer's two converging sides in full (1,019.8 mm) and counts the
+        transition once (509.9 mm) instead, moving this test's own expected
+        figure from 38,320 mm down to 37,810 mm -- closer to the real
+        38.80 m, not further from it. Changed here, in the same commit as
+        the fix, with the reason stated plainly, per the project's own
+        rule about changing a test alongside the behaviour it pins."""
         path = _tmp()
 
         def build(msp):
@@ -105,10 +114,12 @@ class ADoubleLineDuctIsOneRunNotTwo(unittest.TestCase):
         q = boq.measure(path, hvac=True)
         length = q["lengths_by_layer"]["M-DUCT-SUPPLY"]
         # Within a metre of the AI's own independent reading of the real
-        # drawing (38.80 m) -- nowhere near the old, buggy 78.82 m, and
-        # nowhere near half of it either (the reducer's two sides are
-        # correctly left unpaired, each counted at its own full length).
-        self.assertAlmostEqual(length, 38320, delta=100)
+        # drawing (38.80 m) -- nowhere near the old, buggy 78.82 m. The
+        # reducer is correctly left unpaired by rule 1 (its sides converge,
+        # not parallel) and then correctly counted ONCE by rule 2, not
+        # twice -- 37,809.9 mm, not 38,320 mm (rule 2 landed) or 78,819.8
+        # (the original bug).
+        self.assertAlmostEqual(length, 37810, delta=100)
         self.assertLess(length, 50000)
 
 
@@ -210,6 +221,309 @@ class TheRuleOnlyAppliesWhenHvacIsAskedFor(unittest.TestCase):
     # on, nothing else does) is tested in tests/test_boq_dialog.py::
     # TheHvacFlagComesOnlyFromTheAskBox -- that file already has the
     # QApplication + BoqDialog setup this needs.
+
+
+@unittest.skipUnless(ezdxf, "ezdxf not installed")
+class ATaperingTransitionCountsOnceNotTwice(unittest.TestCase):
+    """HVAC_DRAWING_RULES.md rule 2, 23 Oct 2026: a reducer is drawn as two
+    short lines that CONVERGE (not parallel), so rule 1's own pairing
+    correctly leaves them unmatched -- but the original code then summed
+    both diagonals in full, double-counting the transition by about its
+    own length. Found re-verifying rule 1's own fix against an independent
+    reading of the same real file: Prism's rule-1 total (38,319.8 mm) was
+    still off by the reducer's own length from the true 38.80 m."""
+
+    def test_two_converging_lines_between_two_pairs_count_once(self):
+        path = _tmp()
+
+        def build(msp):
+            L = "M-DUCT"
+            # an 800-wide run, a 500mm reducer, then a 600-wide run --
+            # the minimal shape rule 2 exists for.
+            msp.add_line((0, 400), (5000, 400), dxfattribs={"layer": L})
+            msp.add_line((0, 0), (5000, 0), dxfattribs={"layer": L})
+            msp.add_line((5500, 300), (9000, 300), dxfattribs={"layer": L})
+            msp.add_line((5500, 100), (9000, 100), dxfattribs={"layer": L})
+            msp.add_line((5000, 400), (5500, 300), dxfattribs={"layer": L})
+            msp.add_line((5000, 0), (5500, 100), dxfattribs={"layer": L})
+
+        _dxf(path, build)
+        q = boq.measure(path, hvac=True)
+        # 5000 (800-wide run) + 509.9 (the reducer's own diagonal length,
+        # hypot(500, 100), counted once) + 3500 (600-wide run) = 9009.9 --
+        # not 9519.8 (that same diagonal counted on both its sides).
+        self.assertAlmostEqual(q["lengths_by_layer"]["M-DUCT"], 9009.9, delta=1)
+        self.assertTrue(any("tapering transition" in n for n in q["notes"]))
+
+    def test_an_unrelated_long_diagonal_elsewhere_is_never_mistaken_for_one(self):
+        """A transition must be no longer than the widest confirmed pair on
+        the layer -- an ordinary long diagonal duct run (its own, genuine
+        single line, nothing to pair or transition with) stays a plain
+        single length, untouched."""
+        path = _tmp()
+
+        def build(msp):
+            L = "M-DUCT"
+            msp.add_line((0, 400), (3000, 400), dxfattribs={"layer": L})
+            msp.add_line((0, 0), (3000, 0), dxfattribs={"layer": L})
+            # a long diagonal, far longer than the 400-wide pair above --
+            # must stay a single, full-length run, not a "transition"
+            msp.add_line((10000, 10000), (20000, 15000), dxfattribs={"layer": L})
+
+        _dxf(path, build)
+        q = boq.measure(path, hvac=True)
+        diag = math.hypot(20000 - 10000, 15000 - 10000)
+        self.assertAlmostEqual(q["lengths_by_layer"]["M-DUCT"], 3000.0 + diag, delta=1)
+
+
+@unittest.skipUnless(ezdxf, "ezdxf not installed")
+class TextLabelsBecomeDuctSizesAndSheetArea(unittest.TestCase):
+    """HVAC_DRAWING_RULES.md rule 3, 23 Oct 2026: both the owner's own
+    independent AI check and a second review of the same file landed on
+    the same gap -- the duct/pipe size is written right on the drawing as
+    plain TEXT ("800x400", "DN80") and the measurement never read it, so a
+    route length alone could never be priced (GI duct is billed in m² of
+    sheet per size, not metres of centreline). Reconstructs the real
+    file's own trunk-broken-by-branch-gaps shape, since that is exactly
+    the case naive nearest-text matching gets wrong (confirmed live: it
+    first wrongly attached A-WALL, the architectural perimeter, to a duct
+    size label that merely happened to sit nearby -- fixed by scoping
+    rule 3 to layers that name themselves duct or pipe work)."""
+
+    def _trunk_split_by_a_branch_gap(self) -> str:
+        path = _tmp()
+
+        def build(msp):
+            L = "M-DUCT-SUPPLY"
+            # two trunk pieces, same 800 width, split by a 400mm branch gap
+            msp.add_line((0, 800), (3800, 800), dxfattribs={"layer": L})
+            msp.add_line((0, 0), (3800, 0), dxfattribs={"layer": L})
+            msp.add_line((4200, 800), (8000, 800), dxfattribs={"layer": L})
+            msp.add_line((4200, 0), (8000, 0), dxfattribs={"layer": L})
+            # the actual branch tying in at the gap, proving it is a real
+            # junction and not just an unexplained split (rule 2 revisited,
+            # 25 Oct 2026, would otherwise bridge this gap into one run).
+            # Short and far enough from the size label below that it never
+            # competes for it -- a lone stub like this would carry its own
+            # size label in a real drawing, not the trunk's.
+            msp.add_line((4000, 800), (4000, 3000), dxfattribs={"layer": L})
+            # the size label sits near ONE of the two pieces only
+            msp.add_text("800x400 SA", dxfattribs={"layer": "M-TEXT", "height": 150}) \
+               .set_placement((200, 900))
+            # an architectural wall nearby -- must never pick up the label
+            msp.add_line((0, 5000), (8000, 5000), dxfattribs={"layer": "A-WALL"})
+
+        _dxf(path, build)
+        return path
+
+    def test_the_label_propagates_to_both_trunk_pieces(self):
+        q = boq.measure(self._trunk_split_by_a_branch_gap(), hvac=True)
+        sizes = q["duct_sizes"]
+        self.assertEqual(len(sizes), 1)
+        entry = sizes[0]
+        self.assertEqual(entry["layer"], "M-DUCT-SUPPLY")
+        self.assertEqual(entry["size"], "800x400")
+        self.assertEqual(entry["kind"], "duct")
+        # both pieces (3800 + 3800 = 7600), not just the nearer one
+        self.assertAlmostEqual(entry["length"], 7600.0, delta=1)
+        self.assertAlmostEqual(entry["area_m2"], 2.4 * 7.6, delta=0.05)
+
+    def test_an_architectural_wall_near_the_same_label_is_never_sized(self):
+        q = boq.measure(self._trunk_split_by_a_branch_gap(), hvac=True)
+        self.assertFalse(any(e["layer"] == "A-WALL" for e in q["duct_sizes"]))
+
+    def test_no_sizes_at_all_when_hvac_is_off(self):
+        q = boq.measure(self._trunk_split_by_a_branch_gap())
+        self.assertEqual(q["duct_sizes"], [])
+
+    def test_a_pipe_size_label_is_read_as_dn_not_a_duct_size(self):
+        path = _tmp()
+
+        def build(msp):
+            msp.add_line((0, 0), (4000, 0), dxfattribs={"layer": "M-PIPE-CHW-S"})
+            msp.add_text("CHWS DN80", dxfattribs={"layer": "M-TEXT", "height": 150}) \
+               .set_placement((100, 100))
+
+        _dxf(path, build)
+        q = boq.measure(path, hvac=True)
+        self.assertEqual(len(q["duct_sizes"]), 1)
+        entry = q["duct_sizes"][0]
+        self.assertEqual(entry["size"], "DN80")
+        self.assertEqual(entry["kind"], "pipe")
+        self.assertNotIn("area_m2", entry)          # pipes aren't sheet metal
+
+    def test_a_pipe_label_near_a_duct_layer_is_never_attached_to_it(self):
+        """Caught on the real, more complex tender file: a 'DN32' pipe
+        label sat closer to a duct run than any duct-pattern label did,
+        and got attached to it, producing a nonsensical duct-sized-in-DN
+        entry. A duct layer only ever takes a duct-pattern label now, a
+        pipe layer only ever a pipe-pattern one, regardless of distance."""
+        path = _tmp()
+
+        def build(msp):
+            msp.add_line((0, 0), (4000, 0), dxfattribs={"layer": "M-DUCT-FLEX"})
+            # the only label anywhere nearby is a PIPE size -- must be
+            # ignored for this duct layer, not attached just because nothing
+            # closer exists.
+            msp.add_text("DN32", dxfattribs={"layer": "M-TEXT", "height": 150}) \
+               .set_placement((100, 100))
+
+        _dxf(path, build)
+        q = boq.measure(path, hvac=True)
+        self.assertEqual(q["duct_sizes"], [])
+
+    def test_a_duct_label_near_a_pipe_layer_is_never_attached_to_it(self):
+        path = _tmp()
+
+        def build(msp):
+            msp.add_line((0, 0), (4000, 0), dxfattribs={"layer": "M-PIPE-CHW-S"})
+            msp.add_text("400x250", dxfattribs={"layer": "M-TEXT", "height": 150}) \
+               .set_placement((100, 100))
+
+        _dxf(path, build)
+        q = boq.measure(path, hvac=True)
+        self.assertEqual(q["duct_sizes"], [])
+
+    def test_summary_text_aggregates_one_line_per_layer_and_size(self):
+        """A trunk broken into several LINE entities by branch take-offs
+        produces several `duct_sizes` entries of the SAME size on the SAME
+        layer -- the summary text the write-up AI actually reads must show
+        one aggregated line, not several near-duplicates (caught on the
+        real tender file: the first version produced a dozen lines for a
+        handful of real sizes)."""
+        q = boq.measure(self._trunk_split_by_a_branch_gap(), hvac=True)
+        self.assertEqual(len(q["duct_sizes"]), 1)      # engine stays granular...
+        text = boq.summary_text(q)
+        # ...but the text the AI reads says it once, aggregated.
+        self.assertEqual(text.count("M-DUCT-SUPPLY 800x400"), 1)
+        self.assertIn("7.60 m run", text)
+        self.assertIn("do not mark them 'TBC", text)
+
+
+@unittest.skipUnless(ezdxf, "ezdxf not installed")
+class ACornerInASingleLineRunIsAnElbow(unittest.TestCase):
+    """HVAC_DRAWING_RULES.md rule 4, 23 Oct 2026: a single-line duct/pipe
+    that turns a corner (the return duct's own elbow in the real file) is
+    a fitting a real BOQ has to list. Only ever looks at two segments that
+    already share an exact endpoint -- a hard topological fact, not a
+    proximity guess -- so it carries none of the false-positive risk that
+    kept branch-take-off gap bridging out of this round (see
+    HVAC_DRAWING_RULES.md's "what this does NOT handle" section)."""
+
+    def test_an_l_shaped_single_line_duct_reports_one_elbow(self):
+        path = _tmp()
+
+        def build(msp):
+            L = "M-DUCT-RETURN"
+            msp.add_line((19000, 1000), (2000, 1000), dxfattribs={"layer": L})
+            msp.add_line((2000, 1000), (2000, 6000), dxfattribs={"layer": L})
+
+        _dxf(path, build)
+        q = boq.measure(path, hvac=True)
+        self.assertTrue(any("1 corner(s)" in n and "elbow" in n for n in q["notes"]))
+        self.assertAlmostEqual(q["lengths_by_layer"]["M-DUCT-RETURN"], 17000 + 5000, delta=1)
+
+    def test_a_straight_single_line_run_has_no_elbow(self):
+        path = _tmp()
+
+        def build(msp):
+            msp.add_line((0, 0), (22000, 1000), dxfattribs={"layer": "M-DUCT-RETURN"})
+
+        _dxf(path, build)
+        q = boq.measure(path, hvac=True)
+        self.assertFalse(any("elbow" in n for n in q["notes"]))
+
+
+@unittest.skipUnless(ezdxf, "ezdxf not installed")
+class ABranchTakeOffGapIsBridgedOnlyWhenNoBranchTiesIn(unittest.TestCase):
+    """HVAC_DRAWING_RULES.md rule 2's gap-bridging, revisited 25 Oct 2026
+    with the real topology check it was missing the first time: a trunk
+    split into two "pair" runs by a branch take-off is bridged into one
+    continuous run ONLY when nothing else on the layer ties into the gap.
+    When a branch DOES tie in there -- a real tee/cross junction -- the
+    gap is left alone, because it is the branch fitting's own width, not
+    missing trunk duct. The first version of this idea bridged every such
+    gap and was rejected before shipping for exactly this reason (see
+    HVAC_DRAWING_RULES.md rule 2's own "what it does NOT handle" note)."""
+
+    def test_a_gap_with_nothing_tied_into_it_is_bridged(self):
+        path = _tmp()
+
+        def build(msp):
+            L = "M-DUCT-SUPPLY"
+            # two 400-wide trunk pieces, a 500mm gap between them, nothing
+            # else on the layer -- an ordinary DXF-export split, not a
+            # junction.
+            msp.add_line((0, 400), (2000, 400), dxfattribs={"layer": L})
+            msp.add_line((0, 0), (2000, 0), dxfattribs={"layer": L})
+            msp.add_line((2500, 400), (4500, 400), dxfattribs={"layer": L})
+            msp.add_line((2500, 0), (4500, 0), dxfattribs={"layer": L})
+
+        _dxf(path, build)
+        q = boq.measure(path, hvac=True)
+        # 2000 + 500 (the bridged gap) + 2000 = 4500, not 4000 (the two
+        # pieces left separate, the gap silently lost).
+        self.assertAlmostEqual(q["lengths_by_layer"]["M-DUCT-SUPPLY"], 4500.0, delta=1)
+        self.assertTrue(any("bridged" in n and "no branch ties in" in n
+                            for n in q["notes"]))
+
+    def test_a_gap_with_a_branch_tied_in_is_left_alone(self):
+        """The exact false-positive case that kept this out of item 14's
+        first round: a branch duct crosses the trunk and ties in right at
+        the gap. Bridging here would silently add the trunk's own width
+        as if it were missing duct -- it must stay as two separate runs."""
+        path = _tmp()
+
+        def build(msp):
+            L = "M-DUCT-SUPPLY"
+            msp.add_line((0, 400), (2000, 400), dxfattribs={"layer": L})
+            msp.add_line((0, 0), (2000, 0), dxfattribs={"layer": L})
+            msp.add_line((2500, 400), (4500, 400), dxfattribs={"layer": L})
+            msp.add_line((2500, 0), (4500, 0), dxfattribs={"layer": L})
+            # a branch tying into the trunk's own wall, its endpoint
+            # landing exactly inside the gap (x=2250, within 2000-2500,
+            # at y=400 -- the trunk wall's own line).
+            msp.add_line((2250, 400), (2250, 3000), dxfattribs={"layer": L})
+
+        _dxf(path, build)
+        q = boq.measure(path, hvac=True)
+        # The two 2000mm pieces stay separate (4000 total from them) plus
+        # the 500mm branch stub itself (a "single" run) = 4500 -- NOT the
+        # bridged 4500 total coincidentally matching above; the real check
+        # is that it is NOT reported as bridged.
+        self.assertFalse(any("bridged" in n for n in q["notes"]))
+
+    def test_the_real_file_s_own_both_sided_junction_is_never_bridged(self):
+        """The real shape this whole rule exists for, reconstructed from
+        `hvac_tender_complex.dxf`'s M-DUCT-SUPPLY trunk (not read from the
+        file itself -- the exact coordinates found reverse-engineering it,
+        24-25 Oct 2026): a trunk takes branches off BOTH sides at the same
+        point, x=13275-13725, on two different walls 800mm apart -- one
+        branch going up from (13275, 16400), another going down from
+        (13725, 15600). Naively bridging both gaps would have added the
+        trunk's own 800mm width twice, silently, as if it were duct."""
+
+        def build(msp):
+            L = "M-DUCT-SUPPLY"
+            # upper wall, split by the gap, with a branch going UP from
+            # its left-hand piece's own end point
+            msp.add_line((11500, 16400), (13275, 16400), dxfattribs={"layer": L})
+            msp.add_line((13725, 16400), (16000, 16400), dxfattribs={"layer": L})
+            msp.add_line((11500, 16500), (13275, 16500), dxfattribs={"layer": L})
+            msp.add_line((13725, 16500), (16000, 16500), dxfattribs={"layer": L})
+            msp.add_line((13275, 16400), (13275, 26725), dxfattribs={"layer": L})
+            # lower wall, split by the SAME gap, with a branch going DOWN
+            # from its right-hand piece's own end point
+            msp.add_line((11500, 15600), (13275, 15600), dxfattribs={"layer": L})
+            msp.add_line((13725, 15600), (16000, 15600), dxfattribs={"layer": L})
+            msp.add_line((11500, 15700), (13275, 15700), dxfattribs={"layer": L})
+            msp.add_line((13725, 15700), (16000, 15700), dxfattribs={"layer": L})
+            msp.add_line((13725, 15600), (13725, 3725), dxfattribs={"layer": L})
+
+        path = _tmp()
+        _dxf(path, build)
+        q = boq.measure(path, hvac=True)
+        self.assertFalse(any("bridged" in n for n in q["notes"]))
 
 
 if __name__ == "__main__":

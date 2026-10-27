@@ -1,0 +1,6 @@
+pdfplumber>=0.11
+pypdfium2>=4
+pillow>=10
+rapidocr>=3.10
+onnxruntime>=1.30
+opencv-python-headless>=4.5.1.48,<5

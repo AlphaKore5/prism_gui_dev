@@ -14,9 +14,10 @@ from __future__ import annotations
 import os
 import time
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel, QPushButton,
-    QPlainTextEdit, QLineEdit, QMessageBox, QCheckBox,
+    QPlainTextEdit, QLineEdit, QMessageBox, QCheckBox, QFileDialog,
     QComboBox, QWidget,
 )
 
@@ -31,9 +32,10 @@ from widgets import controls as C
 from widgets.loader import Loader
 from widgets.ask_panel import AskPanel, MoreOptions
 from addons.boq import agents as boq_agents
+from addons.boq import industries
 from addons.boq.measured import MeasuredTable
 from addons.boq.pricing import PricingTable
-from addons.boq.workers import BoqGroqWorker
+from addons.boq.takeoff import IndustryTakeoffDialog
 from widgets.output_panel import short_duration
 
 
@@ -66,6 +68,80 @@ def _preselect(combo: QComboBox, value: str):
     i = combo.findText(value)
     if i >= 0:
         combo.setCurrentIndex(i)
+
+
+class InputMeasurementsDialog(QDialog):
+    """Paste measurements, or upload a file of them — the second way into
+    the BOQ pipeline, for numbers measured by a tool outside Prism (a PDF
+    takeoff extractor, a rate list, anyone's own CSV). Returns plain text;
+    it never tries to parse a specific schema, so it works with whatever
+    the other tool actually produced, the same way a sample BOQ or a
+    legend note is handed to the writer as text, not reinterpreted here."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(i18n.t("Input measurements"))
+        self.resize(620, 420)
+        col = QVBoxLayout(self)
+        col.addWidget(C.label(i18n.t(
+            "Paste measurements from another tool, or upload a file of "
+            "them — a PDF takeoff's JSON/CSV, a rate list, your own "
+            "notes. Treated exactly like a drawing's own measured "
+            "figures from here: handed to the writer as plain text, "
+            "never as an image, never sent anywhere until you press "
+            "\"Make my BOQ\"."), level="SUPPORT", wrap=True))
+
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(theme.SPACE_2)
+        self.upload_btn = C.button(i18n.t("Upload a file…"), "secondary",
+                                   icon_name="paperclip", small=True,
+                                   on_click=self._upload)
+        row.addWidget(self.upload_btn)
+        self.file_label = QLabel("")
+        self.file_label.setWordWrap(True)
+        row.addWidget(self.file_label, stretch=1)
+        col.addLayout(row)
+
+        self.text = QPlainTextEdit()
+        self.text.setPlaceholderText(i18n.t(
+            "Paste measurements here, or upload a file above…"))
+        col.addWidget(self.text, stretch=1)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch(1)
+        btn_row.addWidget(C.button(i18n.t("Cancel"), "secondary",
+                                   on_click=self.reject))
+        self.ok_btn = C.button(i18n.t("Use these measurements"), "primary",
+                               on_click=self._confirm)
+        btn_row.addWidget(self.ok_btn)
+        col.addLayout(btn_row)
+
+    def _upload(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, i18n.t("Measurements file"), os.path.expanduser("~"),
+            i18n.t("Text, JSON or CSV (*.txt *.json *.csv *.md);;All files (*)"))
+        if not path:
+            return
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as f:
+                content = f.read()
+        except Exception as e:                              # noqa: BLE001
+            QMessageBox.warning(self, "BOQ", f"Couldn't read that file: {e}")
+            return
+        self.text.setPlainText(content)
+        self.file_label.setText(i18n.t("Loaded: {name}").format(
+            name=os.path.basename(path)))
+
+    def _confirm(self):
+        if not self.text.toPlainText().strip():
+            QMessageBox.information(
+                self, "BOQ", i18n.t("Paste some measurements, or upload a file, first."))
+            return
+        self.accept()
+
+    def measurements_text(self) -> str:
+        return self.text.toPlainText().strip()
 
 
 class BoqDialog(PrismDialog):
@@ -116,6 +192,7 @@ class BoqDialog(PrismDialog):
         self.q = None
         self.summary = ""
         self.csv_path = ""
+        self._hvac = False
         self._worker = None
         self._rec = None
         self._run_pending = False   # "Make my BOQ" pressed while still measuring
@@ -131,10 +208,7 @@ class BoqDialog(PrismDialog):
         # Who answered most recently, and that exact chat's own URL -- a
         # follow-up by the SAME agent resumes THIS chat (resume_urls, see
         # _fu_start_next) instead of a fresh one opening every time, the
-        # same mechanism addons/step/dialog.py already uses. Empty link
-        # (Groq, which has no browser page at all) means resume simply
-        # never triggers -- nothing special-cased for that, it falls out
-        # of the same check.
+        # same mechanism addons/step/dialog.py already uses.
         self._last_agent = ""
         self._last_link = ""
         # The latest real file an AI stage actually produced (write-up,
@@ -146,9 +220,14 @@ class BoqDialog(PrismDialog):
         self._deliverable_path = ""
         self._write_made_files: list = []
         self._fu_made_files: list = []
-        # One live-progress window for every verify/follow-up this BOQ
-        # session makes, not one per click — see _start_followup_run.
+        # One live-progress window for the WHOLE BOQ session, not one per
+        # click or per stage — see _start_followup_run (verify/follow-up)
+        # and _run_stage (the initial research/interpret/write pipeline,
+        # item 22). _active_runner says which of the two owns it right
+        # now, so the window's three signals can be wired exactly once and
+        # still reach the right handler either way.
         self._fu_dialog = None
+        self._active_runner = ""
         # Accumulated across the stage chain so the main window can offer its
         # post-completion follow-up once this dialog closes: every stage's
         # output, and which agent produced it. The dialog runs its own worker
@@ -231,6 +310,54 @@ class BoqDialog(PrismDialog):
         self.template_hint.setObjectName("note")
         self.template_hint.setWordWrap(True)
         root.addWidget(self.template_hint)
+
+        # A second way in, beside measuring a drawing: the owner's own ask,
+        # 24 Oct 2026, built for a tool like the PDF takeoff extractor that
+        # measures OUTSIDE Prism and hands back numbers, not a drawing file.
+        # Paste or upload that text here and it is treated exactly like a
+        # drawing's own measured figures from this point on — handed to the
+        # writer as plain text, never as an image, never sent anywhere
+        # until "Make my {noun}" is actually pressed.
+        meas_row = QHBoxLayout()
+        meas_row.setContentsMargins(0, 0, 0, 0)
+        meas_row.setSpacing(theme.SPACE_2)
+        self.input_meas_btn = self.button(
+            i18n.t("Input measurements…"), "secondary", icon_name="paperclip",
+            small=True, on_click=self._open_input_measurements)
+        meas_row.addWidget(self.input_meas_btn)
+        # Only ever shown for an industry that actually has its own
+        # PDF-takeoff tool (today, only HVAC) -- picked explicitly from
+        # the Industry dropdown above, never guessed from a file. See
+        # addons/boq/industries.has_takeoff and BOQ-CHANGES-TODO.md item 26.
+        self.takeoff_btn = self.button(
+            i18n.t("{industry} PDF takeoff…").format(industry=industries.HVAC),
+            "secondary", icon_name="paperclip", small=True,
+            on_click=self._open_industry_takeoff)
+        self.takeoff_btn.setVisible(False)
+        meas_row.addWidget(self.takeoff_btn)
+        meas_row.addStretch(1)
+        root.addLayout(meas_row)
+
+        # Only appears once external measurements have actually been given —
+        # a second, independent result panel from meas_box: that one is only
+        # ever filled by Prism's own geometry engine measuring a real
+        # drawing, and must stay that way so the two are never confused
+        # about what actually measured something.
+        self.ext_meas_box = QGroupBox(i18n.t("External measurements"))
+        ext_l = QVBoxLayout(self.ext_meas_box)
+        self.ext_meas_view = QPlainTextEdit()
+        self.ext_meas_view.setReadOnly(True)
+        self.ext_meas_view.setMaximumHeight(160)
+        ext_l.addWidget(self.ext_meas_view)
+        self.ext_meas_label = QLabel("")
+        self.ext_meas_label.setWordWrap(True)
+        self.ext_meas_label.setStyleSheet(
+            f"color: {theme.OK_INK}; background: {theme.OK_BG};"
+            f" border-radius: {theme.R_CONTROL}px;"
+            f" padding: {theme.SPACE_2}px {theme.SPACE_3}px; font-size: 13px;")
+        ext_l.addWidget(self.ext_meas_label)
+        self.ext_meas_box.setVisible(False)
+        root.addWidget(self.ext_meas_box)
 
         # Only appears once a drawing has actually been measured.
         self.meas_box = QGroupBox("Measured from your drawing")
@@ -318,6 +445,19 @@ class BoqDialog(PrismDialog):
         self.format_combo.addItem(i18n.t("PDF"), "pdf")
         prow.addWidget(flab)
         prow.addWidget(self.format_combo)
+        # Which industry this job is for -- item 26: BOQ is sold across
+        # industries, and each one reads its own drawings by its own
+        # rules, so the rule-set that runs (HVAC_DRAWING_RULES.md's
+        # write-up guidance, and below, which PDF-takeoff tool offers
+        # itself) is this explicit choice, never guessed from the request
+        # text or from an uploaded file's own content -- see
+        # addons/boq/industries.py and self._on_industry_changed.
+        ilab = QLabel(i18n.t("· Industry")); ilab.setObjectName("meta")
+        self.industry_combo = QComboBox()
+        self.industry_combo.addItems(industries.NAMES)
+        self.industry_combo.currentTextChanged.connect(self._on_industry_changed)
+        prow.addWidget(ilab)
+        prow.addWidget(self.industry_combo)
         prow.addStretch(1)
         root.addWidget(picker)
 
@@ -428,6 +568,72 @@ class BoqDialog(PrismDialog):
                   "after you say so, in \"Make with drawing\".")
             .replace("{n}", str(n)).replace("{word}", word))
 
+    # ── external measurements (the second way in, besides a drawing) ─────
+
+    def _open_input_measurements(self):
+        dlg = InputMeasurementsDialog(self)
+        if dlg.exec() == QDialog.Accepted:
+            self._use_external_measurements(dlg.measurements_text())
+
+    def _on_industry_changed(self, industry: str):
+        """Item 26: the PDF-takeoff button is only ever offered for an
+        industry that has one of its own (today, only HVAC) -- an ELV or
+        pharma-tech job must not be shown a button that would silently run
+        HVAC's own OCR/rules against a drawing that was never one."""
+        self.takeoff_btn.setVisible(industries.has_takeoff(industry))
+
+    def _open_industry_takeoff(self):
+        dlg = IndustryTakeoffDialog(self.industry_combo.currentText(), self)
+        if dlg.exec() == QDialog.Accepted:
+            self._use_external_measurements(dlg.measurements_text())
+
+    def _use_external_measurements(self, text: str):
+        """Numbers already measured by a tool outside Prism (a PDF takeoff,
+        a rate list, anyone's own notes), pasted or uploaded. Treated as
+        plain text from here on — never parsed into a specific schema (the
+        other tool's own shape is trusted, not reinterpreted), never sent
+        anywhere as an image. `self.q` is set to a small, clearly-marked
+        dict only so the rest of this dialog (has_cad, the pending-run
+        wait) sees that SOMETHING measured is now available, same as it
+        would once a real drawing finishes measuring.
+
+        Replaces whatever a real drawing measured before, rather than
+        merging with it — two measurement sources feeding the same prompt
+        at once is exactly the kind of silent ambiguity this whole add-on
+        refuses to allow elsewhere; only one is ever the active one, and
+        the other's panel is hidden so the screen never claims both.
+
+        Also decides `self._hvac` the same way `_measure()` does — item 26
+        (26 Oct 2026) moved this from guessing at the ask box's own typed
+        words to the explicit Industry dropdown, so it must be read here
+        too, regardless of which path the measurements came in by; this
+        path must not quietly skip that check just because no drawing was
+        ever measured here."""
+        self._hvac = self.industry_combo.currentText() == industries.HVAC
+        self.q = {"external": True, "text": text}
+        self.summary = text
+        self.cad_path = ""
+        self.recheck_btn.setEnabled(False)
+        self.meas_box.setVisible(False)
+        self.ext_meas_view.setPlainText(text)
+        os.makedirs(CB.config.RUNS_DIR, exist_ok=True)
+        self.csv_path = os.path.join(
+            CB.config.RUNS_DIR, f"boq_external_measurements_{int(time.time())}.txt")
+        with open(self.csv_path, "w", encoding="utf-8") as f:
+            f.write(text)
+        try:
+            task_label = getattr(self, "_task_name", "") or f"{self._doc} — {getattr(self, 'request', '')}"
+            CB.config.save_artifact(self.csv_path, "external_measurements.txt",
+                                    kind="boq", task=task_label)
+        except Exception:                               # noqa: BLE001
+            pass
+        self.ext_meas_label.setText(i18n.t(
+            "Saved so you can check it later → {path}").format(path=self.csv_path))
+        self.ext_meas_box.setVisible(True)
+        if self._run_pending:
+            self._run_pending = False
+            self._run()
+
     # ── measuring ───────────────────────────────────────────────────────
 
     def _measure(self):
@@ -436,15 +642,21 @@ class BoqDialog(PrismDialog):
         self.progress.set_stage(0)
         self._set_busy(True, f"Reading {os.path.basename(self.cad_path)} — "
                              "a large drawing can take a minute…")
-        # HVAC_DRAWING_RULES.md's rules only ever apply when the person's
-        # own request says "HVAC" — the owner's own instruction (22 Oct
-        # 2026): trade-specific rules must not quietly start reading an
+        # HVAC_DRAWING_RULES.md's rules only ever apply when the person has
+        # explicitly picked HVAC from the Industry dropdown — the owner's
+        # own instruction (22 Oct 2026, widened 26 Oct 2026, item 26):
+        # trade-specific rules must not quietly start reading an
         # electrical or plumbing drawing's lines differently too, just
-        # because the geometry happens to look similar. Read from the ask
-        # box directly (not self.request, which isn't set until "Make" is
-        # pressed, well after this runs) — type "HVAC" into the request
-        # before or alongside attaching the drawing for this to catch it.
-        hvac = "hvac" in self.ask.text().lower()
+        # because the geometry happens to look similar, and (now that BOQ
+        # targets several industries) must never be guessed from the
+        # request's own typed words either — only this explicit choice.
+        hvac = self.industry_combo.currentText() == industries.HVAC
+        # Remembered, not re-read at write time: the write-up prompt's own
+        # HVAC-only guidance (below) must match whatever this measurement
+        # actually used -- telling the writer "use the real duct sizes"
+        # when the measurement never looked for any would be noise, and
+        # the ask box's text could change between measuring and writing.
+        self._hvac = hvac
         self._measure_worker = MeasureWorker(
             self.cad_path, self.unit_edit.text().strip(),
             [s.strip() for s in self.scope_edit.text().split(",") if s.strip()],
@@ -458,6 +670,7 @@ class BoqDialog(PrismDialog):
         self.summary = self.boq.summary_text(q)
         self.meas_table.set_quantities(q)
         self.meas_box.setVisible(True)
+        self.ext_meas_box.setVisible(False)   # only one measurement source is ever active
         if self.mode == "boq":
             # Data is ready now, but the box itself stays hidden until a
             # BOQ actually exists (see _on_written) -- the owner's report:
@@ -576,19 +789,6 @@ class BoqDialog(PrismDialog):
             QMessageBox.warning(self, "BOQ",
                                 "Pick an AI to write the BOQ (the 'Write with' box).")
             return
-        if self.writer_agent == "Groq":
-            if not self.cfg.get("api_key"):
-                QMessageBox.warning(self, "BOQ",
-                                    "Groq needs your key — add it in Settings, "
-                                    "or pick a different tool in 'Write with'.")
-                return
-            if self.templates or self.notes:
-                QMessageBox.warning(self, "BOQ",
-                                    "Groq (in-house) is a text-only call — it "
-                                    "can't read an attached template or notes "
-                                    "file. Pick a different tool in 'Write "
-                                    "with', or remove the attachment first.")
-                return
         self.researcher = self.research_combo.currentText().strip()
         # ChatGPT specifically, and only when there is something it can read.
         # It is the stage that turns a screenshot of the sheet plus a sample
@@ -606,19 +806,11 @@ class BoqDialog(PrismDialog):
         self._stage_log = []
 
         if self.derive_cb.isChecked() and self.researcher:
-            self.progress.set_stage(1)
-            self._set_busy(True, f"{self.researcher} is checking the standard "
-                                 "sizes and norms…")
-            self._worker = AutomationWorker(
-                {}, self.cfg, [], f"design/material standards for a {self._noun}",
-                custom_stages=[("standards", self.researcher,
-                                [self._pm.standards_prompt(
-                                    self.request, project_context=self.request,
-                                    measured_text=self.summary)])],
-                chatgpt_analysis=False)
-            self._worker.done.connect(self._on_standards)
-            self._worker.failed.connect(self._on_failed)
-            self._worker.start()
+            prompt = self._pm.standards_prompt(
+                self.request, project_context=self.request,
+                measured_text=self.summary)
+            self._run_stage("standards", self.researcher, prompt, [],
+                            self._on_standards)
         else:
             self._interpret()
 
@@ -664,23 +856,14 @@ class BoqDialog(PrismDialog):
         if not self.interpreter:
             self._write()
             return
-        self.progress.set_stage(1)
-        self._set_busy(True, f"{self.interpreter} is reading the drawing "
-                             "screenshot and your sample…")
         prompt = self.boq.interpretation_prompt(
             self.request, self.summary,
             self.boq.roles_text([], self.templates, self.images, self.notes),
             legend_hint=self.legend_edit.text().strip())
-        self._worker = AutomationWorker(
-            {}, self.cfg,
-            # Images, sample and notes only — deliberately not the drawing.
-            list(self.images) + list(self.templates) + list(self.notes),
-            "read a drawing screenshot for BOQ legend and scope",
-            custom_stages=[("interpret", self.interpreter, [prompt])],
-            chatgpt_analysis=False)
-        self._worker.done.connect(self._on_interpreted)
-        self._worker.failed.connect(self._on_failed)
-        self._worker.start()
+        # Images, sample and notes only — deliberately not the drawing.
+        files = list(self.images) + list(self.templates) + list(self.notes)
+        self._run_stage("interpret", self.interpreter, prompt, files,
+                        self._on_interpreted)
 
     def _on_interpreted(self, responses: dict, links: dict):
         got = [t for t in (responses.get("interpret") or []) if t.strip()]
@@ -702,12 +885,25 @@ class BoqDialog(PrismDialog):
         """"" (let the tool decide), or "docx"/"csv"/"pdf" from the picker."""
         return self.format_combo.currentData() or ""
 
-    def _format_request_line(self) -> str:
+    def _format_request_line(self, free_text: str = "") -> str:
         """One line asking for the chosen format, appended to a prompt — or
         "" when the picker is left on "Let the tool decide", which changes
-        nothing about today's prompt. Not used for Groq (in-house): a plain
-        API call with no browser page, so there is never a file to produce
-        or download."""
+        nothing about today's prompt.
+
+        Also "" when `free_text` (the person's own typed ask or follow-up
+        note) already names a format or asks for a download in their own
+        words — `prism_terminal/core/contract.py`'s own engine-side system
+        scans the WHOLE prompt (this line included) for exactly that and
+        asks the tool for whatever it finds there first. Appending the
+        picker's choice on top, when it disagrees with what the person
+        just typed, puts two different format requests in one message —
+        the picker left on a stale choice from an earlier run while a
+        follow-up note asked for a different one was a real, reproduced
+        bug (2026-10-24), not a hypothetical. Deferring to the person's
+        own words here means there is only ever one request in the
+        prompt, and it is always the one that matches what they typed."""
+        if free_text and CB.contract.wants_file(free_text):
+            return ""
         fmt = self._wanted_format()
         if not fmt:
             return ""
@@ -739,27 +935,15 @@ class BoqDialog(PrismDialog):
             return
 
     def _write(self):
-        # Reset up front, not only on the AutomationWorker branch below — a
-        # Groq run (which never touches this list at all) must not leave
-        # _on_written looking at a PREVIOUS run's harvested files and saving
-        # a stale one as if this run had just made it.
+        # Reset up front, not only once the AutomationWorker starts — a
+        # failed/skipped earlier run must not leave _on_written looking at a
+        # PREVIOUS run's harvested files and saving a stale one as if this
+        # run had just made it.
         self._write_made_files = []
         # Known only now, not at submit time: pricing can be filled in after
         # the first measurement, so whether there is a priced CSV to hand
         # the writer is only certain once we're actually about to write.
-        # Groq (in-house) is a plain API call with no file upload, so if
-        # pricing was done this run it cannot see it — caught here, not
-        # silently dropped, or its answer would be missing the one thing
-        # the owner just priced.
         reference = self._reference_csv()
-        if self.writer_agent == "Groq" and reference:
-            self._set_busy(False, "")
-            QMessageBox.warning(self, "BOQ",
-                                "Groq (in-house) is a text-only call — it "
-                                "can't read the priced reference CSV. Pick a "
-                                "different tool in 'Write with' to write up "
-                                "this priced run.")
-            return
         self.progress.set_stage(2)
         self._set_busy(True, f"{self.writer_agent} is writing your BOQ…")
         prompt = self._pm.formatting_prompt(
@@ -773,7 +957,13 @@ class BoqDialog(PrismDialog):
             brief_text=self._brief,
             standards_text=self._standards,
             allow_derived=self.derive_cb.isChecked() or not self.q,
-            has_cad=bool(self.q))
+            has_cad=bool(self.q),
+            # HVAC_DRAWING_RULES.md's write-up guidance (duplicate-layer
+            # judgement, legend caution, real sizes) is trade-specific the
+            # same way the measurement rules are -- only ever on when this
+            # run's own measurement used them, never guessed or applied to
+            # an ELV/CCTV/cabling/plumbing/fire-hydrant BOQ by default.
+            hvac=self._hvac)
 
         # Templates and notes only. The drawing itself is never attached to
         # any AI stage -- the same rule Gerber and STEP keep. The writer is
@@ -788,41 +978,23 @@ class BoqDialog(PrismDialog):
                 "not the firm's record: do not recompute totals or change any "
                 "quantity. Lines with a blank rate are unpriced.")
 
-        if self.writer_agent == "Groq":
-            # Direct API call, not a browser agent -- see
-            # addons/boq/workers.py. Reached here only once the guards above
-            # confirm there is nothing on disk for it to miss: no template,
-            # no notes (checked at submit) and no priced reference (just
-            # above), so the plain prompt text is the whole of what it needs.
-            self._worker = BoqGroqWorker(self.cfg, prompt)
-            self._worker.done.connect(self._on_written)
-            self._worker.failed.connect(self._on_failed)
-            self._worker.start()
-            return
-
-        prompt += self._format_request_line()
+        prompt += self._format_request_line(self.request)
 
         files = list(self.templates) + list(self.notes) + reference
-        task_label = getattr(self, "_task_name", "") or f"{self._doc} — {self.request}"
-
-        self._worker = AutomationWorker(
-            {}, self.cfg, files, task_label,
-            custom_stages=[("format", self.writer_agent, [prompt])],
+        self._run_stage("format", self.writer_agent, prompt, files,
+                        self._on_written, worker_kwargs={
             # The skill formatting_prompt was written against, so its
             # checker also reads the answer -- a parts row with no grade, a
             # 250 mm emergency stop. Only this stage: the standards and
             # interpret stages return checklists and notes, not the table.
-            stage_skills={"format": [s.key for s in CB.skills.for_feature(
+            "stage_skills": {"format": [s.key for s in CB.skills.for_feature(
                 f"{self.mode}.format")]},
             # "format" is already a `file`-kind step by default (see
             # core/contract.py's _BY_STAGE) — this just lets the dialog
             # actually SEE what the engine harvested or wrote out for it,
             # which nothing captured before (see _save_deliverable).
-            files_out=self._write_made_files,
-            chatgpt_analysis=False)
-        self._worker.done.connect(self._on_written)
-        self._worker.failed.connect(self._on_failed)
-        self._worker.start()
+            "files_out": self._write_made_files,
+        })
 
     def _reference_csv(self) -> list:
         """The priced grid as a CSV for the writer, or the measured quantities
@@ -844,9 +1016,7 @@ class BoqDialog(PrismDialog):
         self._links.update(links)
         self._all_responses.update(responses)
         self._stage_agents_map["format"] = self.writer_agent
-        # Who to resume, and where -- see _fu_start_next. Groq has no
-        # browser page at all, so links.get("format") is empty for it and
-        # resume never triggers; that is correct, not a gap to fill in.
+        # Who to resume, and where -- see _fu_start_next.
         self._last_agent = self.writer_agent
         self._last_link = links.get("format") or self._last_link
         self._lap("format")
@@ -907,16 +1077,6 @@ class BoqDialog(PrismDialog):
         return answer == QMessageBox.Yes
 
     def _ask_recheck(self):
-        # Groq (in-house) cannot do this at all, consent screen or not --
-        # "recheck" always means sending the drawing file itself, and Groq
-        # has no file upload. Caught before the consent dialog even opens,
-        # so a Groq user isn't asked to approve a send that would then fail.
-        if self.writer_combo.currentText().strip() == "Groq":
-            QMessageBox.warning(self, "BOQ",
-                                "Groq (in-house) can't verify against the "
-                                "drawing — it never sees the file. Pick a "
-                                "different tool in 'Write with' to recheck.")
-            return
         if not self._drawing_consent():
             return
         # No BOQ made yet -- "Make with drawing" is the FIRST thing this
@@ -931,18 +1091,6 @@ class BoqDialog(PrismDialog):
     def _send_followup(self, note: str, extra_files: list, verify: bool):
         agent = self.writer_combo.currentText().strip() or "the writing AI"
         stage = "recheck" if verify else "followup"
-        # The authoritative check, not just the earlier ones at the two call
-        # sites that can reach here (_ask_recheck, the "verify" quick action
-        # in _offer_followup) — this also catches a PLAIN follow-up where
-        # the person attached their own file in the follow-up box, the one
-        # case neither of those checks for.
-        if agent == "Groq" and (extra_files or self.templates or self.notes):
-            self._set_busy(False, "")
-            QMessageBox.warning(self, "BOQ",
-                                "Groq (in-house) is text-only — it can't "
-                                "read the drawing or an attached file. Pick "
-                                "a different tool in 'Write with' for this.")
-            return
         prompt = f"{note}\n\nMEASURED FIGURES:\n{self.summary}"
         # Only when there IS one -- "Make with drawing" pressed before any
         # BOQ exists has nothing previous to show, and an empty section
@@ -952,25 +1100,19 @@ class BoqDialog(PrismDialog):
         if previous:
             prompt += f"\n\nPREVIOUS ANSWER:\n{previous}"
         files = list(extra_files) + list(self.templates) + list(self.notes)
-        if agent != "Groq":
-            # No browser page for Groq, so no file to produce or download —
-            # the format line would just confuse a plain API reply.
-            prompt += self._format_request_line()
-        if agent == "Groq":
-            # Text-only, like the initial write — reached only once the
-            # guard above has confirmed there is no file this prompt text
-            # doesn't already cover. No fallback chain or live window: a
-            # direct API call either answers or it doesn't, there is no
-            # tab to hand to another tool.
-            self._followup_agent = agent
-            self._followup_stage = stage
-            self.progress.set_stage(2)
-            self._set_busy(True, f"{agent} is working on your {self._noun}…")
-            self._worker = BoqGroqWorker(self.cfg, prompt, stage=stage)
-            self._worker.done.connect(self._on_followed_up)
-            self._worker.failed.connect(self._on_failed)
-            self._worker.start()
-            return
+        # The actual previous deliverable, attached alongside the pasted
+        # text above rather than in place of it (the text stays — some
+        # tools cannot read an attached .docx/.csv at all, so dropping it
+        # would lose the previous answer for them). When the tool CAN read
+        # it, handing it the real file to open and edit is a stronger
+        # "remake this" than asking it to reconstruct the document from
+        # its own pasted-text summary.
+        if self._deliverable_path and os.path.exists(self._deliverable_path):
+            try:
+                files.append(CB.files.attach(self._deliverable_path))
+            except OSError:
+                pass
+        prompt += self._format_request_line(note)
         self._start_followup_run(stage, agent, prompt, files)
 
     # ── the live run window: one StageCard, a fallback chain, Skip/Use
@@ -1015,12 +1157,13 @@ class BoqDialog(PrismDialog):
             "memory — this can take up to 20 minutes.").replace("{agent}", agent)}
         title = titles[stage]
         note = notes.get(stage, "")
+        self._active_runner = "fu"
         if self._fu_dialog is None:
             self._fu_dialog = BoqRunDialog(title, stage, agent, parent=self,
                                            note=note)
-            self._fu_dialog.skip_requested.connect(self._fu_on_skip)
-            self._fu_dialog.fallback_requested.connect(self._fu_on_fallback)
-            self._fu_dialog.stop_requested.connect(self._fu_on_stop)
+            self._fu_dialog.skip_requested.connect(self._rundlg_on_skip)
+            self._fu_dialog.fallback_requested.connect(self._rundlg_on_fallback)
+            self._fu_dialog.stop_requested.connect(self._rundlg_on_stop)
         else:
             self._fu_dialog.restart(title, stage, agent, note=note)
         self._fu_start_next()
@@ -1132,6 +1275,149 @@ class BoqDialog(PrismDialog):
         self._fu_stopped = True
         if self._worker and self._worker.isRunning():
             self._worker.stop()
+
+    # ── the SAME live window, for the initial research/interpret/write
+    # pipeline (item 22) — self._fu_dialog is shared with the verify/
+    # follow-up flow above (one window for the whole session, per item 7),
+    # so its three signals are wired exactly once, here, to these
+    # dispatchers rather than straight to either flow's own handlers —
+    # whichever flow is actually running right now (_active_runner) is the
+    # one that gets the click.
+    def _rundlg_on_skip(self):
+        (self._fu_on_skip if self._active_runner == "fu" else self._rs_on_skip)()
+
+    def _rundlg_on_fallback(self):
+        (self._fu_on_fallback if self._active_runner == "fu" else self._rs_on_fallback)()
+
+    def _rundlg_on_stop(self):
+        (self._fu_on_stop if self._active_runner == "fu" else self._rs_on_stop)()
+
+    def _run_stage(self, stage: str, agent: str, prompt: str, files: list,
+                   on_success, worker_kwargs: dict | None = None):
+        """Same live-window + fallback-chain shape as _start_followup_run,
+        for the FIRST run of the pipeline (research, interpret, write) —
+        kept as its own small state (`_rs_*`) rather than reusing `_fu_*`,
+        so neither flow can ever read the other's token, chain or stopped/
+        skipped flags. `on_success(responses, links)` is `_on_standards`/
+        `_on_interpreted`/`_on_written` — unchanged, called directly, since
+        they already expect exactly this shape from a plain
+        AutomationWorker.done signal."""
+        from addons.boq.run_dialog import BoqRunDialog
+        self._rs_stage = stage
+        self._rs_agent_requested = agent
+        self._rs_prompt = prompt
+        self._rs_files = files
+        self._rs_on_success = on_success
+        self._rs_worker_kwargs = worker_kwargs or {}
+        self._rs_chain = [agent] + [a for a in boq_agents.FALLBACK_ORDER if a != agent]
+        self._rs_stopped = False
+        self._rs_skipped = False
+        self._rs_token = 0
+        self._active_runner = "rs"
+        titles = {
+            "standards": i18n.t("Researching standards and norms"),
+            "interpret": i18n.t("Reading the drawing and your sample"),
+            "format": i18n.t("Writing your {noun}").replace("{noun}", self._noun),
+        }
+        title = titles[stage]
+        if self._fu_dialog is None:
+            self._fu_dialog = BoqRunDialog(title, stage, agent, parent=self)
+            self._fu_dialog.skip_requested.connect(self._rundlg_on_skip)
+            self._fu_dialog.fallback_requested.connect(self._rundlg_on_fallback)
+            self._fu_dialog.stop_requested.connect(self._rundlg_on_stop)
+        else:
+            self._fu_dialog.restart(title, stage, agent)
+        self._rs_start_next()
+        self._fu_dialog.show()
+        self._fu_dialog.raise_()
+        self._fu_dialog.activateWindow()
+
+    def _rs_start_next(self):
+        if not self._rs_chain:
+            self._fu_dialog.finish_error(i18n.t(
+                "None of the fallback tools could answer either."))
+            self._on_failed(i18n.t("Nothing came back from any writer tool."))
+            return
+        tool = self._rs_chain.pop(0)
+        self._rs_token += 1
+        token = self._rs_token
+        self.progress.set_stage(2 if self._rs_stage == "format" else 1)
+        self._set_busy(True, f"{tool} is working on your {self._noun}…")
+        self._fu_dialog.set_agent(tool)
+        self._worker = AutomationWorker(
+            {}, self.cfg, self._rs_files, self._rs_prompt,
+            custom_stages=[(self._rs_stage, tool, [self._rs_prompt])],
+            chatgpt_analysis=False,
+            # Found live, 24 Oct 2026: before item 22, these three stages
+            # were never a "follow-up" to the engine at all, so they got
+            # only each tool's own everyday wait_time -- no floor whatsoever,
+            # not even the one a plain follow-up already gets. Claude's own
+            # registered wait_time (600s) is already the highest of the six
+            # writer agents; Kimi's (1000s) is higher still — ChatGPT, Grok
+            # and Gemini (300s each) are the ones that were genuinely short,
+            # and ALL of them now get at least FOLLOWUP_MIN_WAIT (480s), the
+            # same floor a follow-up turn gets, since writing a full BOQ is
+            # exactly the "redoes a whole deliverable" case that floor
+            # exists for. A ceiling only — the wait still ends the moment
+            # the answer settles, so this costs a fast agent nothing.
+            followup=True,
+            min_wait=900 if self._rs_stage == "format" else 0,
+            **self._rs_worker_kwargs)
+        self._worker.done.connect(
+            lambda responses, links, t=token: self._rs_on_done(t, tool, responses, links))
+        self._worker.failed.connect(
+            lambda error, t=token: self._rs_on_failed(t, tool, error))
+        self._worker.start()
+
+    _RS_AGENT_ATTR = {"standards": "researcher", "interpret": "interpreter",
+                      "format": "writer_agent"}
+
+    def _rs_on_done(self, token: int, tool: str, responses: dict, links: dict):
+        if token != self._rs_token:
+            return                             # a superseded attempt's late signal
+        # A fallback may have answered instead of the originally requested
+        # agent — _on_standards/_on_interpreted/_on_written read self.
+        # researcher/interpreter/writer_agent for _stage_agents_map and
+        # _last_agent, so this must name whoever actually answered, exactly
+        # the way _fu_start_next already does for follow-ups.
+        setattr(self, self._RS_AGENT_ATTR[self._rs_stage], tool)
+        if self._rs_skipped:
+            self._fu_dialog.finish_skipped()
+        elif self._rs_stopped:
+            self._fu_dialog.finish_cancelled()
+        else:
+            texts = responses.get(self._rs_stage) or []
+            self._fu_dialog.finish_ok(texts, links.get(self._rs_stage, ""))
+        self._rs_on_success(responses, links)
+
+    def _rs_on_failed(self, token: int, tool: str, error: str):
+        if token != self._rs_token or self._rs_stopped or self._rs_skipped:
+            return
+        if self._rs_chain:
+            self._fu_dialog.finish_error(
+                i18n.t("{tool} could not answer ({error}) — trying the "
+                      "next fallback tool…")
+                .replace("{tool}", tool).replace("{error}", error),
+                exhausted=False)
+            self._rs_start_next()
+        else:
+            self._fu_dialog.finish_error(error)
+            self._on_failed(error)
+
+    def _rs_on_skip(self):
+        self._rs_skipped = True
+        if self._worker and self._worker.isRunning():
+            self._worker.skip()
+
+    def _rs_on_fallback(self):
+        if self._worker and self._worker.isRunning():
+            self._worker.stop()
+        self._rs_start_next()
+
+    def _rs_on_stop(self):
+        self._rs_stopped = True
+        if self._worker and self._worker.isRunning():
+            self._worker.stop()
         self.status.setText(i18n.t(
             "Stopping — finishing up, keeping what's done…"))
 
@@ -1188,13 +1474,6 @@ class BoqDialog(PrismDialog):
         if not dlg.submitted():
             return
         if dlg.chosen_quick() == "verify":
-            if self.writer_combo.currentText().strip() == "Groq":
-                QMessageBox.warning(self, "BOQ",
-                                    "Groq (in-house) can't verify against "
-                                    "the drawing — it never sees the file. "
-                                    "Pick a different tool in 'Write with' "
-                                    "to recheck.")
-                return
             if not self._drawing_consent():
                 return
             self._send_followup(dlg.followup_text(),

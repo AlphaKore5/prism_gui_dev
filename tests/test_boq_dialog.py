@@ -76,8 +76,8 @@ class _FakeRunDialog:
     forever in a test, since the mocked AutomationWorker below never fires
     a signal to end it (CLAUDE.md: never call exec()/a QEventLoop in a
     test). Every BOQ test that reaches _send_followup for a browser agent
-    (not Groq) must patch "addons.boq.run_dialog.BoqRunDialog" with this,
-    the same way existing tests already patch FollowupDialog.
+    must patch "addons.boq.run_dialog.BoqRunDialog" with this, the same
+    way existing tests already patch FollowupDialog.
 
     BoqDialog now keeps ONE of these for its whole session and calls
     restart() on later verify/follow-up calls instead of constructing a
@@ -477,120 +477,11 @@ class TheWriterGetsThePricedCsvAsReferenceOnly(unittest.TestCase):
         self.assertNotIn("/secret/site.dxf", prompt)
 
 
-class GroqInHouseIsADirectCallNotABrowserAgent(unittest.TestCase):
-    """"Groq" in the writer picker is not a browser agent like the rest of
-    addons.boq.agents.WRITER -- addons/boq/dialog.py routes it to
-    addons.boq.workers.BoqGroqWorker, a direct core.router.groq_chat call.
-    That call has no file upload at all, so every path that could otherwise
-    hand it a file (a template/notes attachment, the priced reference CSV,
-    the drawing itself for recheck) must refuse up front rather than
-    silently writing from less than the person attached."""
-
-    class _Capture:
-        seen = {}
-
-        def __init__(self, *a, **kw):
-            GroqInHouseIsADirectCallNotABrowserAgent._Capture.seen = {
-                "args": a, "kwargs": kw}
-            self.done = self.failed = self
-
-        def connect(self, *_):
-            pass
-
-        def start(self):
-            pass
-
-    def setUp(self):
-        self.d = _dialog()
-        self.d.summary = "WALLS 12.00 m"
-        self.d.request = "BOQ for the site"
-        self.d._task_name = "BOQ — sai"
-        self.d.writer_agent = "Groq"
-
-    def test_the_initial_write_goes_through_boqgroqworker_not_automationworker(self):
-        from unittest import mock
-        from addons.boq import dialog as BD
-        with mock.patch.object(BD, "BoqGroqWorker", self._Capture), \
-                mock.patch.object(BD, "AutomationWorker") as auto:
-            self.d._write()
-        auto.assert_not_called()
-        prompt = self._Capture.seen["args"][1]
-        self.assertIn("WALLS 12.00 m", prompt)
-
-    def test_groq_needs_its_own_key_even_if_some_other_agent_is_configured(self):
-        from unittest import mock
-        from addons.boq import dialog as BD
-        d = BD.BoqDialog({"api_key": ""}, [], None, mode="boq")
-        d.ask.set_text("500 brackets")
-        d.writer_combo.setCurrentText("Groq")
-        with mock.patch.object(BD.QMessageBox, "warning") as warn:
-            d._run()
-        warn.assert_called_once()
-        self.assertIsNone(d._worker)
-
-    def test_a_template_blocks_groq_before_anything_starts(self):
-        from unittest import mock
-        from addons.boq import dialog as BD
-        self.d.ask.set_text("500 brackets")
-        self.d.writer_combo.setCurrentText("Groq")
-        self.d.templates = [{"path": "/x/template.xlsx", "name": "template.xlsx"}]
-        with mock.patch.object(BD.QMessageBox, "warning") as warn:
-            self.d._run()
-        warn.assert_called_once()
-        self.assertIsNone(self.d._worker)
-
-    def test_a_priced_reference_blocks_groq_at_write_time(self):
-        from unittest import mock
-        from addons.boq import dialog as BD
-        self.d.q = {"layers": ["WALLS"], "lengths_by_layer": {"WALLS": 12.0},
-                    "areas_by_layer": {}, "block_counts": {}, "unit": "m",
-                    "scope_total_layers": 1}
-        self.d.price_table.set_quantities(self.d.q, title="BOQ")
-        with mock.patch.object(BD.QMessageBox, "warning") as warn:
-            self.d._write()
-        warn.assert_called_once()
-        self.assertIsNone(self.d._worker)
-
-    def test_recheck_refuses_groq_before_the_consent_popup_even_shows(self):
-        from unittest import mock
-        from addons.boq import dialog as BD
-        self.d.cad_path = "/secret/site.dxf"
-        self.d.result.setPlainText("1  Brick wall  12.00  m")
-        self.d.writer_combo.setCurrentText("Groq")
-        with mock.patch.object(self.d, "_drawing_consent") as consent, \
-                mock.patch.object(BD.QMessageBox, "warning") as warn:
-            self.d._ask_recheck()
-        consent.assert_not_called()
-        warn.assert_called_once()
-        self.assertIsNone(self.d._worker)
-
-    def test_a_typed_followup_with_an_attached_file_is_refused_for_groq(self):
-        from unittest import mock
-        from addons.boq import dialog as BD
-        self.d.writer_combo.setCurrentText("Groq")
-        self.d.result.setPlainText("1  Brick wall  12.00  m")
-        with mock.patch.object(BD.QMessageBox, "warning") as warn:
-            self.d._send_followup("add a gate",
-                                  [{"path": "/x/note.txt", "name": "note.txt"}],
-                                  verify=False)
-        warn.assert_called_once()
-        self.assertIsNone(self.d._worker)
-
-    def test_a_file_free_followup_reaches_boqgroqworker_with_its_own_stage(self):
-        from unittest import mock
-        from addons.boq import dialog as BD
-        self.d.writer_combo.setCurrentText("Groq")
-        self.d.result.setPlainText("1  Brick wall  12.00  m")
-        with mock.patch.object(BD, "BoqGroqWorker", self._Capture):
-            self.d._send_followup("make it metric", [], verify=False)
-        self.assertEqual(self._Capture.seen["kwargs"], {"stage": "followup"})
-
-
 class GrokIsARealRegisteredBrowserAgent(unittest.TestCase):
-    """"Grok" needs no BOQ-side special-casing like "Groq" does -- it is a
-    real prism_terminal.core.agents.AGENT_REGISTRY entry, so it just has to
-    resolve, be offered in the picker, and go through the ordinary
-    AutomationWorker path every other browser agent already does."""
+    """"Grok" is a real prism_terminal.core.agents.AGENT_REGISTRY entry, so
+    it just has to resolve, be offered in the picker, and go through the
+    ordinary AutomationWorker path every other browser agent already
+    does."""
 
     def test_grok_is_in_the_writer_pool(self):
         from addons.boq import agents as boq_agents
@@ -627,10 +518,8 @@ class GrokIsARealRegisteredBrowserAgent(unittest.TestCase):
         d.request = "BOQ for the site"
         d._task_name = "BOQ — sai"
         d.writer_agent = "Grok"
-        with mock.patch.object(BD, "AutomationWorker", _Capture), \
-                mock.patch.object(BD, "BoqGroqWorker") as groq_worker:
+        with mock.patch.object(BD, "AutomationWorker", _Capture):
             d._write()
-        groq_worker.assert_not_called()
         self.assertEqual(_Capture.seen["kwargs"]["custom_stages"][0][:2],
                          ("format", "Grok"))
 
@@ -676,10 +565,8 @@ class DeepSeekIsARealRegisteredBrowserAgent(unittest.TestCase):
         d.request = "BOQ for the site"
         d._task_name = "BOQ — sai"
         d.writer_agent = "DeepSeek"
-        with mock.patch.object(BD, "AutomationWorker", _Capture), \
-                mock.patch.object(BD, "BoqGroqWorker") as groq_worker:
+        with mock.patch.object(BD, "AutomationWorker", _Capture):
             d._write()
-        groq_worker.assert_not_called()
         self.assertEqual(_Capture.seen["kwargs"]["custom_stages"][0][:2],
                          ("format", "DeepSeek"))
 
@@ -733,10 +620,8 @@ class GeminiIsARealRegisteredBrowserAgentSeparateFromTheImageMaker(unittest.Test
         d.request = "BOQ for the site"
         d._task_name = "BOQ — sai"
         d.writer_agent = "Gemini"
-        with mock.patch.object(BD, "AutomationWorker", _Capture), \
-                mock.patch.object(BD, "BoqGroqWorker") as groq_worker:
+        with mock.patch.object(BD, "AutomationWorker", _Capture):
             d._write()
-        groq_worker.assert_not_called()
         self.assertEqual(_Capture.seen["kwargs"]["custom_stages"][0][:2],
                          ("format", "Gemini"))
 
@@ -875,6 +760,99 @@ class TheFollowUpFlowHasALiveWindowAndAFallbackChain(unittest.TestCase):
         first.done.emit({"followup": ["stale answer from ChatGPT"]}, {})
         self.assertNotEqual(self.d.result.toPlainText(),
                             "stale answer from ChatGPT")
+
+
+class TheInitialRunNowHasTheSameLiveWindowAndFallbackChain(unittest.TestCase):
+    """Item 22 from BOQ-CHANGES-TODO.md: "Make my BOQ" itself (research,
+    read-drawing and write stages) was the one call in the whole pipeline
+    with NO live window and no fallback chain -- a deliberate boundary at
+    the time item 2 was built, closed here by routing it through the same
+    _run_stage machinery as a verify/follow-up, sharing the SAME
+    BoqRunDialog instance for the whole session (item 7's own rule)."""
+
+    def setUp(self):
+        from unittest import mock
+        _TrackedWorker.instances = []
+        _FakeRunDialog.construct_calls = 0
+        self.d = _dialog()
+        self.d.ask.set_text("500 brackets")
+        self._patches = [
+            mock.patch("addons.boq.dialog.AutomationWorker", _TrackedWorker),
+            mock.patch("addons.boq.run_dialog.BoqRunDialog", _FakeRunDialog),
+        ]
+        for p in self._patches:
+            p.start()
+        self.addCleanup(lambda: [p.stop() for p in self._patches])
+
+    def test_plain_run_no_research_shows_the_window_for_the_format_stage(self):
+        self.d.writer_combo.setCurrentText("ChatGPT")
+        self.d.derive_cb.setChecked(False)
+        self.d._run()
+        self.assertEqual(_FakeRunDialog.construct_calls, 1)
+        self.assertEqual(_FakeRunDialog.last.stage, "format")
+        self.assertEqual(self.d._active_runner, "rs")
+
+    def test_a_research_stage_shows_standards_first_then_reuses_the_window(self):
+        self.d.writer_combo.setCurrentText("ChatGPT")
+        self.d.research_combo.setCurrentText("Perplexity")
+        self.d.derive_cb.setChecked(True)
+        self.d._run()
+        self.assertEqual(_FakeRunDialog.last.stage, "standards")
+        self.assertEqual(_FakeRunDialog.construct_calls, 1)
+        _TrackedWorker.instances[0].done.emit({"standards": ["use 40m spacing"]}, {})
+        # no images -> interpret is skipped -> straight to the write stage,
+        # the SAME window restarted, not a second one built.
+        self.assertEqual(_FakeRunDialog.last.stage, "format")
+        self.assertEqual(_FakeRunDialog.construct_calls, 1)
+        self.assertEqual(_FakeRunDialog.last.restart_calls, 1)
+
+    def test_the_format_stage_gets_a_raised_wait_floor_not_just_claudes_own_pace(self):
+        """Item 23: before this, the initial research/interpret/write
+        pipeline passed neither `followup=True` nor `min_wait` at all --
+        less of a wait floor than an ordinary follow-up already got."""
+        self.d.writer_combo.setCurrentText("ChatGPT")
+        self.d.derive_cb.setChecked(False)
+        self.d._run()
+        kwargs = _TrackedWorker.instances[0].kwargs
+        self.assertTrue(kwargs.get("followup"))
+        self.assertEqual(kwargs.get("min_wait"), 900)
+
+    def test_a_failure_on_the_format_stage_falls_back_to_the_next_agent(self):
+        self.d.writer_combo.setCurrentText("ChatGPT")
+        self.d.derive_cb.setChecked(False)
+        self.d._run()
+        _TrackedWorker.instances[0].failed.emit("ChatGPT ran out of memory")
+        self.assertEqual(len(_TrackedWorker.instances), 2)
+        self.assertEqual(_TrackedWorker.instances[1].kwargs["custom_stages"][0][:2],
+                         ("format", "Claude"))
+        self.assertEqual(_FakeRunDialog.last.agent, "Claude")
+
+    def test_skip_and_stop_route_to_the_run_stage_not_the_followup_flags(self):
+        self.d.writer_combo.setCurrentText("ChatGPT")
+        self.d.derive_cb.setChecked(False)
+        self.d._run()
+        _FakeRunDialog.last.skip_requested.emit()
+        self.assertTrue(_TrackedWorker.instances[0].skipped)
+        self.assertTrue(self.d._rs_skipped)
+        self.assertFalse(getattr(self.d, "_fu_skipped", False))
+
+    def test_a_success_calls_on_written_and_a_later_followup_reuses_the_window(self):
+        from unittest import mock
+        self.d.writer_combo.setCurrentText("ChatGPT")
+        self.d.derive_cb.setChecked(False)
+        self.d._run()
+        with mock.patch("dialogs.followup_dialog.FollowupDialog") as fake:
+            fake.return_value.submitted.return_value = False
+            _TrackedWorker.instances[0].done.emit(
+                {"format": ["1  Bracket  500  nos"]}, {"format": "https://chat/1"})
+        self.assertEqual(self.d.result.toPlainText(), "1  Bracket  500  nos")
+        self.assertEqual(_FakeRunDialog.construct_calls, 1)
+        # a later follow-up reuses the SAME window, now driven by the
+        # follow-up flow instead of the run-stage one.
+        self.d._send_followup("add a gate", [], verify=False)
+        self.assertEqual(_FakeRunDialog.construct_calls, 1)
+        self.assertEqual(self.d._active_runner, "fu")
+        self.assertEqual(_FakeRunDialog.last.restart_calls, 1)
 
 
 class AFollowUpResumesTheSameChatInsteadOfOpeningAFreshOne(unittest.TestCase):
@@ -1032,14 +1010,44 @@ class AFollowUpOrVerifyActuallyProducesAndSurfacesAFile(unittest.TestCase):
         prompt = _TrackedWorker.instances[0].kwargs["custom_stages"][0][2][0]
         self.assertIn("Word (.docx)", prompt)
 
-    def test_a_format_request_is_never_sent_to_groq(self):
-        from unittest import mock
-        self.d.format_combo.setCurrentIndex(self.d.format_combo.findData("docx"))
-        self.d.writer_combo.setCurrentText("Groq")
-        with mock.patch("addons.boq.dialog.BoqGroqWorker", _TrackedWorker):
-            self.d._send_followup("add a gate", [], verify=False)
-        prompt = _TrackedWorker.instances[0].args[1]
-        self.assertNotIn("downloadable", prompt)
+    def test_a_stale_picker_choice_does_not_fight_a_typed_format_request(self):
+        """Item 24b: a real, reproduced bug -- the format picker left on an
+        earlier choice (here CSV) while the follow-up note itself asks for
+        a different format (docx) used to append BOTH requests to the same
+        prompt, leaving the tool with two disagreeing instructions. The
+        note's own wording must win -- the picker's own line is skipped
+        entirely, leaving the engine's own contract system (which scans
+        the note's own wording) as the one and only source of the format
+        instruction actually sent."""
+        self.d.format_combo.setCurrentIndex(self.d.format_combo.findData("csv"))
+        self.d.writer_combo.setCurrentText("ChatGPT")
+        self.d._send_followup("add a gate, and give me this as a docx file",
+                              [], verify=False)
+        prompt = _TrackedWorker.instances[0].kwargs["custom_stages"][0][2][0]
+        self.assertNotIn("downloadable CSV", prompt)
+        self.assertNotIn("Give me the result as", prompt)
+
+    def test_the_previous_deliverable_file_is_attached_alongside_its_pasted_text(self):
+        """Item 24b part 2: when an earlier stage produced a real file, hand
+        the follow-up agent that actual file too, not only the pasted-text
+        summary -- a stronger "remake this" than text alone, and the text
+        stays so a tool that cannot read the attachment still has it."""
+        tmp = tempfile.NamedTemporaryFile(suffix=".docx", delete=False)
+        tmp.write(b"x")
+        tmp.close()
+        self.addCleanup(lambda: os.path.exists(tmp.name) and os.unlink(tmp.name))
+        self.d._deliverable_path = tmp.name
+        self._followup()
+        files = _TrackedWorker.instances[0].args[2]
+        self.assertTrue(any(f.get("path") == tmp.name for f in files))
+        prompt = _TrackedWorker.instances[0].kwargs["custom_stages"][0][2][0]
+        self.assertIn("PREVIOUS ANSWER", prompt)
+
+    def test_a_deleted_previous_deliverable_is_not_attached_or_an_error(self):
+        self.d._deliverable_path = "/x/gone.docx"
+        self._followup()        # must not raise
+        files = _TrackedWorker.instances[0].args[2]
+        self.assertFalse(any(f.get("path") == "/x/gone.docx" for f in files))
 
     # ── items 4/5: the engine sees the real request, not a short label ─
     def test_the_engine_is_given_the_real_prompt_as_its_query(self):
@@ -1257,10 +1265,49 @@ class ASampleBoqDefinesTheDeliverable(unittest.TestCase):
         import core_bridge as CB
         prompt = CB.get_boq().formatting_prompt("WALLS 12.00 m", has_template=True)
         for phrase in ("reference table of the measured figures",
-                       "decide — count it once or keep both",
                        "size storage, power and switching",
                        "use them as mounting or routing points"):
             self.assertIn(phrase, prompt)
+
+    def test_the_writer_is_told_not_to_silently_drop_a_look_alike_layer(self):
+        """23 Oct 2026, a real-file bug: the writer was once told to simply
+        'decide — count it once or keep both' for two similarly-named
+        layers, and on a real file it used that licence to drop an entire
+        real half of a building's ductwork it mistook for a stale
+        duplicate. The instruction now turns on the actual figures, not
+        the names, and forbids ever dropping a quantity when unsure.
+
+        The owner's own instruction, same day, after a second complex HVAC
+        file: this guidance was learned from an HVAC drawing specifically,
+        and the BOQ add-on also writes for ELV, CCTV, cabling, plumbing and
+        fire-hydrant jobs from this exact same function -- so it must only
+        ever appear when the request was actually for HVAC, never by
+        default, the same standing rule the measurement side
+        (core.boq.measure(hvac=...)) already follows."""
+        import core_bridge as CB
+        boq = CB.get_boq()
+        hvac_prompt = boq.formatting_prompt("WALLS 12.00 m", has_template=True, hvac=True)
+        for phrase in ("NOT AUTOMATICALLY A DUPLICATE",
+                       "NEVER drop either",
+                       "When you are not sure which case this is, keep both",
+                       "LEGEND/KEY",
+                       "HVAC-SPECIFIC WRITE-UP RULES"):
+            self.assertIn(phrase, hvac_prompt)
+
+    def test_the_hvac_write_up_rules_never_appear_for_any_other_trade(self):
+        """The other half of the same instruction: an ELV, CCTV, cabling,
+        plumbing or fire-hydrant BOQ -- `hvac` left at its default -- must
+        never see the HVAC-only guidance above. Proven both ways: the
+        phrase is present when hvac=True, absent when it is not."""
+        import core_bridge as CB
+        boq = CB.get_boq()
+        default_prompt = boq.formatting_prompt("WALLS 12.00 m", has_template=True)
+        explicit_off = boq.formatting_prompt("WALLS 12.00 m", has_template=True, hvac=False)
+        for prompt in (default_prompt, explicit_off):
+            for phrase in ("HVAC-SPECIFIC WRITE-UP RULES",
+                           "NOT AUTOMATICALLY A DUPLICATE",
+                           "LEGEND/KEY"):
+                self.assertNotIn(phrase, prompt)
 
 
 class TheMeasurementIsATable(unittest.TestCase):
@@ -1297,14 +1344,23 @@ class TheMeasurementIsATable(unittest.TestCase):
         self.assertEqual(shown[3], ("EP", "Count", "Electric Pole", "22", "nos"))
 
     def test_the_header_and_warnings_say_what_the_text_said(self):
+        """23 Oct 2026: the warnings moved from one ever-growing label into
+        a collapsed, bulleted dropdown (owner's report: a real site file's
+        warnings had become a wall of text again) -- same content, read
+        from warning_lines() / the toggle button instead of a QLabel."""
         from addons.boq.measured import MeasuredTable
         t = MeasuredTable()
         t.set_quantities(self.Q)
         self.assertIn("29,661 entities", t.header.text())
         self.assertIn("6 layers", t.header.text())
-        self.assertTrue(t.warn.isVisibleTo(t))
-        self.assertIn("Unit not confirmed", t.warn.text())
-        self.assertIn("minimal fallback", t.warn.text())
+        self.assertTrue(t.warn_btn.isVisibleTo(t))
+        self.assertFalse(t.warn_list.isVisibleTo(t))          # collapsed by default
+        lines = " ".join(t.warning_lines())
+        self.assertIn("Unit not confirmed", lines)
+        self.assertIn("minimal fallback", lines)
+        t._toggle_warnings()
+        self.assertTrue(t.warn_list.isVisibleTo(t))
+        self.assertEqual(t.warn_list.count(), len(t.warning_lines()))
         self.assertIn("All 6 layers", t.layers.text())
 
     def test_the_window_fills_the_table_and_keeps_the_prompt_text(self):
@@ -1321,19 +1377,270 @@ class TheMeasurementIsATable(unittest.TestCase):
         self.assertTrue(d.meas_box.isVisibleTo(d))
 
 
-class TheHvacFlagComesOnlyFromTheAskBox(unittest.TestCase):
+class RowsAreTintedByConfidenceAndValueIsEditable(unittest.TestCase):
+    """23 Oct 2026, the owner's ask: colour each row by how much Prism
+    trusts it -- green nothing flagged it, yellow the HVAC duct-pairing
+    rule touched it, red Prism can't resolve it alone -- and let a person
+    correct the Value cell by hand, which marks that row green (confirmed)
+    regardless of what flagged it originally."""
+
+    Q = {
+        "unit": "mm", "unit_code": 4, "unit_confirmed": True,
+        "notes": ["M-DUCT-SUPP: read 3 pair(s) of lines as one run's two "
+                 "edges, not two separate runs (a duct/pipe/tray drawn to "
+                 "its real width) — verify before pricing."],
+        "lengths_by_layer": {"M-DUCT-SUPP": 4000.0, "A-WALL": 2000.0,
+                             "A-DOOR": 500.0},
+        "block_counts": {"PUMP": 3},
+        "block_layers": {"PUMP": ["M-EQPM"]},
+        "layers": ["M-DUCT-SUPP", "A-WALL", "A-DOOR", "M-EQPM"],
+        "entity_count": 10,
+        "site": {
+            "lookalikes": [{"layers": ["A-WALL", "A-Wall-2"],
+                            "verdict": "check which is current before counting either"}],
+            "remote_blocks": [{"name": "PUMP", "count": 1, "of": 3,
+                               "distances_m": [5000]}],
+        },
+    }
+
+    def test_severity_for_reads_the_same_signals_as_the_warnings(self):
+        from addons.boq.measured import SEV_BAD, SEV_WARN, severity_for
+        sev = severity_for(self.Q)
+        self.assertEqual(sev["A-WALL"], SEV_BAD)
+        self.assertEqual(sev["A-Wall-2"], SEV_BAD)
+        self.assertEqual(sev["PUMP"], SEV_BAD)
+        self.assertEqual(sev["M-DUCT-SUPP"], SEV_WARN)
+        self.assertNotIn("A-DOOR", sev)
+
+    def test_rows_are_tinted_green_yellow_red(self):
+        """23 Oct 2026, second round: a pale row background alone read as
+        "no colour coding" at a glance -- there is now a dedicated Trust
+        column too, a solid dot in the full ink colour. Both are checked
+        here: the row tint (still present) and the dot's own colour."""
+        import theme
+        from addons.boq.measured import COL_ITEM, COL_TRUST, MeasuredTable
+        t = MeasuredTable()
+        t.set_quantities(self.Q)
+        by_item = {t.table.item(r, COL_ITEM).text(): r for r in range(t.table.rowCount())}
+
+        def bg(item_name):
+            return t.table.item(by_item[item_name], COL_ITEM).background().color()
+
+        def dot_ink(item_name):
+            return t.table.item(by_item[item_name], COL_TRUST).foreground().color()
+
+        self.assertEqual(bg("A-WALL"), theme.qcolor(theme.ERR_BG))
+        self.assertEqual(bg("PUMP"), theme.qcolor(theme.ERR_BG))
+        self.assertEqual(bg("M-DUCT-SUPP"), theme.qcolor(theme.WARN_BG))
+        self.assertEqual(bg("A-DOOR"), theme.qcolor(theme.OK_BG))
+        self.assertEqual(dot_ink("A-WALL"), theme.qcolor(theme.ERR_INK))
+        self.assertEqual(dot_ink("M-DUCT-SUPP"), theme.qcolor(theme.WARN_INK))
+        self.assertEqual(dot_ink("A-DOOR"), theme.qcolor(theme.OK_INK))
+
+    def test_the_colours_actually_render_on_screen_under_the_real_stylesheet(self):
+        """23 Oct 2026, caught on the owner's own screenshot: every test
+        above passed, yet the live app showed every Trust dot solid black
+        and no row tint at all. The data model was right
+        (`.foreground().color()` reported red); the screen was not --
+        because app.qss's `QTableWidget::item { color: #09090b; }` makes
+        Qt's style paint every item with that fixed colour regardless of
+        the item's own Qt.ForegroundRole/BackgroundRole brush, a known Qt
+        stylesheet limitation. Fixed with `_TintDelegate`, which paints
+        the cell itself instead of going through the style. This test
+        loads the REAL style.qss (what every earlier test here skipped)
+        and samples an actual rendered pixel, so it fails the way the
+        owner's screenshot did if this regresses, not just on the data."""
+        import os
+        from PySide6.QtWidgets import QApplication
+        from addons.boq.measured import COL_ITEM, COL_TRUST, MeasuredTable
+        app = QApplication.instance()
+        qss_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "style.qss")
+        with open(qss_path, encoding="utf-8") as f:
+            qss = f.read()
+        previous = app.styleSheet()
+        app.setStyleSheet(qss.replace("%ASSETS%", "."))
+        try:
+            t = MeasuredTable()
+            t.set_quantities(self.Q)
+            t.resize(760, 300)
+            t.show()
+            app.processEvents()
+            by_item = {t.table.item(r, COL_ITEM).text(): r for r in range(t.table.rowCount())}
+            r = by_item["A-WALL"]                       # red (lookalike)
+            rect = t.table.visualItemRect(t.table.item(r, COL_TRUST))
+            local_pt = t.mapFromGlobal(t.table.viewport().mapToGlobal(rect.center()))
+            pixel = t.grab().toImage().pixelColor(local_pt)
+            # style.qss's forced item colour is #09090b -- near-black, low
+            # red, low green. theme.ERR_INK (#b91c1c) is red-dominant and
+            # nowhere near black. If the delegate regresses, this pixel
+            # goes back to black and the assertion below catches it.
+            self.assertGreater(pixel.red(), 120, pixel.name())
+            self.assertLess(pixel.green(), 100, pixel.name())
+        finally:
+            app.setStyleSheet(previous)
+
+    def test_only_the_value_column_can_be_edited(self):
+        from PySide6.QtCore import Qt
+        from addons.boq.measured import COL_SORT, COL_VALUE, MeasuredTable
+        t = MeasuredTable()
+        t.set_quantities(self.Q)
+        for c in range(COL_SORT):                  # every visible column
+            editable = bool(t.table.item(0, c).flags() & Qt.ItemIsEditable)
+            self.assertEqual(editable, c == COL_VALUE, f"column {c}")
+
+    def test_editing_the_value_turns_the_whole_row_green(self):
+        import theme
+        from addons.boq.measured import (
+            COL_ITEM, COL_SORT, COL_TRUST, COL_VALUE, MeasuredTable)
+        t = MeasuredTable()
+        t.set_quantities(self.Q)
+        by_item = {t.table.item(r, COL_ITEM).text(): r for r in range(t.table.rowCount())}
+        r = by_item["A-WALL"]                       # starts red (lookalike)
+        self.assertEqual(t.table.item(r, COL_ITEM).background().color(), theme.qcolor(theme.ERR_BG))
+        t.table.item(r, COL_VALUE).setText("2,500.00")
+        for c in range(COL_SORT):
+            self.assertEqual(t.table.item(r, c).background().color(),
+                             theme.qcolor(theme.OK_BG), f"column {c}")
+        self.assertEqual(t.table.item(r, COL_TRUST).foreground().color(), theme.qcolor(theme.OK_INK))
+        self.assertEqual(t.rows()[r][3], "2,500.00")
+
+    def test_a_non_numeric_edit_is_left_alone(self):
+        import theme
+        from addons.boq.measured import COL_ITEM, COL_VALUE, MeasuredTable
+        t = MeasuredTable()
+        t.set_quantities(self.Q)
+        by_item = {t.table.item(r, COL_ITEM).text(): r for r in range(t.table.rowCount())}
+        r = by_item["A-WALL"]
+        t.table.item(r, COL_VALUE).setText("not a number")
+        # a bad edit never crashes and never falsely marks the row confirmed
+        self.assertEqual(t.table.item(r, COL_ITEM).background().color(), theme.qcolor(theme.ERR_BG))
+
+
+class TheUnitPickerConvertsOnScreenWithoutReMeasuring(unittest.TestCase):
+    """The owner's ask, same day: values were locked to the drawing's own
+    unit with no way to look at them in anything else. `unit_combo` picks
+    mm/cm/m/ft/in and `_render_rows()` redraws from the same measured
+    figures -- no re-measuring, counts never convert, area converts by the
+    squared length factor."""
+
+    Q = {
+        "unit": "millimeters", "unit_code": 4, "unit_confirmed": True,
+        "notes": [],
+        "lengths_by_layer": {"M-DUCT": 4000.0},
+        "areas_by_layer": {"M-EQPM": 2_000_000.0},
+        "block_counts": {"VALVE": 2},
+        "block_layers": {"VALVE": ["M-VALVE"]},
+        "layers": ["M-DUCT", "M-EQPM", "M-VALVE"],
+        "entity_count": 6,
+    }
+
+    def test_convert_value_is_exact_for_length_and_squared_for_area(self):
+        from addons.boq.measured import KIND_AREA, KIND_COUNT, KIND_LENGTH, convert_value
+        self.assertAlmostEqual(
+            convert_value(KIND_LENGTH, 4000.0, "millimeters", "meters"), 4.0)
+        self.assertAlmostEqual(
+            convert_value(KIND_AREA, 2_000_000.0, "millimeters", "meters"), 2.0)
+        self.assertEqual(convert_value(KIND_COUNT, 2, "millimeters", "meters"), 2)
+        # an unrecognised/unconfirmed unit is left exactly as given, never guessed
+        self.assertEqual(convert_value(KIND_LENGTH, 4000.0, None, "meters"), 4000.0)
+
+    def test_as_measured_is_byte_for_byte_the_old_behaviour(self):
+        from addons.boq.measured import MeasuredTable
+        t = MeasuredTable()
+        t.set_quantities(self.Q)
+        self.assertEqual(t.rows()[0], ("M-DUCT", "Length", "M-DUCT", "4,000.00", "millimeters"))
+
+    def test_switching_to_meters_converts_length_and_area_not_count(self):
+        from addons.boq.measured import MeasuredTable
+        t = MeasuredTable()
+        t.set_quantities(self.Q)
+        idx = t.unit_combo.findData("meters")
+        t.unit_combo.setCurrentIndex(idx)
+        by_item = {r[0]: r for r in t.rows()}
+        self.assertEqual(by_item["M-DUCT"][3:], ("4.00", "m"))
+        self.assertEqual(by_item["M-EQPM"][3:], ("2.00", "sq m"))
+        self.assertEqual(by_item["VALVE"][3:], ("2", "nos"))     # untouched
+
+    def test_switching_back_to_as_measured_restores_the_original_figures(self):
+        from addons.boq.measured import MeasuredTable
+        t = MeasuredTable()
+        t.set_quantities(self.Q)
+        t.unit_combo.setCurrentIndex(t.unit_combo.findData("feet"))
+        t.unit_combo.setCurrentIndex(t.unit_combo.findData("native"))
+        self.assertEqual(t.rows()[0], ("M-DUCT", "Length", "M-DUCT", "4,000.00", "millimeters"))
+
+    def test_the_picker_is_disabled_when_the_unit_is_not_confirmed_or_inferred(self):
+        from addons.boq.measured import MeasuredTable
+        t = MeasuredTable()
+        q = dict(self.Q, unit="unspecified", unit_code=0, unit_confirmed=False)
+        t.set_quantities(q)
+        self.assertFalse(t.unit_combo.isEnabled())
+
+
+class TheExpandedWindowAndTheDesktopCsv(unittest.TestCase):
+    """The owner's report, 23 Oct 2026: the embedded table is too small --
+    "you can't see more than half of the information" -- so a button opens
+    the same table full-size in its own window. And once the numbers are
+    reviewed/edited, a direct CSV save to the Desktop, no file dialog."""
+
+    Q = TheMeasurementIsATable.Q
+
+    def test_open_in_a_bigger_window_shows_the_same_rows(self):
+        from addons.boq.measured import MeasuredTable, MeasuredTableWindow
+        t = MeasuredTable()
+        t.set_quantities(self.Q)
+        t._open_big()
+        self.assertIsInstance(t._big_window, MeasuredTableWindow)
+        self.assertEqual(t._big_window.table_widget.rows(), t.rows())
+
+    def test_opening_it_twice_reuses_the_same_window(self):
+        from addons.boq.measured import MeasuredTable
+        t = MeasuredTable()
+        t.set_quantities(self.Q)
+        t._open_big()
+        first = t._big_window
+        t._open_big()
+        self.assertIs(t._big_window, first)
+
+    def test_save_as_csv_writes_what_is_on_screen_to_a_patched_desktop(self):
+        import csv
+        from unittest import mock
+        from addons.boq import measured
+        t = measured.MeasuredTable()
+        t.set_quantities(self.Q)
+        tmp = tempfile.mkdtemp(prefix="prism-desktop-")
+        with mock.patch.object(measured, "desktop_dir", return_value=tmp):
+            t._save_desktop_csv()
+        self.assertTrue(t.saved_label.isVisibleTo(t))
+        self.assertIn(tmp, t.saved_label.text())
+        files = os.listdir(tmp)
+        self.assertEqual(len(files), 1)
+        with open(os.path.join(tmp, files[0]), newline="", encoding="utf-8") as f:
+            rows = list(csv.reader(f))
+        self.assertEqual(rows[0], ["Item", "Measured as", "Layer", "Value", "Unit"])
+        self.assertEqual(len(rows) - 1, len(t.rows()))
+
+
+class TheHvacFlagComesOnlyFromTheIndustryDropdown(unittest.TestCase):
     """HVAC_DRAWING_RULES.md's rules are trade-specific -- the owner's own
-    instruction, 22 Oct 2026: apply them only when the person's own
-    request actually says "HVAC", never by default, and never guessed
-    from the drawing itself. _measure() is the one place this is decided,
-    reading self.ask.text() (available the moment a drawing is attached,
-    unlike self.request, which isn't set until "Make" is pressed)."""
+    instruction, 22 Oct 2026: apply them only when the person has said so,
+    never by default, and never guessed from the drawing itself. Widened
+    26 Oct 2026, item 26: BOQ now targets several industries, each with
+    its own rule-set, so guessing from the ask box's own typed words (the
+    original form of this rule) was replaced with the explicit Industry
+    dropdown -- a typo, or a phrase like "ducting job" that never says
+    the word "HVAC", used to silently miss the gate; an explicit choice
+    cannot. _measure() is the one place this is decided, reading
+    self.industry_combo directly (available the moment a drawing is
+    attached, unlike self.request, which isn't set until "Make" is
+    pressed)."""
 
     class _Capture:
         seen: dict = {}
 
         def __init__(self, *a, **kw):
-            TheHvacFlagComesOnlyFromTheAskBox._Capture.seen = kw
+            TheHvacFlagComesOnlyFromTheIndustryDropdown._Capture.seen = kw
             self.done = self.failed = self
 
         def connect(self, *_):
@@ -1342,11 +1649,11 @@ class TheHvacFlagComesOnlyFromTheAskBox(unittest.TestCase):
         def start(self):
             pass
 
-    def _measure_with(self, text: str) -> bool:
+    def _measure_with(self, industry: str) -> bool:
         from unittest import mock
         from addons.boq import dialog as BD
         d = _dialog()
-        d.ask.set_text(text)
+        d.industry_combo.setCurrentText(industry)
         d.cad_path = os.path.join(tempfile.mkdtemp(), "sai.dxf")
         with open(d.cad_path, "w") as fh:
             fh.write("0\nEOF\n")
@@ -1354,14 +1661,297 @@ class TheHvacFlagComesOnlyFromTheAskBox(unittest.TestCase):
             d._measure()
         return self._Capture.seen.get("hvac")
 
-    def test_the_word_hvac_turns_it_on(self):
-        self.assertTrue(self._measure_with("BOQ for HVAC ductwork"))
+    def test_picking_hvac_turns_it_on(self):
+        self.assertTrue(self._measure_with("HVAC"))
 
-    def test_hvac_is_not_case_sensitive(self):
-        self.assertTrue(self._measure_with("boq for the Hvac layout"))
+    def test_general_leaves_it_off(self):
+        self.assertFalse(self._measure_with("General"))
 
-    def test_a_different_trade_leaves_it_off(self):
-        self.assertFalse(self._measure_with("BOQ for the electrical layout"))
+    def test_the_word_hvac_typed_in_the_request_no_longer_matters(self):
+        """The old gate (typed text) must not leak back in -- picking
+        "General" must leave the flag off even when the request itself
+        says "HVAC", since item 26 moved this decision to the dropdown."""
+        from unittest import mock
+        from addons.boq import dialog as BD
+        d = _dialog()
+        d.ask.set_text("BOQ for HVAC ductwork")
+        d.industry_combo.setCurrentText("General")
+        d.cad_path = os.path.join(tempfile.mkdtemp(), "sai.dxf")
+        with open(d.cad_path, "w") as fh:
+            fh.write("0\nEOF\n")
+        with mock.patch.object(BD, "MeasureWorker", self._Capture):
+            d._measure()
+        self.assertFalse(self._Capture.seen.get("hvac"))
 
-    def test_no_request_text_yet_leaves_it_off(self):
-        self.assertFalse(self._measure_with(""))
+    def test_the_flag_is_remembered_for_the_write_up_stage_too(self):
+        """Not just measured with -- the same decision has to reach the
+        write-up prompt later, at `_write()` time, when the dropdown's own
+        selection may have already changed."""
+        from unittest import mock
+        from addons.boq import dialog as BD
+        d = _dialog()
+        d.industry_combo.setCurrentText("HVAC")
+        d.cad_path = os.path.join(tempfile.mkdtemp(), "sai.dxf")
+        with open(d.cad_path, "w") as fh:
+            fh.write("0\nEOF\n")
+        with mock.patch.object(BD, "MeasureWorker", self._Capture):
+            d._measure()
+        self.assertTrue(d._hvac)
+
+    class _WriteCapture:
+        seen: dict = {}
+
+        def __init__(self, *a, **kw):
+            TheHvacFlagComesOnlyFromTheIndustryDropdown._WriteCapture.seen = {"args": a, "kwargs": kw}
+            self.done = self.failed = self
+
+        def connect(self, *_):
+            pass
+
+        def start(self):
+            pass
+
+    def _write_prompt_with(self, hvac: bool) -> str:
+        from unittest import mock
+        from addons.boq import dialog as BD
+        d = _dialog()
+        d.q = {"layers": ["M-DUCT"], "lengths_by_layer": {"M-DUCT": 12.0},
+              "areas_by_layer": {}, "block_counts": {}, "unit": "m",
+              "duct_sizes": [], "scope_total_layers": 1}
+        d.cad_path = "/x/site.dxf"
+        d.summary = "M-DUCT 12.00 m"
+        d.request = "BOQ for HVAC ductwork" if hvac else "BOQ for the electrical layout"
+        d._hvac = hvac
+        d.writer_agent = "ChatGPT"
+        with mock.patch.object(BD, "AutomationWorker", self._WriteCapture):
+            d._write()
+        return self._WriteCapture.seen["kwargs"]["custom_stages"][0][2][0]
+
+    def test_the_write_up_prompt_carries_the_hvac_rules_only_when_hvac(self):
+        self.assertIn("HVAC-SPECIFIC WRITE-UP RULES", self._write_prompt_with(True))
+
+    def test_a_different_trades_write_up_prompt_never_sees_them(self):
+        self.assertNotIn("HVAC-SPECIFIC WRITE-UP RULES", self._write_prompt_with(False))
+
+
+class ExternalMeasurementsAreASecondWayIn(unittest.TestCase):
+    """24 Oct 2026, the owner's ask: a second entry point into the BOQ
+    pipeline besides measuring a drawing -- paste or upload measurements
+    from a tool outside Prism (the PDF takeoff extractor, a rate list,
+    anyone's own notes). Treated as plain text from here on, never parsed
+    into a schema, never sent anywhere as an image -- the same "no AI
+    ever sees the drawing" promise, just for a source that was never a
+    drawing to begin with."""
+
+    def test_using_external_measurements_sets_q_and_summary(self):
+        from unittest import mock
+        import tempfile
+        import core_bridge as CB
+        d = _dialog()
+        with mock.patch.object(CB.config, "RUNS_DIR", tempfile.mkdtemp()), \
+                mock.patch.object(CB.config, "save_artifact"):
+            d._use_external_measurements("DUCT SUMMARY\n  supply 20x30 38.8m\n")
+        self.assertEqual(d.q, {"external": True,
+                               "text": "DUCT SUMMARY\n  supply 20x30 38.8m\n"})
+        self.assertEqual(d.summary, "DUCT SUMMARY\n  supply 20x30 38.8m\n")
+        self.assertTrue(d.ext_meas_box.isVisibleTo(d))
+        self.assertEqual(d.ext_meas_view.toPlainText(), d.summary)
+
+    def test_it_never_writes_outside_the_patched_runs_dir(self):
+        from unittest import mock
+        import tempfile
+        import core_bridge as CB
+        d = _dialog()
+        tmp = tempfile.mkdtemp()
+        with mock.patch.object(CB.config, "RUNS_DIR", tmp), \
+                mock.patch.object(CB.config, "save_artifact"):
+            d._use_external_measurements("text")
+        self.assertTrue(d.csv_path.startswith(tmp))
+        with open(d.csv_path, encoding="utf-8") as f:
+            self.assertEqual(f.read(), "text")
+
+    def test_hvac_is_decided_from_the_industry_dropdown_the_same_way_as_measuring(self):
+        """Item 26, 26 Oct 2026: moved from guessing at the ask box's own
+        typed words to the explicit Industry dropdown -- see
+        TheHvacFlagComesOnlyFromTheIndustryDropdown for _measure()'s own
+        version of this same rule."""
+        from unittest import mock
+        import tempfile
+        import core_bridge as CB
+        d = _dialog()
+        d.industry_combo.setCurrentText("HVAC")
+        with mock.patch.object(CB.config, "RUNS_DIR", tempfile.mkdtemp()), \
+                mock.patch.object(CB.config, "save_artifact"):
+            d._use_external_measurements("text")
+        self.assertTrue(d._hvac)
+
+    def test_a_non_hvac_industry_leaves_it_off(self):
+        from unittest import mock
+        import tempfile
+        import core_bridge as CB
+        d = _dialog()
+        d.industry_combo.setCurrentText("General")
+        with mock.patch.object(CB.config, "RUNS_DIR", tempfile.mkdtemp()), \
+                mock.patch.object(CB.config, "save_artifact"):
+            d._use_external_measurements("text")
+        self.assertFalse(d._hvac)
+
+    def test_only_one_measurement_source_is_ever_shown_at_once(self):
+        """Measuring a real drawing after external measurements were used
+        hides the external panel, and vice versa -- never both claiming
+        to be the active source at the same time."""
+        from unittest import mock
+        import tempfile
+        import core_bridge as CB
+        d = _dialog()
+        with mock.patch.object(CB.config, "RUNS_DIR", tempfile.mkdtemp()), \
+                mock.patch.object(CB.config, "save_artifact"):
+            d._use_external_measurements("text")
+        self.assertTrue(d.ext_meas_box.isVisibleTo(d))
+        d.cad_path = "/x/site.dxf"
+        with mock.patch.object(CB.config, "RUNS_DIR", tempfile.mkdtemp()), \
+                mock.patch.object(CB.config, "save_artifact"):
+            d._on_measured({"layers": [], "lengths_by_layer": {}, "areas_by_layer": {},
+                            "block_counts": {}, "unit": "m", "unit_code": 6,
+                            "unit_confirmed": True, "notes": [], "site": {},
+                            "entity_count": 0}, [])
+        self.assertFalse(d.ext_meas_box.isVisibleTo(d))
+        self.assertTrue(d.meas_box.isVisibleTo(d))
+
+    def test_make_with_drawing_is_off_without_a_real_drawing(self):
+        from unittest import mock
+        import tempfile
+        import core_bridge as CB
+        d = _dialog()
+        with mock.patch.object(CB.config, "RUNS_DIR", tempfile.mkdtemp()), \
+                mock.patch.object(CB.config, "save_artifact"):
+            d._use_external_measurements("text")
+        self.assertFalse(d.recheck_btn.isEnabled())
+        self.assertEqual(d.cad_path, "")
+
+    def test_the_write_up_prompt_uses_the_pasted_text_as_the_measured_quantities(self):
+        from unittest import mock
+        import tempfile
+        import core_bridge as CB
+        from addons.boq import dialog as BD
+        d = _dialog()
+        d.industry_combo.setCurrentText("HVAC")
+        with mock.patch.object(CB.config, "RUNS_DIR", tempfile.mkdtemp()), \
+                mock.patch.object(CB.config, "save_artifact"):
+            d._use_external_measurements("MY OWN DUCT NUMBERS: 38.8m supply")
+        d.request = "Create me a BOQ for the HVAC industry"
+        d.writer_agent = "ChatGPT"
+
+        class _Capture:
+            seen = {}
+            def __init__(self, *a, **kw):
+                _Capture.seen = {"args": a, "kwargs": kw}
+                self.done = self.failed = self
+            def connect(self, *_): pass
+            def start(self): pass
+
+        with mock.patch.object(BD, "AutomationWorker", _Capture):
+            d._write()
+        prompt = _Capture.seen["kwargs"]["custom_stages"][0][2][0]
+        self.assertIn("MY OWN DUCT NUMBERS: 38.8m supply", prompt)
+        self.assertIn("HVAC-SPECIFIC WRITE-UP RULES", prompt)
+
+
+class TheIndustryDropdownGatesThePdfTakeoffButton(unittest.TestCase):
+    """Item 26: BOQ is sold across industries, and only HVAC has a
+    PDF-takeoff tool of its own today -- the button must never be shown
+    for an industry that has none (it would silently run HVAC's own OCR
+    and rules against a drawing that was never one)."""
+
+    def test_general_is_the_default_and_the_button_starts_hidden(self):
+        d = _dialog()
+        self.assertEqual(d.industry_combo.currentText(), "General")
+        self.assertFalse(d.takeoff_btn.isVisibleTo(d))
+
+    def test_picking_hvac_shows_the_button(self):
+        d = _dialog()
+        d.industry_combo.setCurrentText("HVAC")
+        self.assertTrue(d.takeoff_btn.isVisibleTo(d))
+
+    def test_switching_back_to_general_hides_it_again(self):
+        d = _dialog()
+        d.industry_combo.setCurrentText("HVAC")
+        d.industry_combo.setCurrentText("General")
+        self.assertFalse(d.takeoff_btn.isVisibleTo(d))
+
+    def test_accepting_the_takeoff_dialog_feeds_its_text_in_as_external_measurements(self):
+        from unittest import mock
+        import tempfile
+        import core_bridge as CB
+        from addons.boq import dialog as BD
+        from PySide6.QtWidgets import QDialog
+
+        class _FakeTakeoffDialog:
+            def __init__(self, industry, parent=None):
+                self.industry = industry
+            def exec(self):
+                return QDialog.Accepted
+            def measurements_text(self):
+                return "DUCT SUMMARY\n  supply 12x8  40.0 ft\n"
+
+        d = _dialog()
+        d.industry_combo.setCurrentText("HVAC")
+        with mock.patch.object(BD, "IndustryTakeoffDialog", _FakeTakeoffDialog), \
+                mock.patch.object(CB.config, "RUNS_DIR", tempfile.mkdtemp()), \
+                mock.patch.object(CB.config, "save_artifact"):
+            d._open_industry_takeoff()
+        self.assertEqual(d.summary, "DUCT SUMMARY\n  supply 12x8  40.0 ft\n")
+        self.assertTrue(d._hvac)
+
+    def test_declining_the_takeoff_dialog_changes_nothing(self):
+        from unittest import mock
+        from addons.boq import dialog as BD
+        from PySide6.QtWidgets import QDialog
+
+        class _FakeTakeoffDialog:
+            def __init__(self, industry, parent=None):
+                pass
+            def exec(self):
+                return QDialog.Rejected
+            def measurements_text(self):
+                return "should never be read"
+
+        d = _dialog()
+        d.industry_combo.setCurrentText("HVAC")
+        with mock.patch.object(BD, "IndustryTakeoffDialog", _FakeTakeoffDialog):
+            d._open_industry_takeoff()
+        self.assertEqual(d.summary, "")
+
+
+class InputMeasurementsDialogTests(unittest.TestCase):
+    """The small paste-or-upload dialog itself, independent of BoqDialog."""
+
+    def test_confirm_is_blocked_when_nothing_was_entered(self):
+        from unittest import mock
+        from addons.boq.dialog import InputMeasurementsDialog
+        dlg = InputMeasurementsDialog()
+        # _confirm() shows a blocking QMessageBox when empty -- never let a
+        # test actually run that modal (same trap as .exec()/processEvents).
+        with mock.patch("addons.boq.dialog.QMessageBox.information"):
+            dlg._confirm()
+        self.assertEqual(dlg.result(), 0)   # never accepted -- still open
+
+    def test_pasted_text_is_returned_as_is(self):
+        from addons.boq.dialog import InputMeasurementsDialog
+        dlg = InputMeasurementsDialog()
+        dlg.text.setPlainText("  some measurements  \n")
+        self.assertEqual(dlg.measurements_text(), "some measurements")
+
+    def test_uploading_a_file_loads_its_content_into_the_text_box(self):
+        import tempfile
+        from unittest import mock
+        from addons.boq.dialog import InputMeasurementsDialog
+        from PySide6.QtWidgets import QFileDialog
+        path = os.path.join(tempfile.mkdtemp(), "takeoff.json")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write('{"duct_summary": []}')
+        dlg = InputMeasurementsDialog()
+        with mock.patch.object(QFileDialog, "getOpenFileName", return_value=(path, "")):
+            dlg._upload()
+        self.assertEqual(dlg.text.toPlainText(), '{"duct_summary": []}')
+        self.assertIn("takeoff.json", dlg.file_label.text())

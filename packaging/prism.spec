@@ -208,6 +208,18 @@ try:
 except Exception:                                       # not installed: source-only
     pass
 
+# pypdfium2 (addons/boq's HVAC PDF-takeoff, item 26) ships pdfium's own
+# compiled binary inside the package and loads it by a path read from its
+# own data files -- the same class of bug rapidocr_onnxruntime's own
+# comment above already describes, so it gets the same guarded treatment
+# rather than trusting PyInstaller's static analysis to find a binary
+# loaded this indirectly. pdfplumber is pure Python on top of it and needs
+# no such help; included here only so both land in one place.
+try:
+    datas += collect_data_files("pypdfium2")
+except Exception:                                       # not installed: source-only
+    pass
+
 # OpenCV, which RapidOCR imports. cv2's __init__ loads its compiled extension
 # by a path it reads from its own config files, and on the macOS arm64 bundle
 # that left "recursion is detected during loading of cv2 binary extensions" —

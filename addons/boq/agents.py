@@ -44,6 +44,18 @@ instead of writing one. Selectors verified live the same way as Grok and
 DeepSeek. This closed out every writer agent from the owner's original
 list of seven.
 
+WRITER was pruned to exactly six, 2026-10-25 (item 24a): Claude, Grok,
+Kimi 2.6, DeepSeek, Gemini, ChatGPT — the owner's own words, "keep
+claude, grok, kimi, deepseek, gemini, chatgpt ONLY". Perplexity,
+LAZYCOOK, Jasper, Copy.ai, Writesonic never had a real automation profile
+built for BOQ's write-up job in the first place (item 1's own table) and
+are dropped for good. Groq-inhouse is ALSO dropped here, confirmed with
+the owner directly after item 3 (its whole premise — a second agent
+converting Groq's text-only answer into the real file) was superseded by
+this same instruction, not assumed either way: see BOQ-CHANGES-TODO.md
+item 3's "superseded" note. This replaces item 3's original seven-agent
+ordering where the two disagree.
+
 FALLBACK_ORDER (2026-10-21) is item 2's fallback chain: the owner's own
 words, "when those errors occur which agent should be used as a fallback
 (claude/kimi)". Same shape as addons/step/dialog.py's FALLBACK_ORDER, not
@@ -56,8 +68,7 @@ addons/boq/dialog.py's _fallback_chain().
 """
 from __future__ import annotations
 
-WRITER = ["Perplexity", "ChatGPT", "Claude", "Groq", "Grok", "DeepSeek",
-          "Gemini", "LAZYCOOK", "Jasper", "Copy.ai", "Kimi 2.6", "Writesonic"]
+WRITER = ["Claude", "Grok", "Kimi 2.6", "DeepSeek", "Gemini", "ChatGPT"]
 
 RESEARCH = ["Perplexity", "ChatGPT", "Claude"]
 
