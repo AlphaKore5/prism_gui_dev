@@ -24,3 +24,8 @@ tests/test_step_dialog.py::TheWindowRoutesIt.test_the_screens_button_opens_the_d
 tests/test_boq_dialog.py::TheDrawingGoesToAIOnlyAfterAYes.test_the_button_is_off_until_there_is_an_answer_and_a_drawing
 tests/test_boq_dialog.py::_FakeRunDialog.exec
 tests/test_boq_pricing.py::TheDialogShowsTheCardOnceMeasured.test_hidden_before_and_shown_after_the_measurement
+
+# Dev-build isolation no longer changes HOME or USERPROFILE (RELEASE_ISSUES.md ISS-009), so two tests were
+# renamed to say what they now check: the data folder is separate and the real home is remembered.
+tests/test_channel.py::IsolateHomeTests.test_dev_build_gets_its_own_home_by_default
+tests/test_channel.py::IsolateHomeTests.test_isolation_is_idempotent
