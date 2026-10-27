@@ -1,5 +1,10 @@
 # Working on Prism with Claude
 
+**Read `RELEASE_ISSUES.md` first, every time you build, tag, publish, push, change the
+licence console, or change how a dev build runs.** It holds the pre-release checklist and
+every release mistake already made. Add an entry there in the same session as any new
+incident. Repeating a logged mistake is the failure the owner cares most about.
+
 The owner's standing instruction (8 Sep 2026): every pull, merge, push and
 every change to the codebase's structure follows the architecture rules,
 so that modules stay independent and are easy to add, edit, update and
