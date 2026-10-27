@@ -100,6 +100,14 @@ class TheRepoChecks(unittest.TestCase):
     def test_the_engine_pointer_counts_as_shipped(self):
         self.assertEqual(P.shipped_changes(["prism_terminal", "docs/a.md"]), ["prism_terminal"])
 
+    def test_how_production_is_built_or_published_counts_as_shipped(self):
+        # Found in review 2026-10-28: the first version treated the CI workflow and the publishing
+        # tools as harmless, so a change to how production is built could follow the dev release.
+        for path in (".github/workflows/build.yml", "devtools/release_all.py", "devtools/sign_manifest.py",
+                     "packaging/build.py"):
+            self.assertEqual(P.shipped_changes([path]), [path], path)
+        self.assertEqual(P.shipped_changes(["devtools/promote_check.py", "tests/test_x.py"]), [])
+
     def test_a_dev_tag_on_this_commit_passes(self):
         def fake(*cmd, **kw):
             if cmd[:2] == ("git", "rev-parse"):
@@ -148,10 +156,16 @@ class TheReport(unittest.TestCase):
             self.assertIn(expected, text)
 
     def test_nothing_in_the_plan_is_run_by_the_check(self):
-        # The gate reads and tests; it never pushes, tags, signs or sets a version.
+        # The gate reads and tests; it never pushes, tags, signs, publishes or sets a version.
+        # Checked on the commands it RUNS (every _run(...) call), not on mentions in lists or text.
+        import re
         source = open(os.path.join(ROOT, "devtools", "promote_check.py"), encoding="utf-8").read()
-        for forbidden in ('"push"', '"tag"', "release_all.py\", ", "sign_manifest", "gh\", \"release", "UPDATE_SIGNING_KEY_HEX"):
-            self.assertNotIn(forbidden, source.split("def plan_text")[0], forbidden)
+        calls = re.findall(r"_run\(([^)]*)\)", source)
+        self.assertTrue(calls)
+        for call in calls:
+            for forbidden in ('"push"', '"tag"', "release_all", "sign_manifest", '"release"', "UPDATE_SIGNING_KEY_HEX"):
+                self.assertNotIn(forbidden, call, f"the gate must not run: {call}")
+        self.assertNotIn("UPDATE_SIGNING_KEY_HEX", source)
 
     def test_exit_code_is_failure_when_anything_failed(self):
         failing = [P.Result(P.FAIL, "version", "x")]

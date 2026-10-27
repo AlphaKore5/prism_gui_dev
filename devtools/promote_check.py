@@ -105,11 +105,15 @@ def check_tree_clean() -> Result:
 
 #: Paths that are not part of the shipped app. A commit that touches only these after the dev release
 #: leaves the tested code unchanged, so it does not break "promote what was tested".
-NON_SHIPPING = ("docs/", "devtools/", "tests/", "RELEASE_ISSUES.md", "CLAUDE.md", "CHANGES.md", "BOQ-CHANGES-TODO.md", ".github/")
+NON_SHIPPING = ("docs/", "devtools/", "tests/", "RELEASE_ISSUES.md", "CLAUDE.md", "CHANGES.md", "BOQ-CHANGES-TODO.md")
+#: ...except these, which decide how production is BUILT or PUBLISHED. A change to them after the dev
+#: release means the dev release never exercised it (the workflow is outside NON_SHIPPING already).
+PUBLISHING = ("devtools/release_all.py", "devtools/sign_manifest.py", "devtools/verify_upload.py")
 
 
 def shipped_changes(paths: list[str]) -> list[str]:
-    return [p for p in paths if not any(p == n or p.startswith(n) for n in NON_SHIPPING)]
+    return [p for p in paths
+            if p in PUBLISHING or not any(p == n or p.startswith(n) for n in NON_SHIPPING)]
 
 
 def check_dev_tag(version: str) -> Result:

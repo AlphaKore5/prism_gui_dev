@@ -118,6 +118,42 @@ class Planning(Rooms):
         self.assertEqual(len(plan.extra_files), len(U.LINUX_LAUNCHER_FILES))
 
 
+class TheProgramFolderMustBePrismsAlone(Rooms):
+    """Found in review (2026-10-28): "the folder holding the executable" could be the Desktop, if
+    someone copied Prism's files straight onto it. Then Uninstall would have deleted the Desktop."""
+
+    def test_a_folder_shared_with_the_persons_files_is_refused_and_says_what_to_delete(self):
+        open(os.path.join(self.install, "taxes.pdf"), "w").write("x")
+        os.makedirs(os.path.join(self.install, "_internal"))
+        with self.assertRaises(U.Refused) as ctx:
+            self.plan(U.SCOPE_APP)
+        message = str(ctx.exception)
+        self.assertIn("taxes.pdf", message)
+        self.assertIn("_internal", message)
+
+    def test_a_real_program_folder_is_accepted_with_its_linux_extras(self):
+        os.makedirs(os.path.join(self.install, "_internal"))
+        for name in ("install.sh", "in.alphakore.prism.desktop", "in.alphakore.prism.png", ".prism_update_pending"):
+            open(os.path.join(self.install, name), "w").write("x")
+        self.assertEqual(self.plan(U.SCOPE_APP).app_dir, self.install)
+
+    def test_the_updaters_leftovers_beside_the_program_are_included(self):
+        old = self.install + ".old"
+        staging = os.path.join(self.apps, ".prism-update-staging")
+        marker = self.install + ".prism_update_pending"
+        os.makedirs(old); os.makedirs(staging); open(marker, "w").write("1.6.13")
+        plan = self.plan(U.SCOPE_APP)
+        self.assertEqual(sorted(plan.leftovers), sorted([old, staging]))
+        self.assertIn(marker, plan.extra_files)
+
+    def test_the_helper_never_runs_from_inside_the_program_folder(self):
+        seen = {}
+        U.start(self.plan(U.SCOPE_APP), pid=1, script_dir=os.path.join(self.tmp),
+                runner=lambda argv, **kw: seen.update(kw))
+        self.assertEqual(seen["cwd"], self.tmp)
+        self.assertFalse(seen["cwd"].startswith(self.install))
+
+
 class TheScripts(Rooms):
     def test_the_script_names_exactly_the_plan_and_nothing_else(self):
         plan = self.plan(U.SCOPE_ALL, include_outputs=True, output_candidates=[self.artifacts])
@@ -135,6 +171,13 @@ class TheScripts(Rooms):
         plan = U.Plan(U.SCOPE_APP, app_dir=weird)
         text = U.posix_script(plan, 1, "/tmp/log")
         self.assertEqual(subprocess.run(["/bin/sh", "-n", "-c", text.split("\n", 1)[1]]).returncode, 0)
+
+    def test_the_windows_script_deletes_leftover_files_too(self):
+        plan = U.Plan(U.SCOPE_APP, app_dir=r"C:\Apps\Prism", leftovers=[r"C:\Apps\Prism.old"],
+                      extra_files=[r"C:\Apps\Prism.prism_update_pending"])
+        text = U.windows_script(plan, 7, r"C:\Temp\log.txt")
+        self.assertIn('rmdir /s /q "C:\\Apps\\Prism.old"', text)
+        self.assertIn('del /f /q "C:\\Apps\\Prism.prism_update_pending"', text)
 
     def test_the_windows_script_waits_retries_escapes_and_removes_itself(self):
         plan = U.Plan(U.SCOPE_ALL, app_dir=r"C:\Apps\Prism 100%", data_dirs=[r"C:\Users\a\.prism"])
@@ -176,6 +219,14 @@ class ReallyRunningTheHelper(Rooms):
         self.run_helper(plan)
         self.assertEqual(self.alive(self.install, self.data, self.artifacts, self.chosen,
                                     os.path.join(self.chosen, "taxes.pdf")), [False, False, False, True, True])
+
+    def test_the_updaters_leftovers_are_really_removed_and_neighbours_survive(self):
+        old = self.install + ".old"
+        staging = os.path.join(self.apps, ".prism-update-staging")
+        os.makedirs(old); os.makedirs(staging)
+        self.run_helper(self.plan(U.SCOPE_APP))
+        self.assertEqual(self.alive(self.install, old, staging, os.path.join(self.apps, "OtherApp"), self.data),
+                         [False, False, False, True, True])
 
     def test_start_refuses_a_plan_that_names_a_dangerous_folder(self):
         for bad in (U.Plan(U.SCOPE_APP, app_dir=os.path.dirname(os.path.abspath(os.path.expanduser('~')))),

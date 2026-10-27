@@ -46,6 +46,10 @@ If I am about to do the left-hand thing, I stop.
 | Detected my own patch by an attribute a test mock answers for everything. (ISS-014) | Compare identity, not attributes. Run the FULL suite after a cross-cutting change. |
 | Pushed the dev repo's `v1.6.10` tag at current code, which made the old-client tests vacuous for weeks. (ISS-003) | Trust a tag by its contents, never its name. |
 | Changed a CI workflow (release now waits for tests) without being able to lint it. | Install actionlint before editing a workflow, or say "validated as YAML only". |
+| Treated "the folder holding the executable" as Prism's own folder in a feature that deletes it (ISS-018). | For anything destructive, prove the target is ours (expected contents only), and test the shared-folder case. |
+| Let a helper process inherit the app's working folder, which Windows will not delete. | Give helper processes an explicit working folder outside anything they delete. |
+| Classified the CI workflow and publishing tools as "does not ship" in a gate about what was tested. | Anything that decides how production is built or published counts as shipped. |
+| Wrote a changelog line for a feature that was not in the app and not deployed. | Changelogs describe only what the build contains; anything else is labelled as separate and its state given. |
 
 **D. Testing and tools**
 | What I did | Rule |
@@ -142,6 +146,22 @@ something you did not run.
 ---
 
 ## Issue log (newest first)
+
+### ISS-018 — Review of my own work found three defects before anyone hit them (2026-10-28) — FIXED in code
+- **Uninstall could delete a shared folder.** "The program folder" was simply the folder holding the executable. If
+  Prism's files had been copied straight onto the Desktop or into Downloads, "Remove the app" would have deleted that
+  whole folder. Now it is removed only if it holds nothing but Prism's own entries; otherwise it refuses and names
+  the files to delete by hand. The updater's leftovers (`<folder>.old`, `.prism-update-staging`, the pending marker)
+  are now removed too. Tests: `tests/test_uninstall.py::TheProgramFolderMustBePrismsAlone` (a deliberate break of the
+  check makes it fail).
+- **Uninstall would quietly fail on Windows.** The helper inherited Prism's working folder, which for a double-clicked
+  Prism is its own program folder, and Windows will not delete a folder that is a process's working folder. It now
+  runs from the temp folder. Test: `test_the_helper_never_runs_from_inside_the_program_folder`.
+- **The promotion gate treated the CI workflow and the publishing tools as "does not ship".** A change to how
+  production is built or published could follow the dev release unnoticed. Now they count. Test:
+  `test_how_production_is_built_or_published_counts_as_shipped`.
+- **Changelog overclaimed:** 1.6.13 listed a licence-server feature (not deployed) as part of the app, and said
+  ordinary builds were unchanged although every picker now opens in Downloads. Corrected.
 
 ### ISS-017 — My commit rolled back Hitarth's engine update (2026-10-27) — FIXED, caught within the hour
 - **Seen:** after rebasing onto Hitarth's BOQ commit (which moved the `prism_terminal` engine pointer to `4d8ad52`), my

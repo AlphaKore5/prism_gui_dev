@@ -37,6 +37,12 @@ from dataclasses import dataclass, field
 SCOPE_APP = "app"
 SCOPE_ALL = "all"
 
+#: What a Prism program folder may hold, besides the executable itself (packaging/build.py,
+#: apply_update.py). Anything else means the folder is shared with the person's own files: the
+#: Desktop or Downloads a build's contents were copied into. Then the folder is never deleted.
+PROGRAM_FOLDER_ENTRIES = ("_internal", "install.sh", "in.alphakore.prism.desktop", "in.alphakore.prism.png",
+                          ".prism_update_pending", ".prism-write-probe")
+
 #: Per-user files `packaging/install.sh` puts on Linux next to the program.
 LINUX_LAUNCHER_FILES = (
     ("~/.local/bin", "prism"),
@@ -56,11 +62,12 @@ class Plan:
     app_dir: str                                   # the program folder (or .app bundle)
     data_dirs: list[str] = field(default_factory=list)      # Prism's own state
     output_dirs: list[str] = field(default_factory=list)    # files made for the person
-    extra_files: list[str] = field(default_factory=list)    # Linux launcher entries
+    extra_files: list[str] = field(default_factory=list)    # Linux launcher entries, update markers
+    leftovers: list[str] = field(default_factory=list)      # Prism-named folders the updater left beside the program
     skipped: list[tuple[str, str]] = field(default_factory=list)   # (path, why left alone)
 
     def everything(self) -> list[str]:
-        return [self.app_dir, *self.data_dirs, *self.output_dirs, *self.extra_files]
+        return [self.app_dir, *self.leftovers, *self.data_dirs, *self.output_dirs, *self.extra_files]
 
 
 # ── what is safe to delete ────────────────────────────────────────────────────
@@ -126,7 +133,28 @@ def build_plan(scope: str, *, include_outputs: bool = False,
     if not os.path.abspath(exe).startswith(os.path.abspath(app_dir)):
         raise Refused("Prism could not tell which folder holds the running program.")
 
-    plan = Plan(scope=scope, app_dir=os.path.abspath(app_dir))
+    app_dir = os.path.abspath(app_dir)
+    if not app_dir.endswith(".app"):
+        # The program folder must hold Prism and nothing else. If Prism's files were copied straight
+        # into the Desktop or Downloads, deleting "the folder holding the program" would delete
+        # everything in it.
+        mine = {os.path.basename(exe), *PROGRAM_FOLDER_ENTRIES}
+        others = sorted(e for e in os.listdir(app_dir) if e not in mine)
+        if others:
+            shown = ", ".join(others[:5]) + (f" and {len(others) - 5} more" if len(others) > 5 else "")
+            raise Refused(f"The folder {app_dir} holds other things besides Prism ({shown}), so Prism will "
+                          f"not delete it. Remove Prism by deleting {os.path.basename(exe)} and the _internal "
+                          f"folder yourself.")
+
+    plan = Plan(scope=scope, app_dir=app_dir)
+    # What the updater leaves beside the program: its previous version, its staging folder, its marker.
+    parent = os.path.dirname(app_dir)
+    for candidate in (app_dir + ".old", os.path.join(parent, ".prism-update-staging")):
+        if os.path.isdir(candidate) and not refuse_reason(candidate):
+            plan.leftovers.append(candidate)
+    marker = app_dir + ".prism_update_pending"
+    if os.path.isfile(marker) and not refuse_reason(marker):
+        plan.extra_files.append(marker)
     plat = platform or sys.platform
     if plat.startswith("linux"):
         base = home or os.path.expanduser("~")
@@ -169,7 +197,7 @@ def build_plan(scope: str, *, include_outputs: bool = False,
 # ── the helper that runs after Prism has exited ──────────────────────────────
 def posix_script(plan: Plan, pid: int, log_path: str) -> str:
     """The shell script for macOS and Linux."""
-    removals = " ".join(shlex.quote(p) for p in [*plan.output_dirs, *plan.data_dirs, plan.app_dir])
+    removals = " ".join(shlex.quote(p) for p in [*plan.output_dirs, *plan.data_dirs, *plan.leftovers, plan.app_dir])
     files = " ".join(shlex.quote(p) for p in plan.extra_files)
     lines = [
         "#!/bin/sh",
@@ -206,7 +234,7 @@ def windows_script(plan: Plan, pid: int, log_path: str) -> str:
         "  )",
         ")",
     ]
-    for i, path in enumerate([*plan.output_dirs, *plan.data_dirs, plan.app_dir]):
+    for i, path in enumerate([*plan.output_dirs, *plan.data_dirs, *plan.leftovers, plan.app_dir]):
         out += [
             f"set /a tries{i}=0",
             f":again{i}",
@@ -219,6 +247,8 @@ def windows_script(plan: Plan, pid: int, log_path: str) -> str:
             "  )",
             ")",
         ]
+    for path in plan.extra_files:
+        out.append(f'if exist "{q(path)}" del /f /q "{q(path)}"')
     out += [
         f'echo Prism was removed on %date% %time% >> "{q(log_path)}"',
         '(goto) 2>nul & del "%~f0"',
@@ -241,14 +271,16 @@ def start(plan: Plan, *, pid: int | None = None, runner=subprocess.Popen, script
         with open(script, "w", encoding="utf-8", newline="") as f:
             f.write(windows_script(plan, pid, log_path))
         flags = 0x08000000 | 0x00000008          # CREATE_NO_WINDOW | DETACHED_PROCESS
-        runner(["cmd", "/c", script], creationflags=flags, close_fds=True,
+        # cwd: Windows will not delete a folder that is any process's working folder, and a
+        # double-clicked Prism's working folder is usually its own program folder.
+        runner(["cmd", "/c", script], creationflags=flags, close_fds=True, cwd=folder,
                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     else:
         script = os.path.join(folder, f"prism-uninstall-{pid}.sh")
         with open(script, "w", encoding="utf-8") as f:
             f.write(posix_script(plan, pid, log_path))
         os.chmod(script, 0o700)
-        runner(["/bin/sh", script], start_new_session=True, close_fds=True,
+        runner(["/bin/sh", script], start_new_session=True, close_fds=True, cwd=folder,
                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return script
 
@@ -256,6 +288,7 @@ def start(plan: Plan, *, pid: int | None = None, runner=subprocess.Popen, script
 def describe(plan: Plan) -> list[tuple[str, str]]:
     """(what, path) lines for the confirmation window."""
     rows = [("The Prism program", plan.app_dir)]
+    rows += [("Left over from an earlier update", p) for p in plan.leftovers]
     rows += [("Prism's settings, licence and History", p) for p in plan.data_dirs]
     rows += [("Files Prism made for you", p) for p in plan.output_dirs]
     rows += [("Launcher entry", p) for p in plan.extra_files]

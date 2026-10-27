@@ -15,16 +15,20 @@ Tests: **1966 passing** (6 skipped, 8 Sep 2026 after Round 16 landed on main —
 - **Dev builds no longer change Windows' idea of your folders.** They used to redirect the
   whole home setting, so the file picker lost Desktop, Downloads, Documents and Pictures
   and opened in the install folder. They now keep their own data folder without touching
-  Windows, and every picker opens in your real Downloads. Ordinary builds are unchanged.
+  Windows. In every build, dev or not, file and folder pickers now open in your real Downloads
+  instead of whatever folder Prism was started from.
 - **Choose where Prism saves your files** (Settings > Privacy & data): generated files,
   STEP files and Gerber reports each have a folder box; empty means the usual place.
 - **Uninstall** (Settings > Privacy & data): remove the app only, or everything, with a
   separate off-by-default tick for the files Prism made. Only folders named "Prism ..." are
-  ever removed. Not yet run on a real Windows machine: try it on a spare one first.
+  ever removed, and the program folder is removed only if it holds nothing but Prism (a copy
+  dropped straight onto the Desktop is refused, not deleted). Not yet run on a real Windows
+  machine: try it on a spare one first.
 - **Dev builds only:** a card to bring settings, the Groq key, browser logins, History and
   tools across from your normal Prism, which is only read, never changed.
-- The licence console can mark one computer as Development, so an older dev build follows
-  the dev version numbers without touching what customers are told.
+- Not part of this app, listed so it is not lost: the licence server (deployed separately, not yet)
+  lets the console mark one computer as Development, so an older dev build follows the dev
+  version numbers without touching what customers are told.
 
 ---
 
