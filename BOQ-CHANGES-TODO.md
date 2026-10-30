@@ -2271,3 +2271,842 @@ requirement, recorded for when this is implemented.
   `addons/boq/industries.py` before they can appear in the dropdown at
   all — not attempted here, since none of their actual reading rules
   exist yet to encode.
+- **A real gap, found 27 Oct 2026, when asked directly "will the OCR
+  model actually be installed when someone pulls this": `requirements.txt`
+  was missing `rapidocr` entirely.** `hvac_takeoff.py` imports
+  `from rapidocr import RapidOCR` -- a genuinely separate PyPI package
+  from `rapidocr-onnxruntime` (already required, for `core/ocr.py`),
+  different versioning (3.x vs 1.x), neither depends on the other. The
+  first write-up of this section's `requirements.txt` entry assumed the
+  existing `rapidocr-onnxruntime` line covered it; it does not. Fixed
+  now: `rapidocr>=3.10` added, plus a matching guarded
+  `collect_data_files("rapidocr")` in `packaging/prism.spec`.
+  **Still open, and NOT something a requirements.txt line can fix:** the
+  `rapidocr` package does not ship its ~30MB of model weights (PP-OCRv6
+  det/rec "small" + a text-angle classifier) in the wheel at all --
+  `rapidocr/download_file.py` fetches them from `modelscope.cn`,
+  SHA256-verified, the first time `RapidOCR()` actually runs. A fresh
+  `pip install -r requirements.txt` gets the PACKAGE; the actual model
+  weights only arrive on the first real OCR call, and need network
+  access to do it. A frozen/offline build has no good answer here yet --
+  bundling a pre-downloaded models/ directory into the build, or
+  documenting the first-run network requirement, neither attempted.
+
+## 27. A third ground-truth source for the same real file — the client's own field measurement sheet, three-way compared, root causes graded by evidence
+
+Noted 2026-10-28: the client uploaded `clientsent_quantity_measurements.xls`
+into `HVAC_BOQ_TEST/` — the same real file as items 11-25 above
+(`FINAL LAYOUT-Model.pdf`), but this time the ground truth comes from the
+client's own site measurement/billing sheet, not a second AI's read of the
+drawing. Its `Comparison` tab is literally the earlier Claude-written BOQ
+pasted back with the client's own `Actual Quantity` column filled in
+against it, item by item — the first time this file's ground truth comes
+from someone who actually counted the real terminals and dampers on site.
+
+This item is the analysis step only — **27a-27e below are evidence, not
+changes.** Nothing in `hvac_takeoff.py` or `industries.py` was changed yet.
+The 5 numbered items under "Actual changes to make" near the end of this
+section are the real to-do list this analysis produced; each one still
+needs item 25's own process (real geometry, a named general convention, a
+fix, a regression test) before it gets written up as a shipped rule the
+way `HVAC_DRAWING_RULES.md` records one.
+
+**27a. Three-way headline comparison (background numbers only, not a
+change) — Prism's own BOQ output, my (Claude's)
+independent PDF read, and the client's real counts.**
+
+| item | Prism | Claude | client actual |
+|---|---|---|---|
+| 17 TR units | 2 | 2 | 2 |
+| 2 TR Hi-wall units | 3 | 3 | 3 |
+| Supply duct, 22G, sq.m | 38.15 | 50.87 | 55.90 |
+| Supply duct, 24G, sq.m | 81.32 | 96.38 | 187.57 |
+| Return duct, 22G, sq.m | 39.15 | 33.04 | 17.02 |
+| Return duct, 24G, sq.m | 146.36 | 175.01 | 204.38 |
+| Supply insulation, sq.m | 119.47 | 147.25 | 243.47 |
+| Return insulation, sq.m | 185.51 | 208.05 | 221.40 |
+| Diffusers | 40 | 40 | 53 (40 SA + 13 RA) |
+| 36"×8" return grilles | not quantified (folded into "second duct system, unresolved") | 13 | 13 |
+| VCDs | 13 | 13 | 8 |
+
+Accuracy (1 − Σ\|error\| ÷ Σactual, across the measurable rows above):
+Prism vs client ≈ 62%; Prism vs Claude's own independent PDF read ≈ 75%.
+Prism sits closer to a second AI's read of the drawing than to what was
+actually installed on site — backwards from what the add-on needs to be
+useful for pricing.
+
+**27b. Diffusers (40 vs 53) — the shape geometry is clean, so this is
+very unlikely to be a shape-recognition bug.** Item 25k already confirmed,
+at the raw-rect level, that the diffuser layer (`#00ffff@0.84:rect`)
+groups into *exactly* 40 clean triples with zero leftover geometry and no
+outlier sizes suggesting a second symbol. The 13 "RA" diffusers the
+client's own `SQ. DIFFUSER` schedule counts (40 SA + 13 RA = 53, same
+225×225mm neck, "with attached damper") are not sitting undetected in
+this page's own geometry — there is nothing there to find. Two
+possibilities, not yet told apart: (1) this one PDF page is only part of
+a larger drawing set and the 13 RA units are drawn on a page this tool
+was never given, or (2) the schedule total (53) includes terminals this
+sheet never draws individually, relying on the schedule as the sole
+record of quantity. **Not something `count_symbol_rects` can fix by
+itself** — needs the full drawing set, not just "page 1", to settle which.
+
+**27c. VCDs (13 vs 8) — plausible but unverified: collar dampers may be
+getting counted as VCDs.** The client's real count (8) ties every VCD to
+the two 17 TR units' own main ducts (`VCD` sheet: tags "17TR UNIT-1"/
+"-2"). The same client file's `Grill` sheet separately lists 7 grille tags
+(G1-G7), several marked "with attached coller damper" — a different
+fitting, mounted at a grille neck, that plausibly uses a visually similar
+paired-square symbol to the one item 20 already keys VCDs off
+(`#ff0000@1.08:rect`, outer+inner nested squares). **This has not been
+checked against the real geometry yet** — the next step, before writing
+any rule, is to look at where each of the 13 counted damper rects actually
+sits: on a duct trunk (a real VCD) or beside/overlapping a diffuser/grille
+symbol (a collar damper). Leading theory, not a confirmed cause.
+
+**27d. Return grilles — the count that WAS right (13, confirmed, delta 0)
+still isn't the full picture.** The client's own remark on this exact line
+— "what about 36×6 & 24×6? mention type of grill" — points at the same
+root cause as 25b's unidentified bracket symbol: this tool reads floating
+size/CFM text near a duct run, never a **legend/schedule table**
+(`schedules: []` in every `hvac_takeoff` output — the tool's own flag that
+this category isn't extracted yet, not a finding specific to this file).
+The client's own `Grill` sheet is exactly such a schedule (7 tags, sizes
+in mm, a "with/without attached collar damper" column) and nothing in the
+current pipeline has ever read a table shaped like that.
+
+**27e. Ducting area gaps (24G supply undercounted by more than half; 22G
+return overcounted by more than 2×) — most likely explained by what the
+tool already tells you, not a new bug.** Two causes already visible in
+the tool's own output, neither newly discovered here:
+  - `checks.label_match_rate = 0.43` on this file — under half of the 165
+    measured runs have a readable size label at all; the rest (75.98 m
+    supply, 306.22 m return) sit in the part-sized/TBC bucket and
+    contribute nothing to the firm area subtotal, by this tool's own
+    documented design. 24G is exactly the smaller-size band where label
+    density is thinnest, so a real quantity of 24G duct plausibly never
+    reaches the "fully-sized" total at all.
+  - `T.01` (the write-up's own flag): scale may be wrong. Return 22G is,
+    in effect, a single data point (one 20"×30" run) — a category built
+    from one run is exactly where one bad OCR/scale read swings the whole
+    total, which fits an overcount on a single-member category better
+    than a general rule bug.
+  Neither cause is confirmed against the real geometry the way 25e's
+  layer-mapping bug was — graded as "likely, from the tool's own
+  evidence," not verified line-by-line. Next step, before writing a rule:
+  re-run with a manually confirmed scale (one known dimension on the
+  drawing, measured by hand) and see how much of the gap in both
+  categories closes.
+
+**Actual changes to make — the real to-do list from this analysis (none
+built yet; this is what items 27b-27e above were gathering evidence for):**
+
+  1. **Read legend/schedule tables off the drawing**, not just floating
+     size/CFM text next to a duct run. `hvac_takeoff.py` currently never
+     looks for a tag→size table (`schedules: []`, always empty, by the
+     tool's own admission). Build this, then match tags drawn on the
+     duct layout against it. Fixes the missing 36"×6" / 24"×6" grilles
+     (27d), and may also fix the missing 13 RA diffusers (27b) if the
+     full drawing set has a terminal schedule.
+  2. **Stop counting grille-mounted collar dampers as VCDs.** Before
+     `count_symbol_rects()` counts a paired-square damper shape as a VCD,
+     check whether it sits on a duct trunk (a real VCD) or right next to
+     a diffuser/grille symbol (a collar damper, a different line item).
+     Fixes the 13-vs-8 VCD overcount (27c) — but first needs someone to
+     actually look at where those 13 rects sit on the real drawing; this
+     is still a theory, not a confirmed cause.
+  3. **Let VCDs be billed by area (sq.m), not just by count.** Once a
+     VCD's own width×height is read, compute and show its area as an
+     alternative unit — this is literally how the client said they bill
+     it, not a guess.
+  4. **Put the tool's own warnings where an estimator will actually see
+     them.** `checks.label_match_rate` (43% on this file) and any
+     category whose firm total comes from a single measured run are
+     currently buried in a JSON file, not in Prism's own review screen.
+     Surface both as a loud, visible warning in the BOQ add-on's UI
+     before "Make my BOQ" can be pressed — this is the single biggest
+     fix for catching a bad duct-area total (27e) before it reaches a
+     price.
+  5. **Require a manual scale check before trusting area totals.** The
+     tool already prints "scale may be wrong" (T.01) but nothing stops a
+     BOQ being generated anyway. Add a step where the user confirms one
+     real dimension on the drawing against the assumed scale before the
+     fully-sized duct areas are treated as firm.
+
+## 28. Building item 27's rules — one real finding corrected, three built and tested, one found impossible to verify yet
+
+Noted 2026-10-28, same day, "start building all the rules one by one."
+Followed item 27's own prerequisite (the process `HVAC_DRAWING_RULES.md`
+sets for every rule: real geometry first, never guess the cause from the
+symptom) before writing any fix — which overturned 27c's own theory
+before any code was touched.
+
+**28a. 27c's "collar damper" theory was wrong — checked against the real
+file, not assumed.** Measured the distance from each of the 13 counted
+"volume_damper" rects to the nearest diffuser AND the nearest flex
+connector on the real PDF (`#ff0000@1.08:rect`, `#00ffff@0.84:rect`,
+`#ffbf7f@0.48:rect`). Every single one sits 5.6-8.2 ft from the nearest
+diffuser but a consistent ~2.0-2.85 ft from a flex connector — not the
+"mounted on a grille" pattern 27c guessed. Rendered three of the 13
+positions at 300 dpi to see what is actually drawn there: a red
+starburst/arrow symbol next to a "TT" text mark on a duct riser, visually
+nothing like a volume damper (a plain square symbol, like the diffuser
+layer right next to it in the same crop) -- and exactly the same count
+(13) and the same "TT"-adjacent locations item 25b already flagged as an
+**unidentified repeating symbol it could not name**. The two findings are
+almost certainly the same real thing, seen through two different mapped
+layers. **Real root cause: the persisted `hvac_takeoff/layer_map.json`
+simply had the wrong colour mapped to `volume_damper`** on this file --
+not a disambiguation problem at all.
+
+**Fixed:** `hvac_takeoff/layer_map.json`'s `"#ff0000@1.08:rect"` changed
+from `"volume_damper"` to `"ignore"`. Re-ran the real extraction:
+volume_damper count goes from the wrong 13 to 0; diffuser (40) and
+flex_connector (67) unaffected, confirming the fix is scoped to the one
+wrong layer. **Not fixed, and now a new, separate open item:** the real 8
+VCDs the client's own schedule ties to the two 17TR units are not
+identified anywhere in this file's geometry yet -- 0 is honest ("not
+found"), not "confirmed none on the drawing". Finding them needs its own
+real-geometry pass near the 17TR equipment positions, not attempted here;
+a quick look at one 17TR unit's own crop found no obvious plain damper
+symbol nearby either, so this isn't a five-minute follow-up.
+
+**28b. A correction to 27e's own claim.** 27e called the real file's
+"return, 22G" category "effectively one single run" to explain why it
+came out more than 2x the client's real figure. Checked directly against
+`duct_summary` while building rule 4's single-run warning below: it is
+**5 runs** (the 20"x30" group, 38.8 ft, 13.5% of all return length), not
+one. The warning built for rule 4 (below) correctly does NOT fire on this
+category, because it genuinely isn't a single-point-of-failure case --
+27e overstated this one detail. The real cause of that category's gap is
+still open, not re-investigated here (would need its own geometry pass,
+same honesty as 28a's own "not a five-minute follow-up").
+
+**28c. Rule 3 built — symbols now carry their own size and area, not just
+a count.** `count_symbol_rects()` (`hvac_takeoff.py`) now returns
+`(cx, cy, w_pt, h_pt)` instead of just a centre point, keeping the
+OUTER (larger) footprint when a symbol is drawn as a nested outer/inner
+pair -- the frame someone would actually cut a hole for, the thing an
+area-based bill needs, regardless of which of the pair pdfplumber happens
+to return first (verified both orderings in a new test). `extract()`
+converts this to `width_in`/`height_in`/`area_sqft` on every
+diffuser/flex_connector/volume_damper entry, so a VCD can be billed by
+area (sq.m, the client's own stated convention on the real file) as well
+as by count -- both numbers are just there now, the write-up picks which
+one the client's convention wants. 4 new tests in
+`hvac_takeoff/test_hvac_takeoff.py`; full file re-run clean (20/20).
+
+**28d. Rule 4 built -- three real gaps in the warnings, not just a UI
+pass.** All in `hvac_takeoff.py`'s own `extract()`:
+  - The label-match-rate warning only fired below 30%; the real file sat
+    at 43% -- over half its runs unlabeled -- and said nothing. Added a
+    second tier: 30-50% now gets its own warning naming the real
+    percentage, instead of silence.
+  - The "no symbol layer mapped" warning was all-or-nothing: mapping ANY
+    one of diffuser/flex_connector/volume_damper silenced it for all
+    three. Found live testing 28a's own fix: after removing the wrong
+    volume_damper mapping, the file reported "0 dampers" with zero
+    warning, reading exactly like a confirmed zero. Now checked per
+    role -- an unmapped role gets its own warning naming it.
+  - New: a `(system, size)` group built from exactly one measured run,
+    where that run is a real share (>30%, a plain middle threshold, not
+    tuned against a labelled set yet) of its whole system's length, now
+    gets its own warning -- the general form of the single-point-of-
+    failure risk 27e described (even though, per 28b, it didn't turn out
+    to be this file's actual case).
+  All three verified against the real file (43% warning and the
+  volume_damper gap both now fire; no test added for warning STRINGS,
+  consistent with this file's existing pattern of verifying warnings
+  against the real extraction rather than unit-testing wording).
+
+**28e. Rule 5 built -- a real gate, not just advice text.**
+`addons/boq/takeoff.py`: a new checkbox, "I've checked one real, known
+dimension on the drawing against this scale," next to the scale dropdown.
+`self.use_btn` ("Use these measurements") now stays disabled until BOTH a
+result exists AND this is checked -- changing the scale afterwards
+un-checks it again, so a stale confirmation can never carry forward
+silently. 4 new tests in `tests/test_boq_takeoff.py`; that file's full
+12/12 and the combined `test_boq_dialog.py`/`test_boq_industries.py`/
+`test_boq_takeoff.py` run both clean afterwards.
+
+**28f. Rule 1 (schedule/legend tables) -- checked against the real file,
+found nothing to build against, not attempted.** Before writing any
+table-parsing code, checked whether this specific real file even has
+something to parse: `page.extract_tables()` (pdfplumber) found **zero**
+tables on the one page in hand, and a direct scan of the real text layer
+for tag-shaped tokens (`G1`, `G2`, ... the client's own grille-schedule
+tag format) found **zero** matches anywhere on the page. This is a
+flattened CAD-export PDF, not a typeset document -- a schedule drawn as
+plain text with no ruling lines is exactly what pdfplumber's table
+detector cannot see, and more likely here: the client's grille schedule
+(`G1`-`G7`, sizes in mm) and the VCD schedule almost certainly live on a
+**different sheet of the full drawing set**, which this one-page test
+file does not include. Writing a table-parser against a file that
+provably has nothing for it to find would be exactly the kind of
+unverified guess this project's whole process exists to avoid -- **not
+built, needs the full drawing set (not just page 1) before it can even be
+attempted, let alone verified.**
+
+**Net for this session:** 3 of 5 rules built and tested (3, 4, 5); one
+(2) turned out to need a config fix instead of new logic, with a new,
+correctly-scoped open item left behind it (finding the real VCDs); one
+(1) is confirmed blocked on missing input, not on missing code. Full
+`pytest` suite re-run on the combined changes before calling this done.
+
+## 29. Two more accuracy changes, asked for the same day — one gap closed, one new capability; one idea deliberately NOT built
+
+Noted 2026-10-29, from the owner: after item 28 shipped, asked directly
+whether running Prism now would actually look any different -- it would
+not, for two of the five pieces: rule 3's area numbers were computed but
+never reached a screen, and the `layer_map.json` fix only affects the
+standalone script, never the app. Then asked for "any other ways to
+increase accuracy", and to build them.
+
+**29a. Rule 3, actually finished.** It was only half built: `extract()`
+computed `width_in`/`height_in`/`area_sqft` on every diffuser/flex/damper
+entry (28c), but neither `summary_text()` (what reaches the BOQ writer)
+nor the review dialog (what a person sees before pressing "Use these
+measurements") ever read it. New `symbol_counts_and_areas(res)` in
+`hvac_takeoff.py` is the one place both now read from, so they can't
+drift into reporting different numbers for the same run:
+  - `summary_text()`'s "SYMBOLS COUNTED BY SHAPE" section now prints each
+    type's total area (sq.ft and sq.m) alongside its count.
+  - `addons/boq/industries.py` gains `symbol_counts_and_areas()`, a thin
+    dispatcher matching every other function in that file.
+  - `addons/boq/takeoff.py`'s `_ReviewTable` gains a small summary line
+    under the legend, filled by `_render_symbols()`, so this is visible
+    BEFORE "Use these measurements" is ever pressed, not just in the
+    final text hand-off.
+  Verified against the real file (OCR off, for speed): now prints
+  `Flex Duct Connector: 67 (268.00 sq.ft / 24.90 sq.m total frame area)`,
+  previously just `Flex Duct Connector: 67`. 2 new tests in
+  `hvac_takeoff/test_hvac_takeoff.py`, 2 more in
+  `tests/test_boq_industries.py`.
+
+**29b. A new capability: the scale check can now fix the number, not
+just flag it.** Item 27 rule 5's checkbox only ever asked "did you check
+it?" -- it had no way to let a person actually correct a wrong scale.
+New `_ScaleMeasureDialog` (`addons/boq/takeoff.py`): renders the drawing
+at a fixed 100 dpi, the person clicks two points on something they
+already know the real length of (a labelled room width, a door opening),
+types that real length in feet, and the dialog computes the drawing's
+real points-per-foot scale directly from pixel distance -- `72 / dpi` is
+the PDF-point conversion (not a guess; 72 pt/inch is the PDF unit
+definition), so this needs no second calibration step. A new "Measure…"
+button opens it; accepting overrides `_pt_per_ft()` (a measured reading
+always wins over the dropdown's assumed standard scale) and auto-checks
+the scale-confirmation box, since measuring it IS the confirmation --
+nobody should have to tick a second box saying what they just did.
+Changing the scale dropdown afterwards, or picking a new PDF, clears the
+measured override and un-checks the box again, same reasoning as 28e's
+own reset rule. Verified against the real file: 100 px at 100 dpi over a
+stated 10 ft came out to exactly 7.2 pt/ft, matching the plain
+arithmetic by hand. 9 new tests in `tests/test_boq_takeoff.py` (the real
+PDF is never kept in the repo -- tests replace `_load_image` with a
+blank pixmap and check the click/distance math, not rendering).
+
+**29c. Considered and deliberately NOT built: a duct-run "continuity
+check".** The idea -- flag any measured run that doesn't connect to the
+rest of the network, since an isolated run is often a misread -- sounds
+reasonable, but `HVAC_DRAWING_RULES.md` rule 2 already records a nearly
+identical idea (bridging gaps between runs) being BUILT, shipped, and
+then having to be walked back once a real branch tee-junction was found
+reading as a false "gap". Writing a NEW connectivity heuristic today,
+with no second real file to check it against, risks the exact same
+mistake. Not attempted -- needs its own real-geometry verification pass
+first, the same process every rule in this file and `HVAC_DRAWING_RULES.md`
+already follows, not skipped just because the idea sounds safe.
+
+**Also named, not attempted today (unchanged from item 27's own list):**
+finding the real 8 VCDs in the geometry (28a's own open item), and an
+automatic "second independent AI read" cross-check before a BOQ is
+finalised -- a real idea, but it is a new piece of architecture (which
+agent, what prompt, how a disagreement surfaces in the UI), not a
+same-shape fix to an existing function, and deserves its own design
+pass rather than being rushed in alongside today's other changes.
+
+**29d. Asked which to do next: found the real VCDs.** Scanned every
+rect AND curve layer on the real page for any group with a small count
+(4-20) -- the kind a real VCD schedule (8 total, per the client's own
+file) would produce -- instead of guessing where to look. One stood out:
+`#00ffff@0.84:poly`, 8 polyline objects. Rendered 4 of the 8 positions at
+300dpi: every one is a hatched rectangle with a black bowtie/blade mark,
+sitting directly on a duct riser at a size-transition point -- the
+textbook symbol for a manual volume-control damper (OBD), and visually
+nothing like the red starburst 28a already found to be a different,
+unidentified symbol. 7 of the 8 are distinct positions; one pair is an
+exact duplicate (same coordinates to 0.1pt) -- plausibly one drawn
+symbol standing in for a multiple-unit tag group, the same way the
+client's own grille schedule notes "4NOS." next to one drawn grille
+rather than drawing four.
+
+**Fixed:** new `count_symbol_curves()` in `hvac_takeoff.py` -- same job
+as `count_symbol_rects()`, for a symbol drawn as a filled polyline
+instead of a rectangle (its bounding box is looser, 50pt vs 9-20pt,
+because this symbol's drawn extent runs along the duct, 36-44pt on the
+real file, not a small fixed icon). `extract()`'s symbol loop now checks
+both per role, deduped against each other. `hvac_takeoff/layer_map.json`
+gains `"#00ffff@0.84:poly": "volume_damper"`. Re-ran the real extraction:
+**volume_damper count goes from the wrong 13 (28a) to 7** -- much closer
+to the client's real 8, with a plausible explanation for the remaining
+gap, rather than a number with no story behind it at all.
+
+**A second honesty fix found while building this:** a curve symbol's
+bounding box is the drawn MARK's own extent along the duct, not the
+item's physical cross-section the way a rect icon's bbox is (rule 3,
+item 29a, relies on the bbox BEING the physical size). Computing an
+"area_sqft" from it would be a real-looking number that means nothing.
+`width_in`/`height_in`/`area_sqft` are left `None` for curve-sourced
+symbols rather than populated with a wrong figure -- checked directly:
+the 7 real dampers now report `size: ""`, `area_sqft: None`, not a
+plausible-looking wrong area.
+
+6 new tests (`CountSymbolCurvesFindsThePolylineDamperSymbol`,
+`ACurveSourcedSymbolsAreaIsNoneNotAWrongNumber`) in
+`hvac_takeoff/test_hvac_takeoff.py`.
+
+**Still open:** 7, not 8 -- the duplicate-position theory above is
+plausible, not confirmed; needs the actual schedule (rule 1, still
+blocked on the same missing drawing-set page) to settle which tag covers
+3 units.
+
+**29e. Asked to build the duct-connectivity check anyway, scoped as
+report-only.** A run that connects to NOTHING else, at either end, within
+its own system (supply only checked against supply, return against
+return) is flagged -- a run free at only ONE end is a completely normal
+dead end (a diffuser, a stub, an AHU connection) and is never flagged.
+New `_isolated_runs()` in `hvac_takeoff.py`, wired into `extract()`'s
+warnings only -- it never alters a run, a length or `duct_summary`,
+exactly the line 29c drew before building it.
+
+`tol_ft` checked against the real file before picking one, not chosen
+blind: 1.0 ft flagged 90 of 145 runs (a flood -- ordinary CAD gaps are
+often wider than that); 2.0 ft flagged 17, and every one of those matches
+runs the write-up's own text had ALREADY named by hand ("very short
+identical runs... may be collars, stubs or symbol edges") -- independent
+confirmation this threshold finds a real, already-known anomaly rather
+than noise. Shipped at 2.0 ft. 5 new tests
+(`IsolatedDuctRunsAreFlaggedNeverAlteredOrMerged`), including one that
+asserts the function never mutates its input.
+
+Full `pytest` suite re-run on the combined 28+29 changes before calling
+this done.
+
+## 30. BUILT — OpenRouter write-up agents, research off by default, a per-job memory folder, two-tier models
+
+Noted 2026-10-30, from the owner, explicitly "note this down first, we start working after." Nothing in this
+item is built. Written down before any code so the next session starts from an agreed shape, not from
+memory.
+
+**30a. Research agent: default becomes "No research."** Today's BOQ flow runs a standards-research stage
+before write-up by default. Change: that stage is OFF unless the user turns it on -- the common case
+skips straight from measurements to write-up.
+
+**30b. Write-up agent: default becomes an OpenRouter API key, not browser automation.** Same job, same
+shape (measurements in, a document out), just reached through an API key instead of driving a browser tab.
+Output format (DOCX/CSV/PDF) stays whatever the user already picks. This is the BOQ add-on's own small,
+scoped version of the "Migration A" gateway idea from the 28 Oct migration doc -- OpenRouter here, not
+Prism's own licence-server gateway, and only for this one add-on's write-up stage.
+
+**30c. Two new named write-up options, both via OpenRouter:**
+- **"Prism Agent Claude"** -- `anthropic/claude-sonnet-5.5` ($2 / $10 per 1M tokens, 1M context).
+- **"Prism Agent Deep"** -- `deepseek/deepseek-v3.2` ($0.28 / $0.42 per 1M tokens, 163K context).
+
+Prices and model ids pulled directly from OpenRouter's own `/api/v1/models` endpoint, 29 Oct 2026 -- not a
+blog or a guess. **Quality for this specific job (faithfully writing out given measurements, never
+re-deriving a number, staying in format across follow-ups) is verified for neither model yet** -- Sonnet
+5.5 has a track record in this session's own BOQ write-ups; DeepSeek v3.2 does not, and was recommended on
+price alone. Before this ships as a real default, run the same real-measurement write-up prompt through
+both and check the output directly, the same way this session tested OCR engines before trusting any of
+them -- not assumed from a spec sheet.
+
+**30d. A basic per-job memory folder (a small RAG, not a vector database) -- and the real reason for it is
+a History feature, not logging.** Every time the BOQ add-on is opened fresh for a NEW job, a new folder
+under a new unique job ID is created -- closing the add-on and reopening it starts a new folder, never
+reuses the last one. In it:
+- the input file(s) the user attached (drawing, external measurements),
+- every prompt the user gave, stored as `.txt`/`.json`,
+- the document the API produced for each turn.
+
+**Why:** someone making several BOQs a day needs to come back to any ONE of them later -- a client asks
+for a change on the first BOQ from that morning, after two more have already been made since. The folder
+is what makes that possible: a **History** list in the BOQ add-on, one row per job with its date and time,
+lets the user pick that exact earlier job. Picking one opens ITS folder by its unique ID, Prism reads back
+that job's documents and prompt history, and only then answers or makes the follow-up change -- not the
+currently-open job, not a guess from the live chat alone. This is a new piece of UI (a History
+list/browser), not only a storage format -- noted here since 30d's folder is the data it reads, but the
+list itself still needs its own screen in `addons/boq/dialog.py` or a sibling.
+
+Still to decide, not decided here: the folder's exact layout, how large a document gets read back in full
+vs. summarised, how far back History keeps jobs (forever vs. a cap), and whether this replaces or sits
+alongside the existing conversation-resend pattern `VERIFY_PROMPT`/follow-up flow already uses.
+
+**30e. Two-tier model use inside one job.** A heavier, smarter (and more expensive) model for the actual
+BOQ generation; a lighter, cheaper model for follow-up edits and small changes to an existing BOQ --
+different from 30c's "Claude vs Deep" choice (that is picking WHICH provider/brand runs the write-up
+stage; this is picking a DIFFERENT, cheaper model specifically for the follow-up stage of the SAME job,
+regardless of which brand generated the original document). Not yet decided: which model fills the
+"light" follow-up tier -- a smaller model from the same family as whichever heavy model generated the
+document is the obvious starting guess, not yet checked against a real follow-up prompt.
+
+**Still open after this item, unchanged from before:** the new open items from 28/29 (finding the real 8
+VCDs in the geometry, rule 1's schedule-table parsing still blocked on a missing drawing-set page), and
+everything in section 12 of the 28 Oct migration guide (credits/pricing model, which Reasoner model, data
+terms) that this item's own cost questions overlap with.
+
+## 31. Item 30, actually built — the key screen, every piece wired, and one real bug caught before it shipped
+
+Noted 2026-10-30, same day: "now build all of this with proper UI". All five pieces of item 30 are built
+and tested; nothing here is a plan any more.
+
+**31a. `addons/boq/agents.py`** gains `PRISM_AGENTS = ["Prism Agent Claude", "Prism Agent Deep"]`
+(first in `WRITER`, so a fresh install's write-up default is now an API call, not a browser tab),
+`NO_RESEARCH = "No research"` (first in `RESEARCH`), `PRISM_AGENT_MODELS` (the heavy, generation-tier
+OpenRouter model id per agent) and `PRISM_AGENT_FOLLOWUP_MODELS` (the cheaper same-family sibling — item
+30e's two-tier choice). 9 tests in `tests/test_boq_agents.py`.
+
+**31b. `prism_terminal/core/openrouter.py`** (new) — `openrouter_chat()` and `verify_key()`, deliberately
+shaped like `router.py`'s own `groq_chat()`/`verify_key()` (same retry-on-429/5xx behaviour, same "raise
+with the server's own words" rule), so the two API paths fail the same way to whatever reads their
+exceptions. Exposed as `CB.openrouter` (`core_bridge.py`), same pattern as `CB.router`. 11 tests in
+`tests/test_openrouter.py`, nothing touches the real OpenRouter API.
+
+**31c. `addons/boq/openrouter_writer.py`** (new) — the half a browser agent gets for free (its own
+file-export feature) and a plain API call does not. `write()` picks the right model tier and calls
+`openrouter_chat`; a small markdown parser (`parse_markdown`) reads the headings/paragraphs/bullet-lists/
+pipe-tables the write-up prompt has always asked every agent for; `markdown_to_docx`/`markdown_to_csv`
+build the real file from that (python-docx; the CSV picks the BIGGEST table found, almost always the BOQ
+item schedule, never silently empty); `markdown_to_pdf` reuses `core.boq_price.write_boq_pdf`'s own
+technique (render HTML with the bundled Chromium, print it) rather than a new dependency. **Deliberately
+NOT routed through `core.boq_price`'s `Boq`/`BoqItem` pipeline** — that module's own docstring states "no
+number of record is ever produced by an AI", which is the PRICING stage's rule, not the write-up stage's;
+conflating them would have been exactly the kind of boundary violation this project's whole architecture
+exists to prevent. A real bug was caught here before it shipped: the table-separator regex
+(`_is_table_sep`) scanned a whole row as one string, which fails on a real pipe-table row because the `|`
+characters between cells aren't in the allowed charset — found by running a realistic sample through the
+parser BEFORE writing the tests, not after. Fixed by splitting into cells first. 18 tests in
+`tests/test_boq_openrouter_writer.py`.
+
+**31d. `addons/boq/workers.py`** gains `OpenRouterWriteWorker` (one completion off the GUI thread, same
+`_Worker` base every other worker in this app uses). `addons/boq/dialog.py` gains `_run_prism_agent()`,
+the single interception point called from the TOP of both `_run_stage` (the first run: research/interpret/
+write) and `_start_followup_run` (recheck/followup) whenever the picked agent is a Prism Agent — it never
+reaches `AutomationWorker` or `BoqRunDialog`'s live window/fallback chain at all (a bad key or a down API
+is reported once, directly; retrying it against five different BROWSER agents would not help an API
+problem). `on_success(responses, links)` is called with the exact `{stage: [text]}` / `{}` shape a browser
+run's own done signal already produces, so `_on_standards`/`_on_interpreted`/`_on_written`/
+`_on_followed_up` all work completely unchanged — not one of them can tell the difference between this and
+a browser agent's answer.
+
+**A real hang, found and fixed before this shipped.** The full dialog test suite hung indefinitely after
+this wiring went in. Cause: `writer_combo`'s default is now "Prism Agent Claude" (31a), and ONE existing
+test class (`TheDrawingGoesToAIOnlyAfterAYes`) never set an explicit writer agent — it inherited whatever
+the combo defaulted to. With no OpenRouter key configured in the test's config, `_run_prism_agent` called
+`QMessageBox.warning(...)`, a real blocking modal, with nobody there to click it. Every OTHER test in this
+file already set an explicit agent (`d.writer_agent = "..."` or `writer_combo.setCurrentText(...)`) — this
+was the one gap. Fixed by giving that class's `setUp` the same explicit `self.d.writer_combo.setCurrentText
+("Claude")` every other test already uses, since it specifically tests the browser-agent path. 7 new tests
+in `APrismAgentNeverTouchesAutomationWorkerOrBoqRunDialog` check the bypass directly: no key warns and
+starts no worker, a Prism Agent never constructs `AutomationWorker`, a browser agent's own path is
+completely untouched, a success/failure both call the right callback with the right shape.
+
+**31e. The OpenRouter key screen — Settings → AI tools, same page as the Groq key.** A new password field
+(`widgets/settings_panel.py`, right under the existing Groq key field — "the Groq key and the agent picks
+are one job" already applied here too) saves to `self.cfg["openrouter_api_key"]`, validates the `sk-or-`
+prefix before saving, and checks the key against OpenRouter the moment it's saved (`OpenRouterKeyWorker` in
+root `workers.py`, mirroring `GroqKeyWorker` exactly) — a wrong key is told apart from a right one on the
+spot, the same promise the Groq key already makes. One key powers both Prism Agent models; every other
+writer agent keeps working without one.
+
+**31f. The per-job folder and History — built on what already existed, not a new system.** Checked first:
+`core/config.py` already had a complete "one folder per run, resumable" system
+(`begin_run`/`continue_run`/`current_run_dir`/`save_artifact`/`save_run`, under
+`~/.prism/Artifacts/<Task>/<timestamp>/`) and `_on_written` already called `save_run()` with a JSON record
+— item 30d turned out to be mostly already there, not a new thing to build.
+  - `_run_prism_agent` now writes the exact prompt sent to the API into that same job's folder as both
+    `.txt` (for a person to open) and `.json` (stage/agent/prompt/request/timestamp) via a new
+    `_save_prompt_record()` — best-effort, never fails the BOQ if the write itself fails.
+  - `_on_written`'s and `_on_followed_up`'s `save_run()` calls now tag the record `"addon": "boq"` (so
+    History can find BOQ's own runs without guessing from the title text) and carry `"request"`,
+    `"last_text"` and `"deliverable_path"` — everything a follow-up on a REOPENED job actually needs.
+    `_on_followed_up` now calls `save_run()` too (it never did before), passing the path the FIRST call
+    returned, so `save_run`'s own already-existing "update this file in place" behaviour keeps one job's
+    record current across every follow-up, not stuck at the first answer.
+  - `addons/boq/history.py` (new) — `list_boq_runs()` (every `"addon": "boq"` record, newest first, a file
+    that fails to parse is skipped not a crash) and `BoqHistoryDialog` (date + the original request per
+    row, double-click or "Open this BOQ" to pick one). A new "History" button next to the writer/research
+    pickers opens it; `BoqDialog._resume_from_history()` loads the picked job's last answer, its
+    deliverable path, its measured-CSV/drawing paths, and resumes its OWN artifacts folder via
+    `continue_run` (so anything a follow-up produces now lands beside that job's existing files, not in a
+    fresh folder) — then offers the same "anything to change?" follow-up window any run already ends with.
+  13 tests in `tests/test_boq_history.py`, including the full resume path.
+
+**What's intentionally simpler than the browser-agent path, said plainly:** a Prism Agent has no live
+progress window (`BoqRunDialog`) — a plain API call has nothing comparable to watch happen, unlike a
+browser agent typing in a visible tab, so a simple busy spinner was judged enough rather than building a
+second live-window UI for a call that's just "waiting on a response." No retry across a fallback chain
+either — FALLBACK_ORDER is a chain of BROWSER agents, and retrying an OpenRouter failure against Claude's
+own browser tab would not fix an OpenRouter-side problem; a failure is reported once, directly, with the
+real reason, same as the project's own "the server's own words, never a paraphrase" rule elsewhere.
+
+**Verification:** `tests/test_boq_agents.py` (9), `tests/test_openrouter.py` (11),
+`tests/test_boq_openrouter_writer.py` (18), `tests/test_boq_history.py` (13), plus the existing
+`tests/test_boq_dialog.py` (131, including the 7 new Prism Agent routing tests) and the rest of the BOQ
+suite (`test_boq_run_dialog.py`, `test_boq_pricing.py`, `test_boq_industries.py`, `test_boq_takeoff.py`,
+`test_boq_file_guardrail.py`) all re-run together, clean. Full repo `pytest` re-run before calling this
+done.
+
+**Still open, not attempted here:** DeepSeek's real quality on this job is still unverified (item 30c's own
+flag, unchanged — only the plumbing to call it exists now, not proof it writes a good BOQ); which model
+fills the follow-up tier was picked as "the obvious same-family cheaper sibling", not checked against a
+real follow-up prompt (item 30e's own open point, unchanged); and the per-job folder's prompt files are
+written only for the Prism Agent path, not for a browser agent's own write-up (scoped to match the user's
+own framing — "the document that the API key produced" — not extended further without being asked).
+
+## 32. The drawing itself, for .pdf/.dxf/.dwg, actually reaching a Prism Agent's eyes — and the three calls this forced
+
+Asked 2026-10-30, same day as item 30/31: BOQ's clients split into genuinely different permutations —
+some will hand a drawing straight to an AI as a PDF, some have signed an NDA that the drawing never
+leaves their machine at all. "we must make and solve this problem in all possible ways and people can
+use it in all permutation combination." That's not one feature; it's three decisions plus the pipe that
+makes any of them real. Resolved by `AskUserQuestion`, not guessed, since each one is a real
+business/compliance call:
+
+- **Key provisioning (for now, before a server-side gateway exists):** the installer/Prism-team enters
+  the OpenRouter key during setup, not the client themselves.
+- **Send-to-AI default:** off by default, explicit opt-in every time a drawing would actually leave the
+  machine.
+- **DWG scope:** build all three formats now, including the DWG→DXF conversion step, not just PDF/DXF.
+
+**32a. `addons/boq/cad_render.py` (new)** — turns a drawing into something a vision model can actually
+look at. `prepare_for_ai(path)` branches on extension: a `.pdf` is read and base64-encoded as-is (Claude
+reads a real PDF natively, no rendering needed); a `.dxf` goes through `render_dxf_to_png()`
+(`ezdxf.addons.drawing`'s `RenderContext`/`Frontend`/`MatplotlibBackend`, headless via `matplotlib.use
+("Agg")`); a `.dwg` goes through `dwg_to_drawing()` first — `ezdxf.addons.odafc`, a wrapper around the
+free, separately-installed ODA File Converter (not pip-installable; `odafc.is_installed()` confirmed
+`False` in this dev machine, a real, honestly-reported constraint, not a guess) — then the same PNG
+render. Anything else raises `CadRenderError` with the real reason, never a silent guess.
+
+**A real bug, caught by actually looking at the output, not by the absence of an exception.** The first
+DXF render produced a non-trivial, ~5.8 KB PNG with no errors — and was completely blank when opened.
+Cause: `ax.set_axis_off()`, called before drawing to hide the plot frame, also hides ezdxf's own
+background patch, which is tied to the same axes visibility — so the geometry drew onto an invisible
+canvas. Found by isolating the exact line in a step-by-step repro script and comparing the saved PNG
+with/without it; fixed by removing the call (and the now-pointless `facecolor="white"` savefig argument,
+since ezdxf's own background patch overrides it regardless). 10 tests in `tests/test_boq_cad_render.py`,
+including a regression test that checks the output PNG actually has more than one pixel colour — not just
+that a file of plausible size exists.
+
+**32b. `prism_terminal/core/openrouter.py` extended for multimodal.** `openrouter_chat()` gains an
+`attachments` parameter; a new `_content_blocks()` helper returns a plain string when there's nothing
+attached (every call before this item, unchanged — a payload inspector or a provider that chokes on an
+array-of-one sees exactly what it always has) or OpenRouter's documented multimodal content-array shape
+otherwise: an image becomes an `image_url` block with a `data:` URI; a PDF becomes a `file` block with
+`file_data`, so a compatible model reads the real document rather than a picture of it. Built from
+OpenRouter's own published API shape — **honestly flagged in the code as not yet verified against a live
+call**, since no real key was available to test with this session. 4 new tests in
+`tests/test_openrouter.py` (`AttachmentsBuildOpenroutersMultimodalContentShape`) check the shape built,
+not a real call.
+
+**32c. Vision capability checked against real data, not reputation.** `addons/boq/agents.py` gains
+`PRISM_AGENT_HAS_VISION` — queried directly from OpenRouter's own `/api/v1/models`
+`architecture.input_modalities`, 30 Oct 2026: `claude-sonnet-5.5`/`claude-haiku-5.5` → `['text','image',
+'file']`; `deepseek-v3.2`/`deepseek-v4-flash` → `['text']` only, no vision at any tier. `openrouter_writer.
+has_vision(agent)` reads this table; `write()` silently drops an attachment for an agent with no vision as
+its own last line of defence, but the caller (32d) is expected to have already told the user plainly
+before it gets this far.
+
+**32d. Wired into the actual recheck flow — `addons/boq/dialog.py`.** The real drawing was already being
+attached for the ONE stage that ever sends it — `"recheck"` (`_ask_recheck()` and the "Verify and remake"
+quick action in `_offer_followup()`), both already gated by the pre-existing `_drawing_consent()` yes/no
+("the drawing file leaves this computer. Continue?"), which turned out to already satisfy this item's
+"off by default, explicit opt-in every time" decision — nothing new needed there. The gap was what
+happened to the drawing AFTER that yes, for a Prism Agent: it was being flattened into
+`CB.files.context_block()`'s plain TEXT (whatever `CB.files.attach()`'s own text-extraction finds — little
+to nothing for a DXF/DWG, and not the actual pixels/vectors for a scanned PDF either), never the real
+file/image a vision model could look at.
+
+  - New `_prepare_drawing_attachment(stage, agent, files)`: for `stage == "recheck"` with `files[0]` being
+    the drawing (always true for both call sites above — the drawing is always attached first), it is
+    pulled OUT of the plain-text file list and either turned into a real attachment via `cad_render.
+    prepare_for_ai()` (agent has vision — the drawing is also removed from the text context, since the
+    real file now carries it) or left exactly where it was, in the text list, with a plain `QMessageBox.
+    warning()` telling the user why: no vision at all ("{agent} can't look at drawings... Pick Prism Agent
+    Claude for a real look at the drawing"), or the render itself failed (`CadRenderError`'s own message,
+    e.g. the missing ODA converter), never silently.
+  - `_run_prism_agent()` calls it first, then passes the result on to `OpenRouterWriteWorker(..., 
+    attachments=[attachment] if attachment else None)`; `OpenRouterWriteWorker` and `openrouter_writer.
+    write()` both already accepted `attachments` (32b/32c's own plumbing) — this is what finally calls it
+    with something real instead of `None`.
+  - Every other stage (`format`, `standards`, `interpret`, `followup` without a drawing) is completely
+    unaffected — `_prepare_drawing_attachment` returns `(files, None)` immediately unless `stage ==
+    "recheck"` and the drawing is actually there.
+  5 new tests in `tests/test_boq_dialog.py` (`PrismAgentRecheckShowsTheRealDrawingNotJustTextItem32`):
+  a vision agent gets a real attachment and the drawing leaves the text files; a no-vision agent warns and
+  keeps everything as text; a render failure warns with the real reason and falls back to text; a
+  non-recheck stage never touches the drawing at all; `_run_prism_agent` actually passes the prepared
+  attachment through to the worker constructor.
+
+**Answering the owner's own logistical question — where does the key go?** Today, only the existing
+self-service field exists: Settings → AI tools → "OpenRouter key", the same screen as the Groq key,
+checked against OpenRouter the moment it's saved (item 31e). That is NOT yet the "installer/Prism-team
+enters it, hidden from the client" screen the owner's `AskUserQuestion` answer actually asked for — this
+item built the pipe the key flows through once it exists, not a second, gated entry screen. Said
+plainly, again: OS Keychain storage (how `licensing/secretstore.py` already keeps this key) is not a
+security boundary against a client who controls their own machine — it only raises the cost of casual
+leakage. Real secrecy needs the key to never reach the client's machine at all (a server-side gateway,
+the "Migration A" idea already on record from the 28 Oct migration doc), which this item does not build.
+
+**Still open, not attempted here:** the installer-entered, password-protected key screen itself (today's
+field is self-service, not gated — see above); a real DWG file through a real, installed ODA File
+Converter (the converter is confirmed absent from this dev machine — `dwg_to_drawing()` is unit-tested
+against a mock only); `openrouter_chat`'s multimodal payload against a REAL OpenRouter call (32b's own
+flag — the shape is built from documentation, not proven live); and the server-side gateway itself (every
+key today still lives on the client's machine, by design, per the owner's own "for now" framing of the
+provisioning decision).
+
+**Verification:** `tests/test_boq_cad_render.py` (10, new), `tests/test_openrouter.py` (15, 4 new),
+`tests/test_boq_openrouter_writer.py` (21, 3 new covering `has_vision`/attachment-gating),
+`tests/test_boq_dialog.py` (132, 5 new), full repo `pytest` re-run before calling this done.
+
+## 33. A "Preview this layer" button in Step 1 — and its first real use found the real client_2nd_sample file was stuck at 0 duct runs because of it
+
+Noted 2026-10-30, same day: "i can see the preview option beside layer mapping [in a rival
+PDF-takeoff tool] that is not available in the prism hvac pdf takeoff version... this was
+confusing for the user to actually recognize, so add a option of preview in the prism as well."
+A Layer-mapping row has only ever shown a colour swatch, a segment count and a rough length —
+real information, but not an answer to "is THIS the duct network or something else" without
+opening the raw PDF in another program. The fix: an eye-icon button on every row
+(`addons/boq/takeoff.py`) that calls a new `hvac_takeoff.layer_preview_png()` — the exact
+"render one layer alone, look at it" technique item 25e already used once as a one-off debug
+script (it found `#808080@0:poly` was the building's own wall outline, not ductwork, mapped
+to `return` by mistake) — now a one-click tool instead of something only reachable by someone
+who can write a script. Returns PNG bytes, never a file on disk, since a person still deciding
+every layer's role may click this on dozens of them in one sitting.
+
+- `hvac_takeoff/hvac_takeoff.py`: `layer_preview_png(pdf_path, key, page_index=0, dpi=100)` --
+  fades the full page (same `Image.blend` technique `overlay_png` already uses) and draws only
+  that one layer's own segments (`layer_lines()`, already existed) in red on top.
+- `addons/boq/industries.py`: `layer_preview()` dispatch, same shape as `scan_layers`/`extract`.
+- `addons/boq/takeoff.py`: the eye-icon button, and `_LayerPreviewDialog` -- a small popup
+  showing the rendered picture, or the real error if rendering failed (never a blank dialog).
+- 3 new tests in `hvac_takeoff/test_hvac_takeoff.py`, 2 in `tests/test_boq_industries.py`, 6 in
+  `tests/test_boq_takeoff.py` -- all mocked at the same level this project's own tests already
+  use for this module (a fake page/PdfDocument, never a real PDF fixture).
+
+**It immediately paid for itself.** The owner had just run Prism's own HVAC PDF-takeoff on
+`HVAC_BOQ_TEST/client_2nd_sample/HVAC_LAYOUT_ 2ND SAMPLE-Model.pdf` (the same file item 32's
+BOQ-vision-read used) and got `runs: 0, label match: 0%` -- every one of the file's 212 layers
+had been left on "ignore" (confirmed directly: the owner's own screenshot showed `#808080 line
+289 segs`, `#0000ff rect 760 segs` and `#000000 rect 2220 segs`, all three still "ignore" --
+scanning the same file here reproduced the identical segment counts and lengths exactly, so
+this is the same layer list, not a guess). The extractor's own "No duct runs found: check the
+layer mapping" warning did its job correctly here -- this was never a bug, just confusing to
+act on without being able to see what any of those 212 colours actually drew.
+
+Used the new preview tool itself (not just built it) to find the real answer: rendering
+`#000000@1.56:line` (1347 segments, the longest black line layer) showed the ENTIRE duct
+network, both supply and return branches -- this file does not colour-code return separately
+from supply the way the first sample file does (item 25's `#ff0000@1.08:line` convention).
+`#000000@1.56:poly` turned out to be the SAME network's elbows/transitions, drawn as polylines
+rather than straight lines. Other tall candidates checked and ruled out by eye: `#ff0000@0.84:
+line` is red-highlighted annotation underlines (toilet partitions, a label box), not ductwork;
+`#000000@0.72:line` is the SHX-stroke-drawn label/tag text itself (VAV tags, "T" markers), not
+geometry at all -- consistent with item 8/32's own "hybrid document" finding that this
+drawing's MEP annotation layer is vector strokes, not real embedded text, while its
+architectural room-name layer is (1281 real `ArialMT`/`ArialUnicodeMS` words extract cleanly,
+but zero contain a CFM or VAV tag).
+
+**Mapping `#000000@1.56:line` + `#000000@1.56:poly` to `supply` DOES produce real runs** (38,
+vs 0) -- confirmed by actually calling `industries.extract()` with that map, not assumed from
+the preview picture alone. **Two honest caveats, not glossed over:**
+- The 105.6 ft total is at a GUESSED 96 pt/ft (only to test the pairing mechanics) -- the
+  resulting duct widths (16″, 13″...) read far too small next to labels actually seen on this
+  drawing (550x300mm ≈ 21.7″x11.8″), a clear sign 96 is wrong. The real scale needs "Measure…"
+  against a known dimension on THIS drawing before any length here is trusted -- this file's
+  text isn't extractable (previous paragraph), so there is no OCR'd dimension to fall back on
+  for a quick sanity check either.
+- Even at the right scale, the total will likely stay well below the drawing's real duct
+  footage: visually, this file's duct runs are heavily diagonal (angled VAV-box connections,
+  curved elbows) compared to the first sample file's mostly-orthogonal layout, and the
+  extractor's own documented limit -- "only straight horizontal/vertical ducts are measured" --
+  is a real, structural gap for this drawing's own drafting style, not a mapping mistake to fix
+  by picking a different layer.
+
+**Deliberately NOT done: no change to `hvac_takeoff/layer_map.json`'s defaults.** `#000000` at
+weight 1.56 means "the duct network" on THIS file and "nothing in particular" (0.72 is label
+text, not ductwork) on this SAME file two rows up -- the owner's own standing caution from
+earlier the same day ("are you sure \[these rules\] will be applicable for other drawings?")
+applies directly: a colour-keyed global default would be guessing from one file's convention,
+exactly what item 25's own per-layer reverse-engineering already refused to do. This stays a
+per-file, Preview-button judgement call, the way it already was for every colour before today.
+
+## 34. "The standalone tool measured many runs on this exact file -- BOQ measured zero" -- found why: BOQ was never wired to the standalone tool's own cross-tender memory
+
+The owner tried the SAME `client_2nd_sample` PDF, unchanged, straight through
+`hvac_takeoff.py`'s own standalone GUI (`run_gui()`, tkinter) -- the tool item 33's
+investigation had already been exercising all along from the command line -- and it measured
+real duct runs immediately, no manual mapping. Through BOQ's own dialog, the identical file
+measured zero (item 33). Same PDF, same extraction code underneath -- so the difference had
+to be in what each caller does with Step 1's roles, not in the extraction itself.
+
+**Root cause, found by reading `hvac_takeoff.py`'s own `run_gui()`:** `MAP_FILE`
+(`hvac_takeoff/layer_map.json`) is a *cross-tender memory* -- its own comment says so
+("remembers colour -> role between tenders") -- and the standalone tool's `load()` always
+pre-fills every combo box from it (`v = tk.StringVar(value=saved.get(L["key"], "ignore"))`),
+then `start()` writes the current choices back to it before extracting. `#000000@1.56:line`
+and `#000000@1.56:poly` were ALREADY saved as `"supply"` in that file -- from item 33's own
+`industries.extract()` test calls earlier this same session -- so the standalone tool's Step 1
+opened with those two rows already set to `supply`, and measured real runs with zero manual
+work. BOQ's own `addons/boq/takeoff.py` (`_fill_mapping`) never once reads or writes that file
+-- every layer, on every drawing, in every BOQ session, has always started at "ignore" and
+been thrown away after Extract, regardless of what a previous tender already taught the
+standalone tool about that exact colour+weight+kind key.
+
+**Fix, built the same way as every other industry-specific capability here (item 26's own
+dispatch pattern) -- never a direct import of `hvac_takeoff` from BOQ's own files:**
+- `hvac_takeoff.py`: a new `save_map(updates)` wraps the load-merge-write `start()` already did
+  inline; `start()` itself now just calls it (no behaviour change, one less duplicate).
+- `industries.py`: two new dispatch functions, `saved_layer_roles(industry)` (read) and
+  `remember_layer_roles(industry, layer_map)` (write) -- HVAC reaches `load_map()`/`save_map()`,
+  any other industry gets `{}` back / is a no-op, same "empty/no-op, not an error" convention
+  `roles()`/`scales()` already use for a lookup nothing is being asked to measure.
+- `takeoff.py`: `_fill_mapping` now asks `saved_layer_roles` for each layer's own key and
+  pre-selects that role on the combo (only if the saved value is still one of THIS industry's
+  current `roles()` -- a stale value from an older role list is never forced in); `_extract`
+  calls `remember_layer_roles` with the current `_layer_map()` right before starting the
+  worker, same timing as the standalone tool's `start()` -- saved whether the extraction that
+  follows succeeds, fails, or finds zero runs, since the mapping work itself is still real.
+
+**This is NOT the same thing as item 33's "deliberately not done."** Item 33 refused to pick a
+NEW hardcoded colour-role default and bake it into the JSON as a judgement call on the file's
+behalf -- that would be guessing one file's convention onto every future one. This item wires
+BOQ to a memory mechanism `hvac_takeoff.py` already had on day one, that only ever remembers
+whatever role a person actually picked for an EXACT key, right or wrong -- the same convenience
+default the standalone tool has always offered, now offered in BOQ's dialog too. A pre-filled
+role is still only a starting point, not a verified answer: the same colour can mean something
+else on a different drawing (item 33's own `#000000@1.56` vs `#000000@0.72` finding on the SAME
+file is proof enough of that), so the Preview button from item 33 is exactly how a person
+checks a pre-filled guess before trusting it, same as they would an unfilled one.
+
+Tests: `hvac_takeoff/test_hvac_takeoff.py` +3 (`save_map` merges/overwrites/swallows a write
+failure -- patches `H.MAP_FILE` to a temp path, never the real tracked JSON); `tests/
+test_boq_industries.py` +4 (the two dispatch functions, built and unbuilt industries);
+`tests/test_boq_takeoff.py` +5 (`_fill_mapping` pre-selects a saved-and-still-valid role, never
+forces in a stale one; `_extract` passes the current map to `remember_layer_roles`, and skips
+it entirely when the all-ignore warning is declined). A module-level patch at the top of
+`test_boq_takeoff.py` guards EVERY test in that file from reaching the real
+`hvac_takeoff/layer_map.json` through `_extract()`'s new call, the same "never touch real
+persisted state in a test" rule the project already holds for `~/.prism`.
+
+**Found along the way, NOT fixed here -- a separate, pre-existing bug:** running `tests/
+test_boq_industries.py` together with `hvac_takeoff/test_hvac_takeoff.py` in the same pytest
+process throws `ModuleNotFoundError: No module named 'hvac_takeoff.hvac_takeoff'; 'hvac_takeoff'
+is not a package` on every test after the first that reaches `industries._hvac()` -- confirmed
+reproducible on the unmodified `main` branch (via `git stash`), so today's change did not cause
+it. Cause: `hvac_takeoff/test_hvac_takeoff.py` inserts `hvac_takeoff/` onto `sys.path` and does
+`import hvac_takeoff as H`, which binds `sys.modules["hvac_takeoff"]` to the flat module
+`hvac_takeoff/hvac_takeoff.py` itself; `industries._hvac()`'s later `import
+hvac_takeoff.hvac_takeoff as m` then fails because that name is no longer a package. A bare
+`python3 -m pytest` from the repo root -- the exact pre-push check this file's own standing
+instructions require -- collects both files in one process and would hit this. Worth fixing
+before the next real pre-push run, but it is unrelated to this item and left open here.

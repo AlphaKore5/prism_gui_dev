@@ -65,11 +65,62 @@ it would silently find nothing for any of them. A flat, explicit tuple
 sidesteps that entirely. Whichever agent was already tried (the primary
 pick, or an earlier fallback) is skipped when the chain is walked — see
 addons/boq/dialog.py's _fallback_chain().
+
+PRISM_AGENTS (2026-10-30, item 30): two new writer options that are not a
+browser agent at all — "Prism Agent Claude" and "Prism Agent Deep" call
+OpenRouter directly with the user's own OpenRouter key (Settings → AI
+tools), the BOQ add-on's own scoped version of the API-gateway idea from
+the 28 Oct migration doc. Listed FIRST in WRITER so a fresh install's
+write-up default is an API call, not a browser tab — item 30b's own
+"write-up agent: default becomes an OpenRouter API key". NO_RESEARCH is
+the same idea for the research picker: first in RESEARCH, selecting it
+means `self.researcher` ends up empty, which addons/boq/dialog.py's
+existing `if self.derive_cb.isChecked() and self.researcher:` guard
+already treats as "skip the standards-research stage" — no new skip logic
+needed, just a new way to reach the state that guard already understands.
+
+PRISM_AGENT_MODELS is the OpenRouter model each Prism Agent calls for a
+full BOQ generation; PRISM_AGENT_FOLLOWUP_MODELS is the CHEAPER sibling
+from the same model family used for a follow-up/edit instead (item 30e's
+two-tier idea — generation gets the heavier model, a follow-up a lighter
+one). Model ids and prices pulled directly from OpenRouter's own
+`/api/v1/models` endpoint, 29 Oct 2026 — not a guess. Quality for this
+job is verified for Claude only so far (this session's own BOQ write-ups);
+DeepSeek was picked on price, not a real comparison — see
+BOQ-CHANGES-TODO.md item 30c.
 """
 from __future__ import annotations
 
-WRITER = ["Claude", "Grok", "Kimi 2.6", "DeepSeek", "Gemini", "ChatGPT"]
+NO_RESEARCH = "No research"
 
-RESEARCH = ["Perplexity", "ChatGPT", "Claude"]
+PRISM_AGENTS = ["Prism Agent Claude", "Prism Agent Deep"]
+
+PRISM_AGENT_MODELS = {
+    "Prism Agent Claude": "anthropic/claude-sonnet-5.5",
+    "Prism Agent Deep": "deepseek/deepseek-v3.2",
+}
+
+# Same provider family as the generation model above, picked for being the
+# next tier down in price/size, not re-verified for quality on a real
+# follow-up prompt yet (BOQ-CHANGES-TODO.md item 30e's own open point).
+PRISM_AGENT_FOLLOWUP_MODELS = {
+    "Prism Agent Claude": "anthropic/claude-haiku-5.5",
+    "Prism Agent Deep": "deepseek/deepseek-v4-flash",
+}
+
+# item 32: whether an agent can actually LOOK at a rendered drawing (an
+# image, or a real PDF document) at all. Checked directly against
+# OpenRouter's own /api/v1/models `architecture.input_modalities`, 30
+# Oct 2026, not assumed from either provider's general reputation:
+# claude-sonnet-5.5/claude-haiku-5.5 -> ['text','image','file'];
+# deepseek-v3.2/deepseek-v4-flash -> ['text'] only, no vision at any tier.
+PRISM_AGENT_HAS_VISION = {
+    "Prism Agent Claude": True,
+    "Prism Agent Deep": False,
+}
+
+WRITER = PRISM_AGENTS + ["Claude", "Grok", "Kimi 2.6", "DeepSeek", "Gemini", "ChatGPT"]
+
+RESEARCH = [NO_RESEARCH, "Perplexity", "ChatGPT", "Claude"]
 
 FALLBACK_ORDER = ("Claude", "Kimi 2.6")

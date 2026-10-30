@@ -1167,6 +1167,24 @@ class SettingsPanel(QDialog):
                    "without one."),
             key_edit, lambda: self._save_key(key_edit)))
 
+        # BOQ-CHANGES-TODO.md item 30: the BOQ add-on's two "Prism Agent"
+        # writer options (Settings → AI tools, same page as the Groq key
+        # above — same reasoning, "change my AI setup" is one job) call
+        # OpenRouter directly rather than driving a browser tab. Same
+        # field/save/verify shape as the Groq key, one key for both
+        # Prism Agent models.
+        or_edit = QLineEdit(self.cfg.get("openrouter_api_key", ""))
+        or_edit.setEchoMode(QLineEdit.Password)
+        C.add_password_visibility(or_edit)
+        or_edit.setPlaceholderText("sk-or-…")
+        col.addWidget(self._field_card(
+            i18n.t("OpenRouter key"),
+            i18n.t("Free to create at openrouter.ai/keys — add credit there "
+                   "to use it. Starts with sk-or-. Powers BOQ's \"Prism "
+                   "Agent Claude\" and \"Prism Agent Deep\" write-up "
+                   "options; every other agent still works without one."),
+            or_edit, lambda: self._save_openrouter_key(or_edit)))
+
         col.addWidget(self._agents_editor(chosen, premium))
         # Leads & Outreach runs on the credit pool: the licence server holds every
         # e-mail verifier and finder key, so a customer has none to bring
@@ -1304,6 +1322,39 @@ class SettingsPanel(QDialog):
         self._after_save(i18n.t("Saved."))
         if key:
             self._check_groq_key(key)
+
+    def _save_openrouter_key(self, field: QLineEdit):
+        key = field.text().strip()
+        if key and not (key.startswith("sk-or-") and len(key) > 20):
+            QMessageBox.warning(self, i18n.t("API key"), i18n.t(
+                "That doesn't look like an OpenRouter key — it should "
+                "start with 'sk-or-'."))
+            return
+        self.cfg["openrouter_api_key"] = key
+        self._after_save(i18n.t("Saved."))
+        if key:
+            self._check_openrouter_key(key)
+
+    def _check_openrouter_key(self, key: str):
+        """Saved — now find out whether OpenRouter accepts it, and say so.
+        Same shape as _check_groq_key; see workers.OpenRouterKeyWorker."""
+        from workers import OpenRouterKeyWorker
+        self.show_toast(i18n.t("Saved — checking the key with OpenRouter…"), "warn", 15000)
+        worker = OpenRouterKeyWorker(key)
+
+        def finished(why: str, key=key):
+            if self.cfg.get("openrouter_api_key") != key:
+                return                       # replaced since — not this one's news
+            if not why:
+                self.show_toast(i18n.t("Saved — OpenRouter accepts this key."), "ok")
+            elif why.startswith("The key is valid") or why.startswith("The key works"):
+                self.show_toast(why, "warn", 8000)
+            else:
+                self.show_toast(i18n.t("Saved, but ") + why[0].lower() + why[1:],
+                                "err", 12000)
+        worker.done.connect(finished)
+        self._openrouter_key_worker = worker
+        worker.start()
 
     def _check_groq_key(self, key: str):
         """Saved — now find out whether Groq accepts it, and say so."""

@@ -16,11 +16,13 @@ second industry's own takeoff plugs into the SAME dialog once
 """
 from __future__ import annotations
 
+import math
 import os
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QColor, QImage, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
-    QComboBox, QDialog, QFileDialog, QHBoxLayout, QLabel, QListWidget,
+    QComboBox, QDialog, QFileDialog, QHBoxLayout, QLabel, QLineEdit, QListWidget,
     QListWidgetItem, QMessageBox, QScrollArea, QTableWidget, QTableWidgetItem,
     QVBoxLayout, QWidget, QAbstractItemView, QCheckBox, QHeaderView,
 )
@@ -33,6 +35,182 @@ from addons.boq.measured import _TintDelegate
 from addons.boq.workers import HvacTakeoffWorker
 
 COL_TRUST, COL_KIND, COL_TEXT, COL_CONF = range(4)
+
+
+class _ClickableImageLabel(QLabel):
+    """A QLabel that reports where it was clicked, in its own pixel
+    coordinates -- the label is always sized exactly to its pixmap (see
+    _ScaleMeasureDialog._load_image), so no alignment offset to correct
+    for."""
+    clicked = Signal(float, float)
+
+    def mousePressEvent(self, event):
+        pos = event.position() if hasattr(event, "position") else event.pos()
+        self.clicked.emit(pos.x(), pos.y())
+        super().mousePressEvent(event)
+
+
+class _ScaleMeasureDialog(QDialog):
+    """Item 27 rule 5's own follow-up: the scale-confirmation checkbox
+    only ever asked "did you check it?" -- it could not fix a wrong
+    number. This lets a person click two points on the actual rendered
+    drawing, type the real-world distance between them (a labelled room
+    width, a door opening, a dimension line), and computes the drawing's
+    real points-per-foot scale from that -- instead of trusting whichever
+    standard scale label was picked from the dropdown."""
+
+    def __init__(self, pdf_path: str, page_index: int = 0, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(i18n.t("Measure a known dimension"))
+        self.resize(760, 640)
+        self.pdf_path = pdf_path
+        self.page_index = page_index
+        self.dpi = 100.0
+        self._points: list[tuple[float, float]] = []
+        self.pt_per_ft: float | None = None
+
+        col = QVBoxLayout(self)
+        col.addWidget(C.label(i18n.t(
+            "Click two points on something you already know the real "
+            "length of — a labelled room width, a door opening, a "
+            "dimension line — then type that real length below. Click "
+            "again to restart."), level="SUPPORT", wrap=True))
+
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(False)
+        self.image_label = _ClickableImageLabel()
+        self.image_label.clicked.connect(self._on_click)
+        self.scroll.setWidget(self.image_label)
+        col.addWidget(self.scroll, stretch=1)
+
+        self._load_error = None
+        self._load_image()
+
+        row = QHBoxLayout()
+        row.addWidget(QLabel(i18n.t("Real distance between the two points:")))
+        self.distance_edit = QLineEdit()
+        self.distance_edit.setPlaceholderText(i18n.t("feet, e.g. 6.0"))
+        self.distance_edit.textChanged.connect(self._recompute)
+        row.addWidget(self.distance_edit)
+        row.addWidget(QLabel(i18n.t("ft")))
+        row.addStretch(1)
+        col.addLayout(row)
+
+        self.result_label = QLabel("")
+        col.addWidget(self.result_label)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch(1)
+        btn_row.addWidget(C.button(i18n.t("Cancel"), "secondary", on_click=self.reject))
+        self.use_btn = C.button(i18n.t("Use this scale"), "primary", on_click=self.accept)
+        self.use_btn.setEnabled(False)
+        btn_row.addWidget(self.use_btn)
+        col.addLayout(btn_row)
+
+    def _load_image(self):
+        try:
+            import pypdfium2 as pdfium
+            pdf = pdfium.PdfDocument(self.pdf_path)
+            page = pdf[self.page_index]
+            img = page.render(scale=self.dpi / 72).to_pil().convert("RGB")
+        except Exception as e:                              # noqa: BLE001
+            self._load_error = str(e)
+            self.image_label.setText(i18n.t(
+                "Couldn't render the drawing: {error}").format(error=e))
+            return
+        data = img.tobytes("raw", "RGB")
+        qimg = QImage(data, img.width, img.height, img.width * 3,
+                      QImage.Format_RGB888).copy()   # copy -- `data` goes out of scope
+        self.pixmap = QPixmap.fromImage(qimg)
+        self.image_label.setPixmap(self.pixmap)
+        self.image_label.setFixedSize(self.pixmap.size())
+
+    def _on_click(self, x: float, y: float):
+        if not hasattr(self, "pixmap"):
+            return
+        if len(self._points) >= 2:
+            self._points = []
+        self._points.append((x, y))
+        self._redraw_markers()
+        self._recompute()
+
+    def _redraw_markers(self):
+        pix = self.pixmap.copy()
+        painter = QPainter(pix)
+        pen = QPen(QColor(theme.ERR_INK))
+        pen.setWidth(3)
+        painter.setPen(pen)
+        for x, y in self._points:
+            painter.drawLine(int(x - 8), int(y), int(x + 8), int(y))
+            painter.drawLine(int(x), int(y - 8), int(x), int(y + 8))
+        if len(self._points) == 2:
+            painter.drawLine(int(self._points[0][0]), int(self._points[0][1]),
+                             int(self._points[1][0]), int(self._points[1][1]))
+        painter.end()
+        self.image_label.setPixmap(pix)
+
+    def _recompute(self):
+        self.pt_per_ft = None
+        self.use_btn.setEnabled(False)
+        self.result_label.setText("")
+        if len(self._points) != 2:
+            return
+        try:
+            real_ft = float(self.distance_edit.text())
+        except ValueError:
+            return
+        if real_ft <= 0:
+            return
+        # The dialog shows the page at self.dpi pixels per inch, so
+        # pixel-distance -> PDF points is just the inverse of that scale
+        # (72 pt/inch is the PDF unit definition, not a guess).
+        px_dist = math.hypot(self._points[0][0] - self._points[1][0],
+                             self._points[0][1] - self._points[1][1])
+        pdf_pt_dist = px_dist * 72.0 / self.dpi
+        self.pt_per_ft = pdf_pt_dist / real_ft
+        self.result_label.setText(i18n.t(
+            "Scale: {ppf:.2f} points per foot (equivalent to the dropdown's "
+            "SCALE field for this drawing).").format(ppf=self.pt_per_ft))
+        self.use_btn.setEnabled(True)
+
+
+class _LayerPreviewDialog(QDialog):
+    """One Layer-mapping row's own segments, highlighted on the faded
+    drawing -- "what does this colour actually draw", as a picture
+    instead of a guess from a colour swatch and a segment count. Pointed
+    out directly against a rival PDF-takeoff tool that already has this
+    next to its own layer list, confusing for a person used to it
+    (BOQ-CHANGES-TODO.md item 33) -- the SAME render-one-layer-alone
+    technique that caught item 25e's #808080-is-actually-the-wall-outline
+    bug, now one click instead of a one-off debug script. Read-only, no
+    click handling, unlike _ScaleMeasureDialog above."""
+
+    def __init__(self, industry: str, pdf_path: str, layer: dict, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(i18n.t("Layer preview"))
+        self.resize(820, 680)
+        col = QVBoxLayout(self)
+        col.addWidget(C.label(
+            f'{layer["color"]}  {layer["kind"]}  {layer["segments"]} segs',
+            level="SUPPORT"))
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(False)
+        image_label = QLabel()
+        scroll.setWidget(image_label)
+        col.addWidget(scroll, stretch=1)
+        try:
+            png = industries.layer_preview(industry, pdf_path, layer["key"])
+            pix = QPixmap()
+            pix.loadFromData(png, "PNG")
+            image_label.setPixmap(pix)
+            image_label.setFixedSize(pix.size())
+        except Exception as e:                              # noqa: BLE001
+            image_label.setText(i18n.t(
+                "Couldn't render this layer: {error}").format(error=e))
+        btn_row = QHBoxLayout()
+        btn_row.addStretch(1)
+        btn_row.addWidget(C.button(i18n.t("Close"), "primary", on_click=self.accept))
+        col.addLayout(btn_row)
 
 
 class _ReviewTable(QWidget):
@@ -83,11 +261,33 @@ class _ReviewTable(QWidget):
             level="SUPPORT", wrap=True)
         col.addWidget(legend)
 
+        # item 27 rule 3: diffusers/flex connectors/dampers carry their own
+        # width/height/area now, but that never reached a screen before --
+        # "Use these measurements" used to be the first time anyone saw
+        # whether a count-only item (a VCD, say) also had an area a trade's
+        # own convention might bill it by instead.
+        self.symbols_label = C.label("", level="SUPPORT", wrap=True)
+        self.symbols_label.setVisible(False)
+        col.addWidget(self.symbols_label)
+
     def set_result(self, industry: str, result: dict):
         self.industry = industry
         self.result = result
         self._rows = industries.review_rows(industry, result)
         self._render()
+        self._render_symbols()
+
+    def _render_symbols(self):
+        rows = industries.symbol_counts_and_areas(self.industry, self.result or {})
+        if not rows:
+            self.symbols_label.setVisible(False)
+            return
+        bits = []
+        for t, n, area in rows:
+            bits.append(f'{t}: {n}' + (f' ({area:.2f} sq.ft / {area * 0.0929:.2f} sq.m total frame area)'
+                                       if area is not None else ""))
+        self.symbols_label.setText(i18n.t("Symbols found by shape — ") + "; ".join(bits))
+        self.symbols_label.setVisible(True)
 
     def _render(self):
         self._filling = True
@@ -175,6 +375,7 @@ class IndustryTakeoffDialog(QDialog):
         self.pdf_path = ""
         self.result: dict | None = None
         self._role_combos: list[tuple[dict, QComboBox]] = []
+        self._measured_pt_per_ft: float | None = None
 
         self.setWindowTitle(i18n.t("{industry} PDF takeoff").format(industry=industry))
         self.resize(640, 560)
@@ -199,12 +400,41 @@ class IndustryTakeoffDialog(QDialog):
         self.scale_combo = QComboBox()
         for label in industries.scales(self.industry):
             self.scale_combo.addItem(label, label)
+        self.scale_combo.currentIndexChanged.connect(self._on_scale_changed)
         settings_row.addWidget(self.scale_combo)
+        self.measure_btn = C.button(i18n.t("Measure…"), "secondary", small=True,
+                                    on_click=self._open_measure_dialog)
+        settings_row.addWidget(self.measure_btn)
         self.ocr_cb = QCheckBox(i18n.t("Read text labels (OCR)"))
         self.ocr_cb.setChecked(True)
         settings_row.addWidget(self.ocr_cb)
         settings_row.addStretch(1)
         col.addLayout(settings_row)
+
+        self.measured_scale_label = QLabel("")
+        self.measured_scale_label.setVisible(False)
+        col.addWidget(self.measured_scale_label)
+
+        # item 27 rule 5: the extractor already warns "scale may be wrong"
+        # (hvac_takeoff's own T.01) when few runs matched a label, but
+        # nothing stopped a BOQ being made anyway -- found live on the real
+        # file, a return-duct category came out more than 2x the client's
+        # real figure with that warning sitting unread in a collapsed list.
+        # This is the gate itself, not just another line of advice: "Use
+        # these measurements" below stays disabled until it is checked, and
+        # changing the scale after confirming it un-checks it again.
+        self.scale_confirm_cb = QCheckBox(i18n.t(
+            "I've checked one real, known dimension on the drawing against "
+            "this scale."))
+        col.addWidget(self.scale_confirm_cb)
+        self.scale_confirm_cb.toggled.connect(self._update_use_btn)
+        col.addWidget(C.label(i18n.t(
+            "Measure one dimension you already know (a labelled room width, "
+            "a door opening) against this scale before extracting -- a wrong "
+            "scale is wrong for every length and area this reads, not just "
+            "one row. \"Measure…\" above lets you compute the real scale from "
+            "a dimension you click on the drawing itself, instead of just "
+            "trusting the dropdown."), level="SUPPORT", wrap=True))
 
         # Step 1 -- folded away by default; opening the main add-on must
         # not grow a second, cluttered PDF-reading screen for the common
@@ -271,6 +501,10 @@ class IndustryTakeoffDialog(QDialog):
             return
         self.pdf_path = path
         self.path_label.setText(os.path.basename(path))
+        # A measured scale from the PREVIOUS pdf must never silently carry
+        # over to a new one -- each drawing has its own scale.
+        self._measured_pt_per_ft = None
+        self.measured_scale_label.setVisible(False)
         try:
             layers = industries.scan_layers(self.industry, path)
         except Exception as e:                            # noqa: BLE001
@@ -287,6 +521,7 @@ class IndustryTakeoffDialog(QDialog):
                 item.widget().deleteLater()
         self._role_combos = []
         role_opts = industries.roles(self.industry)
+        saved_roles = industries.saved_layer_roles(self.industry)
         for layer in layers:
             row = QHBoxLayout()
             swatch = QLabel()
@@ -297,8 +532,17 @@ class IndustryTakeoffDialog(QDialog):
             ft = layer["length_pt"] / 72  # a plain visual cue, not a measurement
             row.addWidget(QLabel(
                 f'{layer["color"]}  {layer["kind"]}  {layer["segments"]} segs  ~{ft:.0f} pt'))
+            row.addWidget(C.icon_button(
+                "eye", i18n.t("Preview this layer on the drawing"),
+                on_click=lambda _=False, l=layer: self._preview_layer(l)))
             combo = QComboBox()
             combo.addItems(role_opts)
+            # A key already learned from an earlier drawing starts there,
+            # not back at "ignore" -- this is the cross-tender memory the
+            # standalone hvac_takeoff.py tool already gave its own users.
+            saved = saved_roles.get(layer["key"])
+            if saved and saved in role_opts:
+                combo.setCurrentText(saved)
             row.addWidget(combo)
             row.addStretch(1)
             wrap = QWidget()
@@ -308,6 +552,11 @@ class IndustryTakeoffDialog(QDialog):
         self.mapping_btn.setText(i18n.t("▾ Layer mapping ({n} found)").format(n=len(layers)))
         self.mapping_btn.setVisible(bool(layers))
         self.mapping_area.setVisible(False)
+
+    def _preview_layer(self, layer: dict):
+        if not self.pdf_path:
+            return
+        _LayerPreviewDialog(self.industry, self.pdf_path, layer, parent=self).exec()
 
     def _toggle_mapping(self):
         show = not self.mapping_area.isVisible()
@@ -321,8 +570,39 @@ class IndustryTakeoffDialog(QDialog):
         return {layer["key"]: combo.currentText() for layer, combo in self._role_combos}
 
     def _pt_per_ft(self) -> float:
+        # A measured scale (from "Measure…", item 27 rule 5's own
+        # follow-up) is an actual reading off this drawing and always
+        # wins over the dropdown's assumed standard scale.
+        if self._measured_pt_per_ft is not None:
+            return self._measured_pt_per_ft
         label = self.scale_combo.currentData()
         return (industries.scales(self.industry).get(label) or 1.0)
+
+    def _on_scale_changed(self):
+        # A confirmation (or a measurement) against the OLD scale says
+        # nothing about the new one -- never carry either forward silently.
+        self.scale_confirm_cb.setChecked(False)
+        self._measured_pt_per_ft = None
+        self.measured_scale_label.setVisible(False)
+
+    def _open_measure_dialog(self):
+        if not self.pdf_path:
+            QMessageBox.information(self, "BOQ", i18n.t("Pick a PDF first."))
+            return
+        dlg = _ScaleMeasureDialog(self.pdf_path, parent=self)
+        if dlg.exec() == QDialog.Accepted and dlg.pt_per_ft:
+            self._measured_pt_per_ft = dlg.pt_per_ft
+            self.measured_scale_label.setText(i18n.t(
+                "Using a measured scale: {ppf:.2f} points per foot (overrides "
+                "the dropdown above).").format(ppf=dlg.pt_per_ft))
+            self.measured_scale_label.setVisible(True)
+            # The whole point of measuring it is that it IS the
+            # confirmation -- don't make the person tick a second box
+            # saying what they just did.
+            self.scale_confirm_cb.setChecked(True)
+
+    def _update_use_btn(self):
+        self.use_btn.setEnabled(self.result is not None and self.scale_confirm_cb.isChecked())
 
     # ── Step 2 ───────────────────────────────────────────────────────────
 
@@ -351,6 +631,10 @@ class IndustryTakeoffDialog(QDialog):
                 self.mapping_btn.setText(i18n.t("▴ Layer mapping ({n} found)").format(
                     n=len(self._role_combos)))
                 return
+        # Remember these role choices for the NEXT drawing, win or lose --
+        # saved before the worker even starts, same as the standalone
+        # tool, so a crash or a bad scale never costs the mapping work.
+        industries.remember_layer_roles(self.industry, layer_map)
         self.extract_btn.setEnabled(False)
         self.use_btn.setEnabled(False)
         self.status.setText(i18n.t("Reading the drawing — a large PDF can take a minute…"))
@@ -366,7 +650,7 @@ class IndustryTakeoffDialog(QDialog):
         self.review.set_result(self.industry, result)
         self.review.setVisible(True)
         self.extract_btn.setEnabled(True)
-        self.use_btn.setEnabled(True)
+        self._update_use_btn()
         n = len(result.get("duct_runs") or [])
         if n:
             self.status.setStyleSheet("")

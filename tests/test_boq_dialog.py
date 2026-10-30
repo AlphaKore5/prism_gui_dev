@@ -277,6 +277,12 @@ class TheDrawingGoesToAIOnlyAfterAYes(unittest.TestCase):
     def setUp(self):
         self._Capture.started = 0
         self.d = _dialog()
+        # item 30b: the writer picker's default is now "Prism Agent
+        # Claude" (an OpenRouter API call, no key configured in this
+        # test) — this class tests the AutomationWorker/browser-agent
+        # path specifically, so it needs a browser agent explicitly, the
+        # same way every other test in this file already does.
+        self.d.writer_combo.setCurrentText("Claude")
         self._drawing = os.path.join(tempfile.mkdtemp(), "sai.dxf")
         with open(self._drawing, "w") as fh:
             fh.write("0\nEOF\n")
@@ -1955,3 +1961,200 @@ class InputMeasurementsDialogTests(unittest.TestCase):
             dlg._upload()
         self.assertEqual(dlg.text.toPlainText(), '{"duct_summary": []}')
         self.assertIn("takeoff.json", dlg.file_label.text())
+
+
+class APrismAgentNeverTouchesAutomationWorkerOrBoqRunDialog(unittest.TestCase):
+    """item 30b/30c: a Prism Agent is a plain OpenRouter call -- no browser
+    tab, no live window, no fallback chain. _run_prism_agent is the single
+    interception point in both _run_stage (first run) and
+    _start_followup_run (recheck/followup); this class checks it actually
+    intercepts, in both directions."""
+
+    def _dialog_with_key(self, key: str = "sk-or-test"):
+        from addons.boq.dialog import BoqDialog
+        cfg = {"api_key": "k", "openrouter_api_key": key}
+        return BoqDialog(cfg, [], None, mode="boq")
+
+    def test_run_stage_never_constructs_automationworker_for_a_prism_agent(self):
+        from unittest import mock
+        from addons.boq import dialog as BD
+        d = self._dialog_with_key()
+        with mock.patch.object(BD, "AutomationWorker") as auto, \
+                mock.patch.object(BD, "OpenRouterWriteWorker") as orw:
+            orw.return_value.done = orw.return_value.failed = mock.Mock()
+            d._run_stage("format", "Prism Agent Claude", "write it", [], lambda r, l: None)
+        self.assertFalse(auto.called)
+        self.assertTrue(orw.called)
+
+    def test_start_followup_run_never_constructs_automationworker_either(self):
+        from unittest import mock
+        from addons.boq import dialog as BD
+        d = self._dialog_with_key()
+        with mock.patch.object(BD, "AutomationWorker") as auto, \
+                mock.patch.object(BD, "OpenRouterWriteWorker") as orw:
+            orw.return_value.done = orw.return_value.failed = mock.Mock()
+            d._start_followup_run("followup", "Prism Agent Deep", "change it", [])
+        self.assertFalse(auto.called)
+        self.assertTrue(orw.called)
+
+    def test_a_browser_agent_still_goes_through_automationworker_unchanged(self):
+        """The bypass is agent-specific -- every browser agent's own path
+        (AutomationWorker/BoqRunDialog) must be completely untouched."""
+        from unittest import mock
+        from addons.boq import dialog as BD
+        d = self._dialog_with_key()
+        with mock.patch.object(BD, "AutomationWorker", _TrackedWorker), \
+                mock.patch("addons.boq.run_dialog.BoqRunDialog", _FakeRunDialog), \
+                mock.patch.object(BD, "OpenRouterWriteWorker") as orw:
+            d._run_stage("format", "ChatGPT", "write it", [], lambda r, l: None)
+        self.assertFalse(orw.called)
+
+    def test_no_openrouter_key_warns_and_starts_no_worker(self):
+        from unittest import mock
+        from addons.boq import dialog as BD
+        cfg = {"api_key": "k", "openrouter_api_key": ""}
+        d = BD.BoqDialog(cfg, [], None, mode="boq")
+        with mock.patch.object(BD.QMessageBox, "warning") as warn, \
+                mock.patch.object(BD, "OpenRouterWriteWorker") as orw:
+            d._run_stage("format", "Prism Agent Claude", "write it", [], lambda r, l: None)
+        self.assertTrue(warn.called)
+        self.assertFalse(orw.called)
+
+    def test_a_successful_answer_calls_on_success_with_the_same_shape_a_browser_run_uses(self):
+        from unittest import mock
+        from addons.boq import dialog as BD
+        d = self._dialog_with_key()
+        seen = {}
+
+        def on_success(responses, links):
+            seen["responses"], seen["links"] = responses, links
+
+        fake_worker = mock.Mock()
+        with mock.patch.object(BD, "OpenRouterWriteWorker", return_value=fake_worker), \
+                mock.patch.object(BD.openrouter_writer, "write_file") as write_file:
+            d._run_stage("format", "Prism Agent Claude", "write it", [], on_success)
+            # the real worker would emit `done` off the GUI thread; call
+            # the connected slot directly, the same way every other test
+            # in this file drives a captured/mocked worker's signal.
+            done_cb = fake_worker.done.connect.call_args[0][0]
+            done_cb("the BOQ text")
+        self.assertEqual(seen["responses"], {"format": ["the BOQ text"]})
+        self.assertEqual(seen["links"], {})
+        self.assertTrue(write_file.called)
+
+    def test_a_text_only_stage_never_tries_to_build_a_file(self):
+        """standards/interpret are research/read stages -- only format/
+        recheck/followup produce an actual document."""
+        from unittest import mock
+        from addons.boq import dialog as BD
+        d = self._dialog_with_key()
+        fake_worker = mock.Mock()
+        with mock.patch.object(BD, "OpenRouterWriteWorker", return_value=fake_worker), \
+                mock.patch.object(BD.openrouter_writer, "write_file") as write_file:
+            d._run_stage("standards", "Prism Agent Claude", "research it", [],
+                        lambda r, l: None)
+            done_cb = fake_worker.done.connect.call_args[0][0]
+            done_cb("a standards brief")
+        self.assertFalse(write_file.called)
+
+    def test_a_failed_answer_warns_and_never_calls_on_success(self):
+        from unittest import mock
+        from addons.boq import dialog as BD
+        d = self._dialog_with_key()
+        called = []
+        fake_worker = mock.Mock()
+        with mock.patch.object(BD, "OpenRouterWriteWorker", return_value=fake_worker), \
+                mock.patch.object(BD.QMessageBox, "warning") as warn:
+            d._run_stage("format", "Prism Agent Claude", "write it", [],
+                        lambda r, l: called.append(1))
+            failed_cb = fake_worker.failed.connect.call_args[0][0]
+            failed_cb("OpenRouter rejected your API key.")
+        self.assertTrue(warn.called)
+        self.assertEqual(called, [])
+
+
+class PrismAgentRecheckShowsTheRealDrawingNotJustTextItem32(unittest.TestCase):
+    """item 32: the "recheck"/"Verify and remake" stage always attaches
+    the real drawing as `files[0]` (see dialog.py's _ask_recheck/
+    _offer_followup, both gated by the SAME _drawing_consent() a browser
+    agent's own upload already goes through) — _prepare_drawing_attachment
+    is where that drawing either becomes a real OpenRouter attachment (a
+    vision-capable agent) or stays a plain text mention (no vision, or the
+    render itself failed), and is the one place that decision is made."""
+
+    def _dialog_with_key(self):
+        from addons.boq.dialog import BoqDialog
+        cfg = {"api_key": "k", "openrouter_api_key": "sk-or-test"}
+        return BoqDialog(cfg, [], None, mode="boq")
+
+    def _files(self, cad_path):
+        return [{"path": cad_path, "name": "drawing.pdf", "size": 1, "kind": "pdf"},
+                {"path": "/x/notes.txt", "name": "notes.txt", "size": 1, "kind": "text"}]
+
+    def test_a_vision_agent_gets_a_real_attachment_and_the_drawing_leaves_the_text_files(self):
+        from unittest import mock
+        from addons.boq import dialog as BD
+        d = self._dialog_with_key()
+        d.cad_path = "/x/drawing.pdf"
+        fake_att = {"kind": "image", "mime": "image/png", "b64": "QQ==", "name": "drawing_render.png"}
+        with mock.patch.object(BD.cad_render, "prepare_for_ai", return_value=fake_att) as prep:
+            files, attachment = d._prepare_drawing_attachment(
+                "recheck", "Prism Agent Claude", self._files(d.cad_path))
+        prep.assert_called_once_with(d.cad_path)
+        self.assertEqual(attachment, fake_att)
+        self.assertEqual([f["name"] for f in files], ["notes.txt"])
+
+    def test_an_agent_with_no_vision_warns_and_keeps_everything_as_text(self):
+        from unittest import mock
+        from addons.boq import dialog as BD
+        d = self._dialog_with_key()
+        d.cad_path = "/x/drawing.pdf"
+        with mock.patch.object(BD.cad_render, "prepare_for_ai") as prep, \
+                mock.patch.object(BD.QMessageBox, "warning") as warn:
+            files, attachment = d._prepare_drawing_attachment(
+                "recheck", "Prism Agent Deep", self._files(d.cad_path))
+        self.assertFalse(prep.called)
+        self.assertIsNone(attachment)
+        self.assertEqual([f["name"] for f in files], ["drawing.pdf", "notes.txt"])
+        self.assertTrue(warn.called)
+
+    def test_a_render_failure_warns_with_the_real_reason_and_falls_back_to_text(self):
+        from unittest import mock
+        from addons.boq import dialog as BD
+        d = self._dialog_with_key()
+        d.cad_path = "/x/drawing.pdf"
+        with mock.patch.object(BD.cad_render, "prepare_for_ai",
+                               side_effect=BD.cad_render.CadRenderError(
+                                   "needs the ODA File Converter")) as prep, \
+                mock.patch.object(BD.QMessageBox, "warning") as warn:
+            files, attachment = d._prepare_drawing_attachment(
+                "recheck", "Prism Agent Claude", self._files(d.cad_path))
+        self.assertTrue(prep.called)
+        self.assertIsNone(attachment)
+        self.assertEqual([f["name"] for f in files], ["drawing.pdf", "notes.txt"])
+        self.assertIn("ODA File Converter", warn.call_args[0][2])
+
+    def test_a_non_recheck_stage_never_touches_the_drawing_at_all(self):
+        from unittest import mock
+        from addons.boq import dialog as BD
+        d = self._dialog_with_key()
+        d.cad_path = "/x/drawing.pdf"
+        with mock.patch.object(BD.cad_render, "prepare_for_ai") as prep:
+            files, attachment = d._prepare_drawing_attachment(
+                "followup", "Prism Agent Claude", self._files(d.cad_path))
+        self.assertFalse(prep.called)
+        self.assertIsNone(attachment)
+        self.assertEqual(len(files), 2)
+
+    def test_run_prism_agent_passes_the_prepared_attachment_to_the_worker(self):
+        from unittest import mock
+        from addons.boq import dialog as BD
+        d = self._dialog_with_key()
+        d.cad_path = "/x/drawing.pdf"
+        fake_att = {"kind": "image", "mime": "image/png", "b64": "QQ==", "name": "drawing_render.png"}
+        fake_worker = mock.Mock()
+        with mock.patch.object(BD.cad_render, "prepare_for_ai", return_value=fake_att), \
+                mock.patch.object(BD, "OpenRouterWriteWorker", return_value=fake_worker) as ctor:
+            d._run_prism_agent("recheck", "Prism Agent Claude", "verify it",
+                               self._files(d.cad_path), lambda r, l: None)
+        self.assertEqual(ctor.call_args.kwargs["attachments"], [fake_att])

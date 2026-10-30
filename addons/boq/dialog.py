@@ -33,9 +33,12 @@ from widgets.loader import Loader
 from widgets.ask_panel import AskPanel, MoreOptions
 from addons.boq import agents as boq_agents
 from addons.boq import industries
+from addons.boq import cad_render
+from addons.boq import openrouter_writer
 from addons.boq.measured import MeasuredTable
 from addons.boq.pricing import PricingTable
 from addons.boq.takeoff import IndustryTakeoffDialog
+from addons.boq.workers import OpenRouterWriteWorker
 from widgets.output_panel import short_duration
 
 
@@ -58,16 +61,6 @@ MAKE_WITH_DRAWING_PROMPT = (
     "from the same drawing -- use them as a cross-check, and where your own "
     "reading of the drawing disagrees with a measured figure, say so and use "
     "the drawing's own value.")
-
-
-def _preselect(combo: QComboBox, value: str):
-    """Select `value` in the combo if it is one of the options; otherwise
-    leave the registry's own first-listed (recommended) default in place."""
-    if not value:
-        return
-    i = combo.findText(value)
-    if i >= 0:
-        combo.setCurrentIndex(i)
 
 
 class InputMeasurementsDialog(QDialog):
@@ -394,29 +387,33 @@ class BoqDialog(PrismDialog):
         self.price_box.setVisible(False)
         root.addWidget(self.price_box)
 
-        # Which AIs run the BOQ. Defaults to the agents configured in Settings,
-        # but re-pickable per BOQ: the write-up tool (Claude vs ChatGPT vs …)
-        # and the standards-research tool (Perplexity vs Consensus vs …) each
-        # change the result, and the user should be able to choose them for one
-        # document without editing the global Agents setup. The interpreter
-        # (screenshot reader) stays automatic — it only runs when an image is
-        # attached, and ChatGPT is the right tool for it.
+        # Which AIs run the BOQ. Re-pickable per BOQ: the write-up tool
+        # (Prism Agent Claude vs ChatGPT vs …) and the standards-research
+        # tool (No research vs Perplexity vs …) each change the result,
+        # and the user should be able to choose them for one document
+        # without editing the global Agents setup. The interpreter
+        # (screenshot reader) stays automatic — it only runs when an image
+        # is attached, and ChatGPT is the right tool for it.
         #
-        # The POOL each picker offers is BOQ's own (addons/boq/agents.py), not
-        # the engine's shared CATEGORIES — see that file for why. cfg_agents
-        # below is still the shared, global "what's configured in Settings",
-        # used only to decide which pool entry starts selected.
-        cfg_agents = CB.config.active_agents(self.cfg)
+        # The POOL each picker offers is BOQ's own (addons/boq/agents.py),
+        # not the engine's shared CATEGORIES — see that file for why. Since
+        # item 30a/30b, the default is no longer "whatever's configured in
+        # Settings" (see the comment just below) — it starts on index 0 of
+        # each list instead: "Prism Agent Claude" and "No research".
         writer_opts = list(boq_agents.WRITER) or ["Claude", "ChatGPT"]
         research_opts = list(boq_agents.RESEARCH) or ["Perplexity"]
         self.writer_combo = QComboBox()
         self.writer_combo.addItems(writer_opts)
         self.research_combo = QComboBox()
         self.research_combo.addItems(research_opts)
-        _preselect(self.writer_combo,
-                   cfg_agents.get("content") or cfg_agents.get("brains"))
-        _preselect(self.research_combo,
-                   cfg_agents.get("research") or cfg_agents.get("brains"))
+        # item 30a/30b: the default is now "Prism Agent Claude" (an
+        # OpenRouter API call) and "No research" -- both are index 0 of
+        # their own list (addons/boq/agents.py), so simply NOT calling
+        # _preselect() here is what makes them win over whatever a
+        # generic Settings agent pick would otherwise override them with.
+        # A person who wants a browser agent, or research back on, still
+        # picks it from the dropdown same as always -- this only changes
+        # what a fresh BOQ starts on.
         picker = QWidget()
         prow = QHBoxLayout(picker)
         prow.setContentsMargins(0, 0, 0, 0)
@@ -427,6 +424,15 @@ class BoqDialog(PrismDialog):
         prow.addWidget(self.writer_combo)
         prow.addWidget(rlab)
         prow.addWidget(self.research_combo)
+        prow.addStretch(1)
+        # item 30d: "someone made 3 BOQs today, needs to follow up on the
+        # first one this afternoon" — a new job's own dialog instance has
+        # no memory of a PAST one (each open of this add-on is a fresh
+        # BoqDialog), so resuming one has to come from the side, not from
+        # continuing the live screen.
+        self.history_btn = C.button(i18n.t("History"), "tertiary", small=True,
+                                    icon_name="clock", on_click=self._open_history)
+        prow.addWidget(self.history_btn)
         # What file the write-up, "Verify and remake" and a follow-up should
         # hand back — the owner's own ask: "a dedicated button just to
         # select in which file format does the user want the file", after
@@ -781,15 +787,21 @@ class BoqDialog(PrismDialog):
                                  "starts the moment it's done…")
             return
 
-        # The agent pickers are the source of truth now (defaulted from the
-        # configured agents). This also removes the old "no writing agent set
-        # up yet" dead end — the picker always offers the registry's tools.
+        # The agent pickers are the source of truth now. This also removes
+        # the old "no writing agent set up yet" dead end — the picker
+        # always offers the registry's tools.
         self.writer_agent = self.writer_combo.currentText().strip()
         if not self.writer_agent:
             QMessageBox.warning(self, "BOQ",
                                 "Pick an AI to write the BOQ (the 'Write with' box).")
             return
-        self.researcher = self.research_combo.currentText().strip()
+        # item 30a: "No research" is a real choice in the dropdown, not a
+        # blank one — mapped to "" here so the existing
+        # `if self.derive_cb.isChecked() and self.researcher:` guard below
+        # already skips the standards-research stage for it, same as it
+        # always has for an empty researcher.
+        researcher = self.research_combo.currentText().strip()
+        self.researcher = "" if researcher == boq_agents.NO_RESEARCH else researcher
         # ChatGPT specifically, and only when there is something it can read.
         # It is the stage that turns a screenshot of the sheet plus a sample
         # BOQ into the legend, scope and house style the writer then follows.
@@ -1042,10 +1054,19 @@ class BoqDialog(PrismDialog):
         if self.mode == "boq" and texts:
             self.price_box.setVisible(True)
         task_label = getattr(self, "_task_name", "") or f"{self._noun} — {self.request}"
-        CB.config.save_run({
-            "query": task_label, "responses": responses,
-            "links": self._links,
+        # item 30d: "addon" is what lets History's own list (addons/boq/
+        # history.py) find BOQ's runs without guessing from the title
+        # text; "request"/"last_text"/"deliverable_path" are what a
+        # resumed job actually needs to carry a follow-up forward with --
+        # the SAME fields _on_followed_up below updates in place via
+        # `path=`, so reopening this exact job later always reads the
+        # latest turn, not just the first one.
+        self._boq_run_path = CB.config.save_run({
+            "addon": "boq", "query": task_label, "request": getattr(self, "request", ""),
+            "responses": responses, "links": self._links,
+            "last_text": texts[0] if texts else "",
             "artifacts": getattr(self, "_artifacts_dir", "") or CB.config.current_run_dir(),
+            "deliverable_path": getattr(self, "_deliverable_path", ""),
             "boq": {"quantities_csv": self.csv_path, "source": self.cad_path},
         })
         if texts:
@@ -1127,6 +1148,14 @@ class BoqDialog(PrismDialog):
     # disconnected run instead of a continuation of this one.
     def _start_followup_run(self, stage: str, agent: str, prompt: str,
                             files: list):
+        # item 30b/30c/30e: same bypass as _run_stage, and this is the
+        # path that uses the CHEAPER, same-family model tier — a
+        # follow-up is an edit to something already written, not a fresh
+        # generation.
+        if agent in boq_agents.PRISM_AGENTS:
+            self._run_prism_agent(stage, agent, prompt, files,
+                                  self._on_followed_up, followup=True)
+            return
         from addons.boq.run_dialog import BoqRunDialog
         self._fu_stage = stage
         self._fu_prompt = prompt
@@ -1276,6 +1305,168 @@ class BoqDialog(PrismDialog):
         if self._worker and self._worker.isRunning():
             self._worker.stop()
 
+    # ── item 30d: History — resume a past job on THIS screen ───────────────
+    def _open_history(self):
+        from addons.boq.history import BoqHistoryDialog
+        dlg = BoqHistoryDialog(self)
+        if dlg.exec() == QDialog.Accepted and dlg.chosen:
+            self._resume_from_history(dlg.chosen)
+
+    def _resume_from_history(self, record: dict):
+        """Load a past BOQ job's saved state onto this screen so a
+        follow-up on it is grounded in what that job actually produced —
+        its last answer, its deliverable file, and (via continue_run)
+        its own artifacts folder, so a new document this follow-up makes
+        lands beside the old ones instead of starting a fresh folder."""
+        self._boq_run_path = record.get("_path", "")
+        self.request = record.get("request") or record.get("query") or ""
+        self._task_name = record.get("query") or self.request
+        self._all_responses = dict(record.get("responses") or {})
+        self._links = dict(record.get("links") or {})
+        boq = record.get("boq") or {}
+        self.csv_path = boq.get("quantities_csv") or ""
+        self.cad_path = boq.get("source") or ""
+        self._deliverable_path = record.get("deliverable_path") or ""
+        artifacts = record.get("artifacts") or ""
+        if artifacts and os.path.isdir(artifacts):
+            self._artifacts_dir = CB.config.continue_run(
+                artifacts, task=self._task_name, title=self._task_name)
+        from addons.boq.history import when_label
+        text = record.get("last_text") or ""
+        self.result.setPlainText(text)
+        self.status.setText(i18n.t(
+            "Opened from History: {when}. Type a follow-up below to carry "
+            "it on.").replace("{when}", when_label(record.get("_path", ""))))
+        self.open_btn.setEnabled(bool(self._deliverable_path or self._links))
+        self.recheck_btn.setEnabled(bool(self.cad_path))
+        if self.mode == "boq" and text:
+            self.price_box.setVisible(True)
+        if text:
+            self._offer_followup()
+
+    # ── item 30b/30c: a "Prism Agent" writer, a plain OpenRouter call ──────
+    def _save_prompt_record(self, stage: str, agent: str, prompt: str):
+        """item 30d: this job's own folder (the SAME one begin_run()
+        already opened for it — see _write()'s own `CB.config.begin_run`
+        call) gets the exact prompt that went to the API, as a .txt (for
+        a person to open and read) and a .json (for a future follow-up,
+        or History, to load back in). Best-effort — a BOQ never fails to
+        write just because its own prompt couldn't be logged."""
+        folder = getattr(self, "_artifacts_dir", "") or CB.config.current_run_dir()
+        if not folder:
+            return
+        import json as _json
+        stamp = time.strftime("%Y-%m-%d %H-%M-%S")
+        stem = os.path.join(folder, f"prompt_{stage}_{stamp}")
+        try:
+            with open(stem + ".txt", "w", encoding="utf-8") as f:
+                f.write(prompt)
+            with open(stem + ".json", "w", encoding="utf-8") as f:
+                _json.dump({"stage": stage, "agent": agent, "prompt": prompt,
+                           "request": getattr(self, "request", ""), "at": stamp}, f,
+                          indent=2, ensure_ascii=False)
+        except OSError:
+            pass
+
+    def _prepare_drawing_attachment(self, stage: str, agent: str, files: list
+                                    ) -> tuple[list, dict | None]:
+        """item 32: pull the real drawing (never a browser agent's text-
+        extraction stand-in) out of `files` and turn it into something
+        OpenRouter can actually look at, for the one stage that ever
+        attaches it — "recheck" (_ask_recheck/_offer_followup's "Verify
+        and remake"), always as `files[0]` there, straight after the SAME
+        `_drawing_consent()` yes a browser agent's own upload already goes
+        through. Returns (files with the drawing removed if it was
+        pulled out, the attachment dict or None) — `files` unchanged, and
+        None, for every other stage or agent."""
+        if stage != "recheck" or not files or not self.cad_path:
+            return files, None
+        if files[0].get("path") != self.cad_path:
+            return files, None
+        rest = files[1:]
+        if not openrouter_writer.has_vision(agent):
+            QMessageBox.warning(self, "BOQ", i18n.t(
+                "{agent} can't look at drawings — it will recheck against "
+                "the measured figures and text only, not the drawing "
+                "itself. Pick Prism Agent Claude for a real look at the "
+                "drawing.").replace("{agent}", agent))
+            return files, None
+        try:
+            attachment = cad_render.prepare_for_ai(self.cad_path)
+        except cad_render.CadRenderError as e:
+            QMessageBox.warning(self, "BOQ", i18n.t(
+                "Couldn't prepare the drawing for {agent} to look at "
+                "({error}). Rechecking against the measured figures and "
+                "text only instead.").replace("{agent}", agent).replace(
+                    "{error}", str(e)))
+            return files, None
+        return rest, attachment
+
+    def _run_prism_agent(self, stage: str, agent: str, prompt: str, files: list,
+                         on_success, *, followup: bool = False):
+        """No browser tab, no live window, no fallback chain — a bad key or
+        a down API is reported once, directly; retrying it against five
+        different BROWSER agents (FALLBACK_ORDER) would not help an API
+        problem anyway. `on_success(responses, links)` is called with the
+        same `{stage: [text]}` / `{}` shape a browser run's own done signal
+        already produces, so _on_standards/_on_interpreted/_on_written/
+        _on_followed_up all work completely unchanged — they cannot tell
+        the difference between this and a browser agent's answer."""
+        api_key = (self.cfg.get("openrouter_api_key") or "").strip()
+        if not api_key:
+            QMessageBox.warning(self, "BOQ", i18n.t(
+                "No OpenRouter key set for {agent}. Add one in Settings → "
+                "AI tools, or pick a different agent.").replace("{agent}", agent))
+            self._set_busy(False, "")
+            return
+        files, attachment = self._prepare_drawing_attachment(stage, agent, files)
+        # A plain chat completion has no file-upload feature the way a
+        # browser tool does — any attachment left here (a template, notes,
+        # the priced/measured reference CSV) has to reach the model as
+        # TEXT. The drawing itself, when one was pulled out above into
+        # `attachment`, goes separately as a real image/file block instead.
+        if files:
+            prompt = prompt + "\n\n" + CB.files.context_block(files)
+        self._save_prompt_record(stage, agent, prompt)
+        self.progress.set_stage(2 if stage in ("format", "recheck", "followup") else 1)
+        self._set_busy(True, f"{agent} is writing your {self._noun}…")
+        self._worker = OpenRouterWriteWorker(
+            agent, prompt, api_key, followup=followup,
+            attachments=[attachment] if attachment else None)
+        self._worker.done.connect(
+            lambda text, s=stage, a=agent, cb=on_success:
+                self._on_prism_agent_done(s, a, text, cb))
+        self._worker.failed.connect(self._on_prism_agent_failed)
+        self._worker.start()
+
+    def _on_prism_agent_done(self, stage: str, agent: str, text: str, on_success):
+        self._set_busy(False, "")
+        made_files: list = []
+        # "standards"/"interpret" are text-only stages (a research brief, a
+        # read of an attached sample) — only a document-producing stage
+        # gets turned into an actual DOCX/CSV/PDF file.
+        if stage in ("format", "recheck", "followup"):
+            fmt = self._wanted_format() or "docx"
+            try:
+                os.makedirs(CB.config.RUNS_DIR, exist_ok=True)
+                safe_agent = agent.replace(" ", "_").lower()
+                path = os.path.join(
+                    CB.config.RUNS_DIR, f"boq_{safe_agent}_{int(time.time())}.{fmt}")
+                openrouter_writer.write_file(text, fmt, path)
+                made_files = [{"path": path, "name": os.path.basename(path),
+                              "kind": stage}]
+            except Exception as e:                           # noqa: BLE001
+                QMessageBox.warning(self, "BOQ", i18n.t(
+                    "The answer came back, but building the {fmt} file "
+                    "failed: {error}").replace(
+                        "{fmt}", fmt.upper()).replace("{error}", str(e)))
+        self._save_deliverable(made_files, stage)
+        on_success({stage: [text]}, {})
+
+    def _on_prism_agent_failed(self, error: str):
+        self._set_busy(False, "")
+        QMessageBox.warning(self, "BOQ", error)
+
     # ── the SAME live window, for the initial research/interpret/write
     # pipeline (item 22) — self._fu_dialog is shared with the verify/
     # follow-up flow above (one window for the whole session, per item 7),
@@ -1302,6 +1493,12 @@ class BoqDialog(PrismDialog):
         `_on_interpreted`/`_on_written` — unchanged, called directly, since
         they already expect exactly this shape from a plain
         AutomationWorker.done signal."""
+        # item 30b/30c: a Prism Agent is a plain API call, never a browser
+        # tab — it never reaches BoqRunDialog's live window or fallback
+        # chain at all. See _run_prism_agent's own docstring for why.
+        if agent in boq_agents.PRISM_AGENTS:
+            self._run_prism_agent(stage, agent, prompt, files, on_success)
+            return
         from addons.boq.run_dialog import BoqRunDialog
         self._rs_stage = stage
         self._rs_agent_requested = agent
@@ -1446,6 +1643,24 @@ class BoqDialog(PrismDialog):
         # only after the ordinary "Make my BOQ" path.
         if self.mode == "boq" and texts:
             self.price_box.setVisible(True)
+        # item 30d: update the SAME History record a follow-up belongs
+        # to, rather than leaving it stuck at whatever the first write-up
+        # said — save_run's own `path=` does an in-place update
+        # (core/config.py's own docstring). No path yet (a follow-up
+        # answering before any "Make my BOQ" ever ran, e.g. "Make with
+        # drawing" straight off) -- same call still works, it just
+        # creates the first record instead of updating one.
+        run_path = getattr(self, "_boq_run_path", "")
+        request = getattr(self, "request", "")
+        task_label = getattr(self, "_task_name", "") or f"{self._noun} — {request}"
+        self._boq_run_path = CB.config.save_run({
+            "addon": "boq", "query": task_label, "request": request,
+            "responses": self._all_responses, "links": self._links,
+            "last_text": texts[0] if texts else "",
+            "artifacts": getattr(self, "_artifacts_dir", "") or CB.config.current_run_dir(),
+            "deliverable_path": getattr(self, "_deliverable_path", ""),
+            "boq": {"quantities_csv": self.csv_path, "source": self.cad_path},
+        }, path=run_path)
         self._offer_followup()
 
     def _offer_followup(self):

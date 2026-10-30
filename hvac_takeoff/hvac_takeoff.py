@@ -115,14 +115,49 @@ def layer_lines(pdf_path, key, page_index):
         p = pdf.pages[page_index]
         return [seg for obj, kind, seg in iter_segments(p) if layer_key(obj, kind) == key], (p.width, p.height)
 
+def layer_preview_png(pdf_path, key, page_index=0, dpi=100):
+    """What a Layer-mapping row's colour swatch/segment-count actually
+    draws, as a picture instead of a guess -- the same "render one layer
+    alone, look at it" technique that caught the #808080
+    perimeter-mapped-as-duct bug by eye (BOQ-CHANGES-TODO.md item 25e: a
+    whole return-air total was wrong because that layer turned out to be
+    the building's own wall outline, not ductwork, found only once it was
+    rendered alone and recognised). This is that same check, wired as a
+    one-click tool in Step 1 instead of a one-off debug script -- the
+    confusion it fixes was pointed out directly against a rival PDF-takeoff
+    tool that already offers it (BOQ-CHANGES-TODO.md item 33).
+
+    Returns PNG bytes, not a file path -- a person still deciding every
+    layer's role may click this on many of them in one sitting, and
+    writing a file next to the client's PDF on every click would litter
+    their folder for a result nobody keeps."""
+    import io
+    import pypdfium2 as pdfium
+    from PIL import Image, ImageDraw
+    img = pdfium.PdfDocument(pdf_path)[page_index].render(scale=dpi / 72).to_pil().convert("RGB")
+    img = Image.blend(img, Image.new("RGB", img.size, "white"), 0.75)
+    dr = ImageDraw.Draw(img)
+    segs, _ = layer_lines(pdf_path, key, page_index)
+    k = dpi / 72
+    for x0, y0, x1, y1 in segs:
+        dr.line([x0 * k, y0 * k, x1 * k, y1 * k], fill=(230, 0, 0), width=3)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
 
 def count_symbol_rects(page, layer_map: dict, role: str) -> list:
-    """Centre position of every rect on a layer mapped to `role`, deduped
-    by position and filtered to a plausible size for that role.
+    """Centre position AND size (w_pt, h_pt) of every rect on a layer
+    mapped to `role`, deduped by position and filtered to a plausible
+    size for that role. Returns (cx, cy, w_pt, h_pt) tuples.
 
     Deduped because a symbol can be two overlapping rects, not one (a
     damper's outer and inner square, found on the real file) -- counting
-    raw rects there would double every damper. Filtered because the same
+    raw rects there would double every damper. The OUTER (larger) of a
+    nested pair is kept as the symbol's own size -- billing an item by its
+    footprint (item 27 rule 3, the client's own "VCD taken in sq.m" note)
+    needs the frame someone would actually cut a hole for, not whichever
+    of the pair happened to be scanned first. Filtered because the same
     colour/weight that draws the symbol can also carry something else
     entirely that happens to share it (a page border, in the real file)."""
     cap = _SYMBOL_MAX_PT.get(role, 20.0)
@@ -133,11 +168,48 @@ def count_symbol_rects(page, layer_map: dict, role: str) -> list:
         w, h = abs(r["x1"] - r["x0"]), abs(r["bottom"] - r["top"])
         if w > cap or h > cap:
             continue
-        cands.append(((r["x0"] + r["x1"]) / 2, (r["top"] + r["bottom"]) / 2))
+        cands.append(((r["x0"] + r["x1"]) / 2, (r["top"] + r["bottom"]) / 2, w, h))
     out = []
-    for c in cands:
-        if not any(math.hypot(c[0] - o[0], c[1] - o[1]) < 2.0 for o in out):
-            out.append(c)
+    for cx, cy, w, h in cands:
+        match = next((o for o in out if math.hypot(cx - o[0], cy - o[1]) < 2.0), None)
+        if match is None:
+            out.append([cx, cy, w, h])
+        elif w * h > match[2] * match[3]:
+            match[2], match[3] = w, h
+    return [tuple(o) for o in out]
+
+
+def count_symbol_curves(page, layer_map: dict, role: str, max_extent_pt: float = 50.0) -> list:
+    """Same job as count_symbol_rects(), for a symbol drawn as a filled
+    POLYLINE instead of a rectangle. Found reverse-engineering the real
+    file, 29 Oct 2026 (BOQ-CHANGES-TODO.md item 29d): the real manual
+    volume-control-damper symbol is a hatched rectangle with a bowtie
+    blade mark, exactly 8 of them on the one real test page, every one
+    visually confirmed against the rendered drawing -- not count_symbol_
+    rects' small square damper icon (that one, `#ff0000@1.08:rect`, turned
+    out to be a different, unidentified symbol -- see item 28a). Returns
+    (cx, cy, w_pt, h_pt) tuples, same shape as count_symbol_rects().
+
+    `max_extent_pt` is looser than count_symbol_rects' per-role cap
+    (9-20pt): this symbol's own bounding box runs the damper's drawn
+    length along the duct (36-44pt / ~4-5ft on the real file), not a
+    small fixed icon size -- a plain, generous ceiling, not tuned against
+    a labelled set."""
+    out = []
+    for c in page.curves:
+        if layer_map.get(layer_key(c, "poly"), "ignore") != role:
+            continue
+        pts = c.get("pts") or []
+        if not pts:
+            continue
+        xs = [p[0] for p in pts]
+        ys = [p[1] for p in pts]
+        w, h = max(xs) - min(xs), max(ys) - min(ys)
+        if max(w, h) > max_extent_pt:
+            continue
+        cx, cy = sum(xs) / len(xs), sum(ys) / len(ys)
+        if not any(math.hypot(cx - o[0], cy - o[1]) < 2.0 for o in out):
+            out.append((cx, cy, w, h))
     return out
 
 # ---------------------------------------------------------------- step 2: duct runs
@@ -500,6 +572,55 @@ def _classify_duct_label_colors(pdf_path, pi, labels, dpi=150):
         l["is_secondary_duct_color"] = _is_secondary_duct_pixel(r, g, b)
 
 # ---------------------------------------------------------------- main extraction
+def _isolated_runs(duct_runs: list, tol_ft: float = 2.0) -> list:
+    """item 29c: a measured run that connects to NOTHING else, at either
+    end, within the same system -- a real anomaly, not just a normal
+    dead end. Every terminal run in a real network is free at ONE end
+    (where it reaches a diffuser, an AHU, a stub) -- that is completely
+    normal and NOT flagged. A run free at BOTH ends never ties into the
+    network at all, which is what a misread, a duplicate fragment, or
+    junk geometry looks like.
+
+    REPORT-ONLY: this never alters a run, a length or a total. Deliberately
+    narrower than the DXF pipeline's own rejected gap-bridging idea
+    (`HVAC_DRAWING_RULES.md` rule 2, built, shipped, then had to be
+    walked back after misreading a real branch tee-junction as a gap) --
+    that one changed a MEASUREMENT from a proximity guess; this only ever
+    adds a warning, so the same mistake can't repeat here even if the
+    proximity guess is sometimes wrong.
+
+    `tol_ft=2.0`: checked against the real file, not picked blind -- at
+    1.0 ft it flagged 90 of 145 runs (false-positive flood, ordinary CAD
+    gaps are often wider than that); at 2.0 ft it flagged exactly the
+    short, unlabeled runs this file's own write-up had already named by
+    hand (the "very short identical runs... may be collars, stubs or
+    symbol edges" note) -- a plain middle value chosen because it
+    reproduces a known real anomaly without flooding, not tuned against a
+    labelled test set."""
+    by_system = defaultdict(list)
+    for r in duct_runs:
+        by_system[r["system"]].append(r)
+    out = []
+    for rs in by_system.values():
+        for i, r in enumerate(rs):
+            a = (r["x1_ft"], r["y1_ft"])
+            b = (r["x2_ft"], r["y2_ft"])
+            connects = False
+            for j, r2 in enumerate(rs):
+                if j == i:
+                    continue
+                for p in ((r2["x1_ft"], r2["y1_ft"]), (r2["x2_ft"], r2["y2_ft"])):
+                    if math.hypot(a[0] - p[0], a[1] - p[1]) < tol_ft or \
+                       math.hypot(b[0] - p[0], b[1] - p[1]) < tol_ft:
+                        connects = True
+                        break
+                if connects:
+                    break
+            if not connects:
+                out.append(r)
+    return out
+
+
 def extract(pdf_path, layer_map, pt_per_ft, use_ocr=True, dpi=250, match_ft=8, log=print):
     result = {"tool": "hvac_takeoff v2", "generated": datetime.now().isoformat(timespec="seconds"),
               "source": {"file": os.path.basename(pdf_path)}, "settings": {"pt_per_ft": pt_per_ft,
@@ -533,15 +654,54 @@ def extract(pdf_path, layer_map, pt_per_ft, use_ocr=True, dpi=250, match_ft=8, l
                     by_role[role].append(seg)
             log("  symbols (diffusers, flex connectors, dampers) ...")
             for role in SYMBOL_ROLES:
-                for cx, cy in count_symbol_rects(page, layer_map, role):
+                # item 29d: the real manual volume damper is drawn as a
+                # filled polyline (count_symbol_curves), not a rect -- a
+                # role can have symbols of either kind, so both are
+                # checked. Each function dedupes its OWN candidates, but
+                # not against the other's, so a final pass here catches a
+                # rect and a curve symbol that happened to land on the
+                # same spot (none do on the real file -- a safety net for
+                # the next one, not a fix for something seen).
+                rect_found = [(cx, cy, w, h, "rect")
+                             for cx, cy, w, h in count_symbol_rects(page, layer_map, role)]
+                curve_found = []
+                for cx, cy, w, h in count_symbol_curves(page, layer_map, role):
+                    if not any(math.hypot(cx - o[0], cy - o[1]) < 2.0 for o in rect_found):
+                        curve_found.append((cx, cy, w, h, "curve"))
+                for cx, cy, w_pt, h_pt, shape in rect_found + curve_found:
                     entry = {"page": pi, "x_pt": cx, "y_pt": cy, "source": "geometry", "conf": 1.0}
+                    # item 27 rule 3: some trades bill a damper by area
+                    # (sq.m/sq.ft of its own frame), not by count -- the
+                    # client's own remark on the real file ("VCD quantity
+                    # take in SQMTR"). Both units are carried on every
+                    # RECT-sourced symbol entry so the write-up can use
+                    # whichever the client's own convention wants, not
+                    # just "No.".
+                    #
+                    # item 29d: a CURVE-sourced symbol's bounding box is
+                    # the drawn mark's own extent along the duct (the real
+                    # manual damper, ~4-5ft of hatching), not the item's
+                    # physical cross-section the way a rect icon's bbox
+                    # is -- computing an "area" from it would be a real
+                    # number that means nothing. Left blank, honestly,
+                    # rather than shown and silently wrong.
+                    if shape == "rect":
+                        width_in = round(w_pt / pt_per_ft * 12, 1)
+                        height_in = round(h_pt / pt_per_ft * 12, 1)
+                        area_sqft = round((width_in / 12) * (height_in / 12), 3)
+                    else:
+                        width_in = height_in = area_sqft = None
                     if role == "diffuser":
                         entry.update({"type": "Supply Diffuser", "purpose": "supply", "face": "",
-                                     "neck": "", "cfm": 0, "qty": 1, "room": ""})
+                                     "neck": "", "cfm": 0, "qty": 1, "room": "",
+                                     "width_in": width_in, "height_in": height_in, "area_sqft": area_sqft})
                         result["terminals"].append(entry)
                     else:
                         entry.update({"type": "Flex Duct Connector" if role == "flex_connector"
-                                     else "Volume Control Damper", "size": "", "qty": 1})
+                                     else "Volume Control Damper",
+                                     "size": f"{width_in}x{height_in}" if width_in is not None else "",
+                                     "width_in": width_in, "height_in": height_in,
+                                     "area_sqft": area_sqft, "qty": 1})
                         result["accessories"].append(entry)
             runs = []
             for role, lines in by_role.items():
@@ -638,19 +798,71 @@ def extract(pdf_path, layer_map, pt_per_ft, use_ocr=True, dpi=250, match_ft=8, l
     result["checks"] = {"runs": n, "runs_with_size_label": m, "label_match_rate": round(rate, 2)}
     if n == 0: result["warnings"].append("No duct runs found: check the layer mapping (which colour is supply/return).")
     elif rate < 0.3: result["warnings"].append("Few runs matched a size label: scale may be wrong, or labels need OCR.")
+    # item 27 rule 4: under half of a real file's runs had NO label at all
+    # (43%, nowhere near the 30% floor above) and that never surfaced as a
+    # warning -- an estimator reading only the headline totals had no way
+    # to know most of the length behind them was unconfirmed. A second,
+    # softer tier so "more than half unlabeled" is said out loud even when
+    # it isn't bad enough to hit the sharper warning above.
+    elif rate < 0.5:
+        result["warnings"].append(
+            f"Only {round(rate * 100)}% of duct runs matched a size label -- more than half have "
+            "no confirmed size. Any area/length total built only from the matched runs is missing "
+            "real duct; do not treat it as a firm total without checking the overlay.")
     if not any(l["source"].startswith("ocr") for l in result["labels"]) and use_ocr:
         result["warnings"].append("No OCR labels: check rapidocr/onnxruntime are installed, or labels may be missing.")
     result["warnings"].append("Only straight horizontal/vertical ducts are measured; bends, angled runs and fittings are not.")
-    if not any(role in layer_map.values() for role in SYMBOL_ROLES):
+    # item 27 rule 4, continued: the old check was all-or-nothing (any ONE
+    # symbol role mapped silenced the warning for all three) -- found live,
+    # 28 Oct 2026: a file with diffuser and flex_connector mapped but NOT
+    # volume_damper reported 0 dampers with no warning at all, which reads
+    # exactly like "confirmed zero on the drawing" rather than "nobody told
+    # this tool which layer is the damper". Checked per role instead.
+    mapped_symbol_roles = {role for role in SYMBOL_ROLES if role in layer_map.values()}
+    unmapped_symbol_roles = SYMBOL_ROLES - mapped_symbol_roles
+    if not mapped_symbol_roles:
         result["warnings"].append(
             "No diffuser/flex_connector/volume_damper layer mapped -- symbols are not counted at "
             "all unless a rect layer is mapped to one of those roles; use cfm_label_counts and "
             "check against the drawing instead.")
     else:
+        if unmapped_symbol_roles:
+            result["warnings"].append(
+                f'No layer mapped to: {", ".join(sorted(unmapped_symbol_roles))} -- these report as '
+                '0 in terminals/accessories, which means "not counted on this file", not "confirmed '
+                'zero on the drawing". Map a layer to each role that needs counting.')
         result["warnings"].append(
             "Symbol counts (diffusers/flex connectors/dampers) are geometric finds (exact), not an "
             "interpretation -- a rect that happens to share the mapped layer's colour/weight and "
             "size range would be miscounted as one; check the overlay, not just the number.")
+    # item 27 rule 4, continued: a size/gauge group built from exactly one
+    # measured run is a single point of failure -- one bad scale or OCR
+    # read on that one run swings the WHOLE group's total, the same way the
+    # real file's "return, 22G" category (a single 20x30 run) came out
+    # more than 2x the client's real figure. 30% is a plain middle
+    # threshold (same honest framing as `unread`'s 0.6, above) -- not
+    # tuned against a labelled test set yet.
+    sys_totals = defaultdict(float)
+    for d in result["duct_summary"]:
+        sys_totals[d["system"]] += d["length_ft"]
+    for d in result["duct_summary"]:
+        total = sys_totals[d["system"]]
+        if d["runs"] == 1 and total > 0 and d["length_ft"] / total > 0.3:
+            result["warnings"].append(
+                f'{d["system"]} {d["size_in"]}: {d["length_ft"]} ft comes from a single measured run '
+                f'({round(d["length_ft"] / total * 100)}% of all {d["system"]} length) -- one bad '
+                "scale or OCR read on this one run swings the whole size total built from it.")
+    # item 29c: report-only -- never changes a run, a length or a total,
+    # see _isolated_runs' own docstring for why this stops short of
+    # bridging/merging anything.
+    isolated = _isolated_runs(result["duct_runs"])
+    if isolated:
+        iso_ft = sum(r["length_ft"] for r in isolated)
+        result["warnings"].append(
+            f'{len(isolated)} duct run(s) ({iso_ft:.1f} ft total) do not connect to any other '
+            "measured run at either end -- not a normal dead end (that only needs ONE free end); "
+            "possibly a misread, a duplicate, or junk geometry. Not altered, just flagged -- check "
+            "these against the overlay before trusting their length.")
     # "equipment" now holds real finds (Hi-Wall split units, from a "<N>TR
     # HI-WALL" note) -- the "empty by design" warning stayed true for it
     # even after real entries started landing, which is its own kind of
@@ -714,6 +926,22 @@ def save(result, pdf_path):
         for r in result["duct_runs"]: w.writerow([r.get(c) for c in cols])
     return base + ".json"
 
+def symbol_counts_and_areas(res):
+    """One (type, count, total_area_sqft_or_None) tuple per symbol type
+    found by shape (diffuser/flex_connector/volume_damper) -- the single
+    place both summary_text() and the review UI read this from, so the
+    two never drift into reporting different numbers for the same run."""
+    counts = defaultdict(int)
+    areas = defaultdict(float)
+    has_area = defaultdict(bool)
+    for e in (res.get("terminals") or []) + (res.get("accessories") or []):
+        counts[e["type"]] += 1
+        if e.get("area_sqft") is not None:
+            areas[e["type"]] += e["area_sqft"]
+            has_area[e["type"]] = True
+    return [(t, n, areas[t] if has_area[t] else None) for t, n in sorted(counts.items())]
+
+
 def summary_text(res):
     s = [f'File: {res["source"]["file"]}   pages: {res["source"]["pages"]}   runs: {res["checks"]["runs"]}   '
          f'label match: {int(res["checks"]["label_match_rate"] * 100)}%', "", "DUCT SUMMARY (system, size in, length ft / m, runs)"]
@@ -729,10 +957,16 @@ def summary_text(res):
         s += [f'  {e["type"]} {e["capacity"]} x{e["qty"]} (conf {e["conf"]:.2f})' for e in res["equipment"]]
     if res["terminals"] or res["accessories"]:
         s += ["", "SYMBOLS COUNTED BY SHAPE (partial -- see warnings)"]
-        counts = defaultdict(int)
-        for e in res["terminals"] + res["accessories"]:
-            counts[e["type"]] += 1
-        s += [f'  {t}: {n}' for t, n in sorted(counts.items())]
+        # item 27 rule 3: the per-symbol area (width_in/height_in/area_sqft,
+        # from count_symbol_rects' own outer footprint) was computed but
+        # never reached this hand-off -- a BOQ built only from this text
+        # never saw it, even though every entry has carried it since 28c.
+        # Shown as a total per type so a trade that bills (e.g.) a damper
+        # by sq.m, not by count, has the number here, not just in the raw
+        # JSON.
+        for t, n, area in symbol_counts_and_areas(res):
+            area_bit = f'  ({area:.2f} sq.ft / {area * 0.0929:.2f} sq.m total frame area)' if area is not None else ""
+            s.append(f'  {t}: {n}{area_bit}')
     if res["unresolved_duct_labels"]:
         s += ["", "UNRESOLVED -- SECOND DUCT SYSTEM (different ink colour, role not geometry-derivable)"]
         s += [f'  {u["kind"]}: {u["text"]} (page {u["page"] + 1})' for u in res["unresolved_duct_labels"][:40]]
@@ -744,6 +978,14 @@ def summary_text(res):
 def load_map():
     try: return json.load(open(MAP_FILE))
     except Exception: return {}
+
+def save_map(updates: dict):
+    """Remember this tender's own role choices for the NEXT one -- the
+    same cross-tender memory `MAP_FILE` already promises, just callable
+    from outside run_gui()'s own tkinter `start()` too."""
+    saved = load_map(); saved.update(updates)
+    try: json.dump(saved, open(MAP_FILE, "w"), indent=1)
+    except Exception: pass
 
 def run_gui(preload=None):
     import tkinter as tk
@@ -819,9 +1061,7 @@ def run_gui(preload=None):
         if not mp: return messagebox.showinfo("HVAC Takeoff", "Set at least one layer to supply or return.")
         try: ppf = pt_per_ft()
         except ValueError as e: return messagebox.showerror("HVAC Takeoff", str(e))
-        saved = load_map(); saved.update({k: v.get() for k, v in st["vars"].items()})
-        try: json.dump(saved, open(MAP_FILE, "w"), indent=1)
-        except Exception: pass
+        save_map({k: v.get() for k, v in st["vars"].items()})
         go.state(["disabled"]); out.delete("1.0", "end")
         log = lambda m: root.after(0, lambda: status.set(m))
         def work():

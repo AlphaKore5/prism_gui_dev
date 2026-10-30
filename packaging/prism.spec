@@ -220,6 +220,25 @@ try:
 except Exception:                                       # not installed: source-only
     pass
 
+# rapidocr (the NEW package hvac_takeoff.py imports -- genuinely separate
+# from rapidocr_onnxruntime above, see requirements.txt's own comment)
+# ships its yaml configs (default_models.yaml etc.) inside the package;
+# this bundles THOSE. It does NOT solve the real gap found 27 Oct 2026:
+# the actual model weights (~30MB of .onnx files) are not in the wheel
+# at all -- rapidocr/download_file.py fetches them from modelscope.cn
+# the first time RapidOCR() actually runs, same as RapidOCR's own
+# install-time note elsewhere in this file already says for a different
+# model set. A frozen build with no network reachable at first use will
+# have a working takeoff button that fails the moment OCR is reached --
+# not fixed here; needs either bundling pre-downloaded models into datas
+# explicitly (find them under site-packages/rapidocr/models after a
+# build-machine run that primed the cache) or accepting the first-run
+# network dependency as a documented limitation.
+try:
+    datas += collect_data_files("rapidocr")
+except Exception:                                       # not installed: source-only
+    pass
+
 # OpenCV, which RapidOCR imports. cv2's __init__ loads its compiled extension
 # by a path it reads from its own config files, and on the macOS arm64 bundle
 # that left "recursion is detected during loading of cv2 binary extensions" —

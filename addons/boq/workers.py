@@ -12,6 +12,7 @@ from __future__ import annotations
 from PySide6.QtCore import Signal
 
 from addons.boq import industries
+from addons.boq import openrouter_writer
 from workers import _Worker
 
 
@@ -39,5 +40,33 @@ class HvacTakeoffWorker(_Worker):
                 self.industry, self.pdf_path, self.layer_map, self.pt_per_ft,
                 use_ocr=self.use_ocr)
             self.done.emit(result)
+        except Exception as e:                           # noqa: BLE001
+            self.failed.emit(str(e))
+
+
+class OpenRouterWriteWorker(_Worker):
+    """BOQ-CHANGES-TODO.md item 30b/30c: one "Prism Agent" completion off
+    the GUI thread -- a plain OpenRouter API call, not a browser tab, so
+    this never touches AutomationWorker/BoqRunDialog's fallback-chain
+    machinery at all; see addons/boq/dialog.py's _run_prism_agent()."""
+
+    done = Signal(str)
+    failed = Signal(str)
+
+    def __init__(self, agent: str, prompt: str, api_key: str, *, followup: bool = False,
+                 attachments: list[dict] | None = None):
+        super().__init__()
+        self.agent = agent
+        self.prompt = prompt
+        self.api_key = api_key
+        self.followup = followup
+        self.attachments = attachments
+
+    def run(self):
+        try:
+            text = openrouter_writer.write(
+                self.agent, self.prompt, self.api_key, followup=self.followup,
+                attachments=self.attachments)
+            self.done.emit(text)
         except Exception as e:                           # noqa: BLE001
             self.failed.emit(str(e))

@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 import sys
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -49,6 +50,10 @@ class AnIndustryWithNoRuleSetRaisesRatherThanGuessing(unittest.TestCase):
         with self.assertRaises(ValueError):
             industries.summary_text("ELV", {})
 
+    def test_layer_preview_raises_for_an_unbuilt_industry(self):
+        with self.assertRaises(ValueError):
+            industries.layer_preview("ELV", "/x/does/not/matter.pdf", "k1")
+
     def test_roles_and_scales_are_just_empty_not_an_error(self):
         """Read-only lookups used to populate a combo box -- an empty list
         (nothing to offer yet) rather than a raised error, since nothing
@@ -58,6 +63,62 @@ class AnIndustryWithNoRuleSetRaisesRatherThanGuessing(unittest.TestCase):
 
     def test_review_rows_is_just_empty_not_an_error(self):
         self.assertEqual(industries.review_rows("ELV", {"labels": []}), [])
+
+    def test_symbol_counts_and_areas_is_just_empty_not_an_error(self):
+        self.assertEqual(industries.symbol_counts_and_areas("ELV", {}), [])
+
+
+class SavedLayerRolesIsStep1sOwnCrossTenderMemory(unittest.TestCase):
+    """Found 30 Oct 2026: a real client file read 0 duct runs through
+    BOQ's dialog while the standalone hvac_takeoff.py tool, run on the
+    exact same PDF, measured many -- because that tool's own combo boxes
+    always start from `load_map()`'s saved roles and BOQ's dialog never
+    looked at that file at all. These two functions are the fix's
+    dispatch surface; the dialog wiring is covered in test_boq_takeoff.py.
+    """
+
+    def test_an_unbuilt_industry_has_no_memory_to_read(self):
+        self.assertEqual(industries.saved_layer_roles("ELV"), {})
+
+    def test_an_unbuilt_industry_silently_ignores_a_remember_call(self):
+        industries.remember_layer_roles("ELV", {"k1": "supply"})  # must not raise
+
+    def test_hvac_reads_whatever_hvac_takeoff_itself_has_saved(self):
+        with mock.patch.object(industries, "_hvac") as hv:
+            hv.return_value.load_map.return_value = {"#000000@1.56:line": "supply"}
+            self.assertEqual(industries.saved_layer_roles("HVAC"),
+                              {"#000000@1.56:line": "supply"})
+
+    def test_hvac_remember_reaches_hvac_takeoffs_own_save_map(self):
+        with mock.patch.object(industries, "_hvac") as hv:
+            industries.remember_layer_roles("HVAC", {"k1": "return"})
+            hv.return_value.save_map.assert_called_once_with({"k1": "return"})
+
+
+class SymbolCountsAndAreasReachTheReviewScreen(unittest.TestCase):
+    """item 27 rule 3, completed: the per-symbol area was computed in
+    hvac_takeoff.extract() (28c) but never reached a screen -- this is the
+    dispatcher the review table actually calls, so a regression here would
+    silently go back to count-only."""
+
+    def _result(self):
+        return {"terminals": [
+            {"type": "Supply Diffuser", "area_sqft": 2.0},
+            {"type": "Supply Diffuser", "area_sqft": 2.0},
+        ], "accessories": [
+            {"type": "Volume Control Damper", "area_sqft": 0.5},
+        ]}
+
+    def test_one_row_per_type_with_count_and_total_area(self):
+        rows = industries.symbol_counts_and_areas("HVAC", self._result())
+        by_type = {t: (n, a) for t, n, a in rows}
+        self.assertEqual(by_type["Supply Diffuser"], (2, 4.0))
+        self.assertEqual(by_type["Volume Control Damper"], (1, 0.5))
+
+    def test_a_type_with_no_area_data_reports_none_not_zero(self):
+        result = {"terminals": [{"type": "Supply Diffuser"}], "accessories": []}
+        rows = industries.symbol_counts_and_areas("HVAC", result)
+        self.assertEqual(rows, [("Supply Diffuser", 1, None)])
 
 
 class ReviewRowsCarryTheRealConfidenceNeverAnInventedOne(unittest.TestCase):

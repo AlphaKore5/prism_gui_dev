@@ -83,6 +83,43 @@ def scan_layers(industry: str, pdf_path: str) -> list[dict]:
     raise ValueError(f"No PDF-takeoff rule-set for {industry!r}")
 
 
+def saved_layer_roles(industry: str) -> dict:
+    """Step 1's own cross-tender memory -- the role a colour+weight+kind
+    key was mapped to on a PREVIOUS drawing, so the same key on a new one
+    starts pre-filled rather than back at "ignore" every single time.
+    Found 30 Oct 2026: the standalone hvac_takeoff.py tool has always read
+    this (`load_map()`, pre-filling its own combo boxes) and the exact
+    same key a tender ago (`#000000@1.56:line`/`:poly` -> "supply") is why
+    it measured real duct runs on a drawing BOQ's own Step 1 showed every
+    layer still on "ignore" for -- BOQ never looked at this file at all.
+    An unbuilt industry has no memory to read, same as `roles`/`scales`
+    above -- empty, not an error, since nothing here is being asked to
+    measure anything."""
+    if industry == HVAC:
+        return _hvac().load_map()
+    return {}
+
+
+def remember_layer_roles(industry: str, layer_map: dict) -> None:
+    """The other half of `saved_layer_roles` -- called once a person has
+    set Step 1's roles for THIS drawing, so the next one gets the benefit.
+    A no-op for an industry with no PDF-takeoff rule-set, same reasoning
+    as `saved_layer_roles`."""
+    if industry == HVAC:
+        _hvac().save_map(layer_map)
+
+
+def layer_preview(industry: str, pdf_path: str, key: str, page_index: int = 0) -> bytes:
+    """Step 1's own "what does this colour actually draw" picture, PNG
+    bytes -- a layer's own segments highlighted on the faded page, so a
+    person can SEE what a colour swatch and a segment count can't say.
+    Raises ValueError for an industry with no PDF-takeoff rule-set, same
+    as every other function here."""
+    if industry == HVAC:
+        return _hvac().layer_preview_png(pdf_path, key, page_index)
+    raise ValueError(f"No PDF-takeoff rule-set for {industry!r}")
+
+
 def extract(industry: str, pdf_path: str, layer_map: dict, pt_per_ft: float,
            use_ocr: bool = True, log=None) -> dict:
     """Step 2: run `industry`'s own extraction with the layer roles chosen
@@ -118,6 +155,16 @@ def review_rows(industry: str, result: dict) -> list[dict]:
              "conf": float(l.get("conf", 1.0)), "page": l.get("page", 0),
              "editable": l.get("kind", "") in EDITABLE_KINDS}
             for i, l in enumerate(result.get("labels") or [])]
+
+
+def symbol_counts_and_areas(industry: str, result: dict) -> list[tuple[str, int, float | None]]:
+    """Item 27 rule 3, the review UI's half: one (type, count, area_sqft)
+    row per symbol type found by shape -- the same figures summary_text()
+    hands to the BOQ writer, shown here before that, so "Use these
+    measurements" is never the first time anyone sees them."""
+    if industry != HVAC:
+        return []
+    return _hvac().symbol_counts_and_areas(result)
 
 
 def apply_review_edit(industry: str, result: dict, index: int, new_text: str) -> bool:

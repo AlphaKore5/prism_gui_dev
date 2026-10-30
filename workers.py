@@ -698,6 +698,22 @@ class GroqKeyWorker(_Worker):
             self.done.emit(str(e))
 
 
+class OpenRouterKeyWorker(_Worker):
+    """Same job as GroqKeyWorker, for the BOQ add-on's "Prism Agent" key
+    (BOQ-CHANGES-TODO.md item 30)."""
+    done = Signal(str)       # "" == the key works, else why not
+
+    def __init__(self, api_key: str, model: str = ""):
+        super().__init__()
+        self.api_key, self.model = api_key, model
+
+    def run(self):
+        try:
+            self.done.emit(CB.openrouter.verify_key(self.api_key, self.model))
+        except Exception as e:                          # noqa: BLE001
+            self.done.emit(str(e))
+
+
 class InboxVerifyWorker(_Worker):
     """Find the mail server and check the password, off the UI thread.
 
