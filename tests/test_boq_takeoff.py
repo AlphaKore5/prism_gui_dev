@@ -31,7 +31,23 @@ from addons.boq import takeoff as T                                # noqa: E402
 # hvac_takeoff/layer_map.json. Guard every test in this file from ever
 # writing to it; only the dedicated test below re-patches this locally
 # to verify the call itself happens.
-mock.patch.object(T.industries, "remember_layer_roles").start()
+#
+# setUpModule/tearDownModule, not a bare `.start()` -- this file is one of
+# several collected into the SAME pytest process (e.g. alongside
+# test_boq_industries.py, which tests the real remember_layer_roles), and
+# an un-stopped `.start()` here replaced that function for every test in
+# every OTHER file for the rest of the process, not just this one.
+_remember_guard = None
+
+
+def setUpModule():
+    global _remember_guard
+    _remember_guard = mock.patch.object(T.industries, "remember_layer_roles")
+    _remember_guard.start()
+
+
+def tearDownModule():
+    _remember_guard.stop()
 
 
 class _FakeWorker:
