@@ -149,6 +149,32 @@ class VerifyKeyReturnsEmptyOnlyWhenItWorks(unittest.TestCase):
             out = OR.verify_key("sk-or-good", model="anthropic/claude-sonnet-5.5")
         self.assertIn("claude-sonnet-5.5", out)
 
+    def test_the_key_is_checked_on_the_endpoint_that_checks_keys(self):
+        # OpenRouter's /models list is public and answers 200 to a made-up key,
+        # so a check that only calls it would pass every key.
+        seen = []
+
+        def fake_get(url, headers=None, timeout=None):
+            seen.append(url)
+            return _resp(401 if url.endswith("/key") else 200, {"data": []})
+
+        with mock.patch.object(OR.requests, "get", side_effect=fake_get):
+            out = OR.verify_key("sk-or-made-up")
+        self.assertIn("rejected", out)
+        self.assertTrue(seen[0].endswith("/api/v1/key"))
+
+    def test_the_public_model_list_is_sent_no_key(self):
+        sent = {}
+
+        def fake_get(url, headers=None, timeout=None):
+            sent[url.rsplit("/", 1)[-1]] = headers
+            return _resp(200, {"data": [{"id": "anthropic/claude-sonnet-5.5"}]})
+
+        with mock.patch.object(OR.requests, "get", side_effect=fake_get):
+            self.assertEqual(OR.verify_key("sk-or-good", model="anthropic/claude-sonnet-5.5"), "")
+        self.assertTrue(sent["key"])
+        self.assertFalse(sent["models"])
+
 
 if __name__ == "__main__":
     unittest.main()
