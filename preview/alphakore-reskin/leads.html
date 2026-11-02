@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Leads & Outreach · Prism by AlphaKore</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body data-page="leads">
+<div class="canvas"></div>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <symbol id="ak" viewBox="0 0 789 480"><path fill="currentColor" d="M0,479 L295,480 L366,374 L330,312 L260,418 L106,417 L282,126 L387,302 L486,480 L789,480 L653,240 L787,18 L499,18 L420,134 L463,185 L531,75 L680,76 L577,245 L682,419 L521,417 L374,153 L283,0Z"/></symbol>
+  <symbol id="parrow" viewBox="0 0 18 18"><g fill="#fff"><rect x="2" y="8" width="2" height="2"/><rect x="5" y="8" width="2" height="2"/><rect x="8" y="8" width="2" height="2"/><rect x="11" y="8" width="2" height="2"/><rect x="11" y="5" width="2" height="2"/><rect x="11" y="11" width="2" height="2"/><rect x="14" y="8" width="2" height="2"/></g></symbol>
+  <symbol id="pplus" viewBox="0 0 18 18"><g fill="#fff"><rect x="8" y="2" width="2" height="2"/><rect x="8" y="5" width="2" height="2"/><rect x="2" y="8" width="2" height="2"/><rect x="5" y="8" width="2" height="2"/><rect x="8" y="8" width="2" height="2"/><rect x="11" y="8" width="2" height="2"/><rect x="14" y="8" width="2" height="2"/><rect x="8" y="11" width="2" height="2"/><rect x="8" y="14" width="2" height="2"/></g></symbol>
+  <symbol id="pplay" viewBox="0 0 18 18"><g fill="#fff"><rect x="5" y="3" width="2" height="2"/><rect x="5" y="6" width="2" height="2"/><rect x="5" y="9" width="2" height="2"/><rect x="5" y="12" width="2" height="2"/><rect x="8" y="5" width="2" height="2"/><rect x="8" y="8" width="2" height="2"/><rect x="8" y="11" width="2" height="2"/><rect x="11" y="7" width="2" height="2"/><rect x="11" y="9" width="2" height="2" opacity=".0"/><rect x="13" y="8" width="2" height="2" opacity=".0"/></g></symbol>
+  <symbol id="pdots" viewBox="0 0 18 18"><g fill="#fff"><rect x="3" y="3" width="2.4" height="2.4"/><rect x="7.8" y="3" width="2.4" height="2.4"/><rect x="12.6" y="3" width="2.4" height="2.4"/><rect x="3" y="7.8" width="2.4" height="2.4"/><rect x="7.8" y="7.8" width="2.4" height="2.4"/><rect x="12.6" y="7.8" width="2.4" height="2.4"/><rect x="3" y="12.6" width="2.4" height="2.4"/><rect x="7.8" y="12.6" width="2.4" height="2.4"/><rect x="12.6" y="12.6" width="2.4" height="2.4"/></g></symbol>
+
+  <symbol id="i-home" viewBox="0 0 24 24"><path d="M3.5 10.5 12 3.5l8.5 7V20a1 1 0 0 1-1 1H15v-6H9v6H4.5a1 1 0 0 1-1-1z"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3.5 7a2 2 0 0 1 2-2h3.8l2 2.2h7.2a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/></symbol>
+  <symbol id="i-inbox" viewBox="0 0 24 24"><path d="M3.5 13 6 5.5h12l2.5 7.5V18a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1z"/><path d="M3.5 13H8l1.5 2.5h5L16 13h4.5"/></symbol>
+  <symbol id="i-sheet" viewBox="0 0 24 24"><path d="M14 3.5H7a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8.5z"/><path d="M14 3.5v5h5M8.5 12.5h7M8.5 16h7M12 12.5V16"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 3.5H7a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8.5z"/><path d="M14 3.5v5h5"/></symbol>
+  <symbol id="i-chip" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="1.6"/><path d="M10 3.5V7M14 3.5V7M10 17v3.5M14 17v3.5M3.5 10H7M3.5 14H7M17 10h3.5M17 14h3.5"/></symbol>
+  <symbol id="i-cube" viewBox="0 0 24 24"><path d="M12 3.2 19.8 7.6v8.8L12 20.8l-7.8-4.4V7.6z"/><path d="M4.2 7.6 12 12l7.8-4.4M12 12v8.8"/></symbol>
+  <symbol id="i-mail" viewBox="0 0 24 24"><rect x="3.5" y="5.5" width="17" height="13" rx="2"/><path d="m4 7.5 8 5.5 8-5.5"/></symbol>
+  <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8.5" r="3.8"/><path d="M4.8 20.5a7.2 7.2 0 0 1 14.4 0"/></symbol>
+  <symbol id="i-chat" viewBox="0 0 24 24"><path d="M20.5 12a8.3 8.3 0 0 1-12.3 7.3L3.5 20.5l1.3-4.4A8.3 8.3 0 1 1 20.5 12z"/><path d="M9 10.5h6M9 13.5h4"/></symbol>
+  <symbol id="i-box" viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><path d="M14.5 16.5h4M16.5 14.5v4"/></symbol>
+  <symbol id="i-film" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M7.5 4.5v15M16.5 4.5v15M3.5 9.5h4M3.5 14.5h4M16.5 9.5h4M16.5 14.5h4"/></symbol>
+  <symbol id="i-clip" viewBox="0 0 24 24"><path d="m20 11.5-8 8a5 5 0 0 1-7-7l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7L9.6 17.3a1.7 1.7 0 0 1-2.4-2.4L15 7"/></symbol>
+  <symbol id="i-cmd" viewBox="0 0 24 24"><path d="M9 6.5a2.5 2.5 0 1 0-2.5 2.5h11A2.5 2.5 0 1 0 15 6.5v11a2.5 2.5 0 1 0 2.5-2.5h-11A2.5 2.5 0 1 0 9 17.5z"/></symbol>
+  <symbol id="i-grid" viewBox="0 0 24 24"><rect x="4" y="4" width="6.5" height="6.5" rx="1.4"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.4"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.4"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.4"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4.5 7h15M9.5 7V4.5h5V7M6.5 7l.9 12.5a1 1 0 0 0 1 .9h7.2a1 1 0 0 0 1-.9L17.5 7"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></symbol>
+  <symbol id="i-left" viewBox="0 0 24 24"><path d="m14.5 6-6 6 6 6"/></symbol>
+  <symbol id="i-down" viewBox="0 0 24 24"><path d="m6 9.5 6 6 6-6"/></symbol>
+  <symbol id="i-right" viewBox="0 0 24 24"><path d="m9.5 6 6 6-6 6"/></symbol>
+  <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13.5 6.5 19 12l-5.5 5.5"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="m5.5 12.5 4.2 4.2L18.5 8"/></symbol>
+  <symbol id="i-more" viewBox="0 0 24 24"><circle cx="6" cy="12" r=".9"/><circle cx="12" cy="12" r=".9"/><circle cx="18" cy="12" r=".9"/></symbol>
+  <symbol id="i-bars" viewBox="0 0 24 24"><path d="M6 19V11M12 19V5M18 19v-6"/></symbol>
+  <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 4v4M12 16v4M4 12h4M16 12h4M7 7l1.8 1.8M15.2 15.2 17 17M17 7l-1.8 1.8M8.8 15.2 7 17"/></symbol>
+  <symbol id="i-wifi" viewBox="0 0 24 24"><path d="M4 9.5a12 12 0 0 1 16 0M7 13a7.5 7.5 0 0 1 10 0M10 16.5a3 3 0 0 1 4 0"/></symbol>
+
+  <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="3.5" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v2.5"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10.5" width="14" height="10" rx="2"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5"/></symbol>
+  <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M15.5 4.5l4 4L9 19H5v-4z"/><path d="M13.5 6.5l4 4"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.8"/></symbol>
+  <symbol id="i-ext" viewBox="0 0 24 24"><path d="M14 4.5h5.5V10M19.5 4.5 11 13M18 14v4.5a1 1 0 0 1-1 1H5.5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1H10"/></symbol>
+  <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></symbol>
+  <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M9.6 9.5a2.5 2.5 0 1 1 3.4 2.3c-.6.3-1 .8-1 1.5v.4"/><circle cx="12" cy="16.8" r=".6"/></symbol>
+  <symbol id="i-list" viewBox="0 0 24 24"><path d="M5 7h14M5 12h14M5 17h9"/></symbol>
+  <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="15" r="3.8"/><path d="m10.8 12.2 8.7-8.7M16 6.5l2.5 2.5M13.5 9l2 2"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.5v13l10-6.5z"/></symbol>
+  <symbol id="i-video" viewBox="0 0 24 24"><rect x="3.5" y="6.5" width="12" height="11" rx="2"/><path d="m15.5 10.5 5-3v9l-5-3"/></symbol>
+  <symbol id="i-expand" viewBox="0 0 24 24"><path d="M14 4.5h5.5V10M10 19.5H4.5V14M19.5 4.5 14 10M4.5 19.5 10 14"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+</defs></svg>
+<div class="app">
+  <aside class="side">
+    <div class="brand">
+      <a href="index.html" title="Home"><img class="crystal" src="img/prism-logo.svg" alt="Prism"></a>
+      <div class="txt">
+        <div class="name">Prism</div>
+        <div class="by">by <svg viewBox="0 0 789 480" aria-label="AlphaKore"><use href="#ak"/></svg> AlphaKore</div>
+      </div>
+      <button class="iconbtn collapse" title="Collapse the sidebar"><svg class="i"><use href="#i-left"/></svg></button>
+    </div>
+    <div class="label">Work</div>
+    <a class="btn dark" href="index.html#new" title="New task"><span class="ic"><svg><use href="#pplus"/></svg></span><span class="t">New task</span></a>
+    <nav class="nav"><a class="navi" href="index.html" title="Home"><svg class="i"><use href="#i-home"/></svg><span>Home</span></a><a class="navi" href="history.html" title="History"><svg class="i"><use href="#i-clock"/></svg><span>History</span></a><a class="navi" href="artifacts.html" title="Artifacts"><svg class="i"><use href="#i-folder"/></svg><span>Artifacts</span></a></nav>
+    <div class="grp"><div class="label">Add-ons</div><svg class="i"><use href="#i-down"/></svg></div>
+    <div class="addons"><nav class="nav"><a class="navi" href="inquiry.html" title="Email Inquiries"><span class="tile"><svg class="i"><use href="#i-inbox"/></svg></span><span>Email Inquiries</span></a><a class="navi" href="boq.html" title="BOQ"><span class="tile"><svg class="i"><use href="#i-sheet"/></svg></span><span>BOQ</span></a><a class="navi" href="gerber.html" title="Gerber"><span class="tile"><svg class="i"><use href="#i-chip"/></svg></span><span>Gerber</span></a><a class="navi" href="step.html" title="STEP"><span class="tile"><svg class="i"><use href="#i-cube"/></svg></span><span>STEP</span></a><a class="navi" href="email.html" title="Email Outreach"><span class="tile"><svg class="i"><use href="#i-mail"/></svg></span><span>Email Outreach</span></a><a class="navi on" href="leads.html" aria-current="page" title="Leads & Outreach"><span class="tile"><svg class="i"><use href="#i-user"/></svg></span><span>Leads &amp; Outreach</span></a><a class="navi" href="whatsapp.html" title="WhatsApp"><span class="tile"><svg class="i"><use href="#i-chat"/></svg></span><span>WhatsApp</span></a><a class="navi" href="bom.html" title="BOM & Stock"><span class="tile"><svg class="i"><use href="#i-box"/></svg></span><span>BOM &amp; Stock</span></a></nav></div>
+    <a class="me" href="settings.html#profile" title="Your profile and settings">
+      <div class="avatar">P</div>
+      <div class="who"><b>Parth</b><span>complete plan</span></div>
+      <svg class="i"><use href="#i-right"/></svg>
+    </a>
+  </aside>
+  <main class="main">
+    <section class="screen on full">
+      <header class="phead">
+        <div><h1>Leads &amp; Outreach</h1><p>Find, qualify and reach the right people — Prism drafts, you send.</p></div>
+        <div class="acts"><button class="iconbtn" id="ld-help" title="Help — ask Lumi" style="box-shadow:inset 0 0 0 1px var(--line2)"><svg class="i"><use href="#i-help"/></svg></button><button class="btn light plain sm" id="ld-credits" title="Your credits — every paid lookup Leads makes is charged to them. Click for the price list.">Credits</button><button class="btn light plain sm" id="ld-export" disabled title="Find or import people first" aria-label="Find or import people first"><svg class="i"><use href="#i-file"/></svg>Export sheets</button><button class="btn dark sm" id="ld-send" disabled title="Pick people and press Draft emails first" aria-label="Pick people and press Draft emails first"><span class="ic"><svg><use href="#parrow"/></svg></span>Send all</button></div>
+      </header>
+      <div class="pbody">
+        <div class="card wsc">
+          <div class="utabs" id="ld-tabs"><button class="on">People</button><button>Sessions</button><button>Lists</button><button>Saved searches</button><button>Sequences</button><button>Analytics</button>
+            <span class="sp"></span><span class="chipm">Your credits · your inbox</span></div>
+          <div id="ld-people" class="ldp">
+            <div class="hd2"><h2>Find people</h2><button class="chip" id="ld-import">Import<svg class="i"><use href="#i-down"/></svg></button></div>
+            <div class="toolbar">
+              <button class="chip" id="ld-view"><svg class="i"><use href="#i-grid"/></svg>Default view</button><button class="chip" id="ld-hide"><svg class="i"><use href="#i-list"/></svg>Hide filters</button>
+              <div class="fsearch"><svg class="i"><use href="#i-search"/></svg><input class="field2" id="ld-q" placeholder="Search people" aria-label="Search people"></div>
+              <button class="chip" id="ld-ai"><svg class="i"><use href="#i-spark"/></svg>Research with AI</button><button class="chip" id="ld-savesearch" title="Keep these filters to run again later">Save search</button>
+              <span class="sp"></span><select class="sel" aria-label="Sort" id="ld-sort"><option>Relevance</option><option>Newest</option><option>Company A–Z</option></select><button class="chip" id="ld-settings"><svg class="i"><use href="#i-sliders"/></svg>Search settings</button>
+            </div>
+            <div class="split2">
+              <div class="filt">
+                <div class="stats3" id="ld-stats"><div class="on" data-s="total">Total<b>0</b></div><div data-s="new">Net New<b>0</b></div><div data-s="saved">Saved<b>0</b></div></div>
+                <div class="acc"><div class="h">Job title<svg class="i"><use href="#i-down"/></svg></div><div class="b"><input class="field2" id="ld-title" placeholder="Add a job title" aria-label="Job title"><label><input type="checkbox" class="ck" id="ld-sim" checked> Include similar titles</label></div></div>
+                <div class="acc"><div class="h">Seniority<svg class="i"><use href="#i-right"/></svg></div><div class="b" hidden><input class="field2" placeholder="Add a seniority" aria-label="Seniority"></div></div><div class="acc"><div class="h">Current company<svg class="i"><use href="#i-right"/></svg></div><div class="b" hidden><input class="field2" placeholder="Add a current company" aria-label="Current company"></div></div>
+                <div class="acc"><div class="h">Location<svg class="i"><use href="#i-down"/></svg></div><div class="b"><input class="field2" id="ld-loc" placeholder="Add a country, region or city" aria-label="Location"></div></div>
+                <div class="acc"><div class="h">Industry<svg class="i"><use href="#i-right"/></svg></div><div class="b" hidden><input class="field2" placeholder="Add a industry" aria-label="Industry"></div></div><div class="acc"><div class="h">Contact CSV Import<svg class="i"><use href="#i-right"/></svg></div><div class="b" hidden><input class="field2" placeholder="Add a contact csv import" aria-label="Contact CSV Import"></div></div><div class="acc"><div class="h">Account CSV Import<svg class="i"><use href="#i-right"/></svg></div><div class="b" hidden><input class="field2" placeholder="Add a account csv import" aria-label="Account CSV Import"></div></div>
+                <div class="fbtns"><button class="btn light plain sm" id="ld-more">More filters (12)</button><button class="btn dark sm" id="ld-find"><span class="ic"><svg><use href="#parrow"/></svg></span>Find new people</button></div>
+              </div>
+              <div class="res" id="ld-res"></div>
+            </div>
+          </div>
+          <div id="ld-other" class="ldo" hidden></div>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<button class="edge" title="Open Lumi, Prism's helper"><svg class="i"><use href="#i-left"/></svg></button>
+<div class="status"><span class="ok">Ready.</span><span class="r">Prism 1.6.13 · by AlphaKore <svg viewBox="0 0 789 480"><use href="#ak" fill="currentColor"/></svg></span></div>
+<script src="mock.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
