@@ -529,7 +529,8 @@ class Sidebar(QFrame):
         self.new_task_btn.setMinimumHeight(C.MIN_TARGET + 6)
         self.new_task_btn.setAccessibleName(i18n.t("New task"))
         self.new_task_btn.setToolTip(i18n.t("Describe something you want done"))
-        icons.button_icon(self.new_task_btn, "plus", 15, "#ffffff")
+        self.new_task_btn.setIcon(C.brand_dot_icon(24, "plus"))
+        self.new_task_btn.setIconSize(QSize(24, 24))
         self.new_task_btn.clicked.connect(
             lambda: self.command_triggered.emit("workbench"))
         elevate(self.new_task_btn, theme.SHADOW_ACCENT, theme.ACCENT)
@@ -751,6 +752,8 @@ class Sidebar(QFrame):
 
         r = QRectF(self.rect())
         radius = 20.0
+        if C.paint_flat_card(self, painter, r, radius):
+            return
 
         clip = QPainterPath()
         clip.addRoundedRect(r, radius, radius)
@@ -1334,7 +1337,7 @@ class Sidebar(QFrame):
             self.new_task_btn.setText("")
             self.new_task_btn.setFixedSize(48, 38)
             self.new_task_btn.setToolTip(i18n.t("New task"))
-            icons.button_icon(self.new_task_btn, "plus", 16, "#ffffff")
+            self.new_task_btn.setIcon(C.brand_dot_icon(24, "plus"))
         else:
             self.new_task_btn.setText(i18n.t('New task'))
             self.new_task_btn.setMinimumHeight(C.MIN_TARGET + 6)

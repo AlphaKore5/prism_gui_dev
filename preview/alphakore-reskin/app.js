@@ -339,8 +339,35 @@
     });
     function del(r) { MOCK.runs = MOCK.runs.filter(function (x) { return x !== r; }); renderRecent(); toast("Run deleted"); }
   }
+  function renderInsights() {
+    var box = $("#h-insights"); if (!box) return;
+    var c = { quote: 0, wait: 0 }; MOCK.inquiries.forEach(function (i) { if (c[i.stage] !== undefined) c[i.stage]++; });
+    var due = MOCK.inquiries.filter(function (i) { return i.due && i.stage === "wait"; }).length;
+    var tiles = [
+      [c.quote, "Inquiries to quote", c.quote ? "Waiting for your price" : "Nothing waiting", "inquiry.html#pipeline"],
+      [c.wait, "Quotations, no answer", due ? due + " needs a reminder today" : "All answered", "inquiry.html#pipeline"],
+      [6, "Orders this month", "33% of quotations won", "inquiry.html"],
+      [MOCK.runs.length, "Tasks run this week", "All saved in History", "history.html"],
+      ["1,240", "Credits left", "Resets 1 December", "settings.html#licence"]];
+    box.innerHTML = tiles.map(function (x) { return '<a class="istat card" href="' + x[3] + '"><span class="n">' + x[0] + '</span><span class="t">' + x[1] + '</span><span class="s">' + x[2] + '</span></a>'; }).join("");
+  }
+  function renderVids() {
+    var box = $("#h-vids"); if (!box) return;
+    var V = [["Make a reel", "A 9:16 video from one sentence", "film", "media/reel.mp4", "media/reel-poster.jpg", "0:30"],
+             ["Bill of Quantities", "From a drawing to a priced sheet", "sheet", "", "", "1:00"],
+             ["Email inquiries", "Quote, remind, record the order", "inbox", "", "", "1:00"],
+             ["Leads & Outreach", "Find people, draft, send", "user", "", "", "1:00"]];
+    box.innerHTML = V.map(function (v, i) {
+      return '<button class="vtile card" data-i="' + i + '"><span class="th"' + (v[4] ? ' style="background-image:url(' + v[4] + ')"' : "") + '>' + ic(v[2]) + '<span class="play">' + ic("play") + '</span><span class="dur">' + v[5] + '</span></span><b>' + v[0] + '</b><small>' + v[1] + '</small></button>';
+    }).join("");
+    $$(".vtile", box).forEach(function (b) {
+      var v = V[+b.dataset.i];
+      if (v[3]) b.onclick = function () { video(v[3], v[0], v[4]); };
+      else { b.classList.add("soon"); setOff(b, "This demo hasn't been recorded yet"); b.querySelector(".dur").textContent = "Soon"; }
+    });
+  }
   function homeInit() {
-    renderRecent();
+    renderRecent(); renderInsights(); renderVids();
     var ta = $("#task"), send = $("#h-send"), holder = $("#h-att"), st = { files: [], tools: ["Claude", "ChatGPT", "Perplexity"] };
     function upd() { setOff(send, ta.value.trim() || st.files.length ? "" : "Type what you need, or attach a file first"); }
     ta.addEventListener("input", upd); upd();
@@ -368,28 +395,38 @@
     send.onclick = function () { if (!send.disabled) newTask(ta.value.trim() || "Work with the attached files", st.files.slice(), function () { ta.value = ""; holder.innerHTML = ""; st.files = []; upd(); }); };
     videoDialog("reel"); videoDialog("motion");
   }
+  function taskSteps(kind) {
+    return kind === "boq" ? [["file", "Read the drawing", "Measured on this computer · no AI sees the file", "Measured here"], ["sheet", "Build the quantities", "Prism Agent Claude · about 40 s", "Prism Agent Claude"], ["grid", "Prepare the workbook", "Excel, in your sample's layout", "Prism"]]
+      : [["search", "Research", "Perplexity · waits up to 4 min", "Perplexity"], ["pencil", "Write it up", "Claude · about 1 min", "Claude"], ["check", "Check the facts", "ChatGPT · about 30 s", "ChatGPT"]];
+  }
   function newTask(prompt, files, cleared) {
     if (/\breel\b|video/i.test(prompt)) { location.hash = "reel"; setTimeout(function () { var t = $("#reel textarea"); t.value = prompt; t.dispatchEvent(new Event("input", { bubbles: true })); }, 50); cleared(); return; }
-    var kind = /boq|quantit|dxf|drawing/i.test(prompt) ? "boq" : /pdf|summar|price list/i.test(prompt) ? "text" : "text";
-    var steps = kind === "boq" ? [["file", "Read the drawing", "Measured on this computer · no AI sees the file", "Measured here"], ["sheet", "Build the quantities", "Prism Agent Claude · about 40 s", "Prism Agent Claude"], ["grid", "Prepare the workbook", "Excel, in your sample's layout", "Prism"]]
-      : [["search", "Research", "Perplexity · waits up to 4 min", "Perplexity"], ["pencil", "Write it up", "Claude · about 1 min", "Claude"], ["check", "Check the facts", "ChatGPT · about 30 s", "ChatGPT"]];
-    var m = info("New task", "Prism made a plan. Switch off any step you don't want, then start.", "spark",
-      '<div class="taskq"><span class="label">You asked</span><p>' + esc(prompt) + '</p>' + (files.length ? '<div class="frow">' + files.map(function (f) { return '<span class="fchip mini">' + ic("clip") + '<b>' + esc(f[0]) + '</b></span>'; }).join("") + '</div>' : "") + '</div>' +
-      '<div class="plan"><div class="planh"><span class="label">Suggested workflow</span><span class="mono muted">' + steps.length + ' steps</span></div>' +
-      steps.map(function (s, i) { return '<label class="pstep"><span class="n">0' + (i + 1) + '</span><span class="ftile">' + ic(s[0]) + '</span><span class="tx"><b>' + s[1] + '</b><small>' + s[2] + '</small></span><span class="switch"><input type="checkbox" checked><i></i></span></label>'; }).join("") + '</div>' +
-      '<div class="out" id="task-out">The answer appears here once the steps finish.</div>' +
-      '<div class="df inl"><span class="mono muted" id="task-note">Nothing has run yet.</span><span class="sp"></span><button class="btn light plain sm" data-close>Not now</button><button class="btn dark sm" id="task-go">' + pix("parrow") + 'Start work</button></div>', "mid");
+    var kind = /boq|quantit|dxf|drawing/i.test(prompt) ? "boq" : "text";
+    try { sessionStorage.setItem("pk-task", JSON.stringify({ prompt: prompt, kind: kind, files: files.map(function (f) { return f[0]; }) })); } catch (e) {}
     cleared();
-    $("#task-go", m).onclick = function () {
-      var b = this, on = $$(".pstep input", m).map(function (x, i) { return x.checked ? steps[i] : null; }).filter(Boolean);
-      if (!on.length) { toast("Switch on at least one step"); return; }
-      setOff(b, "Working…"); $("#task-note", m).textContent = "Working — you can close this; it keeps going.";
-      stages($("#task-out", m), on.map(function (s) { return s[1] + " — " + s[3]; }), function () {
-        var o = $("#task-out", m); o.classList.add("filled"); o.innerHTML = kind === "boq" ? boqHTML() : textHTML("text");
-        $("#task-note", m).textContent = "Done · saved to History and Prism Artifacts"; b.innerHTML = pix("parrow") + "Open History"; setOff(b, "");
-        b.onclick = function () { location.href = "history.html"; };
-        MOCK.runs.unshift({ id: "n" + Date.now(), day: "Today", when: "now", title: prompt, tool: kind === "boq" ? "BOQ" : "", by: on[on.length - 1][3], status: "ok", out: kind, icon: kind === "boq" ? "sheet" : "file" });
-        renderRecent(); toast("Task finished");
+    location.href = "task.html";
+  }
+  function taskInit() {
+    var job = null; try { job = JSON.parse(sessionStorage.getItem("pk-task") || "null"); } catch (e) {}
+    if (!job) { $("#taskpg").hidden = true; $("#tp-empty").hidden = false; return; }
+    var steps = taskSteps(job.kind), go = $("#tp-go"), out = $("#tp-out"), note = $("#tp-note"), state = $("#tp-state");
+    $("#tp-title").textContent = job.prompt;
+    $("#tp-files").innerHTML = job.files.map(function (n) { return '<span class="fchip mini">' + ic("clip") + '<b>' + esc(n) + '</b></span>'; }).join("");
+    $("#tp-steps").innerHTML = steps.map(function (s, i) { return '<label class="pstep"><span class="n">0' + (i + 1) + '</span><span class="ftile">' + ic(s[0]) + '</span><span class="tx"><b>' + s[1] + '</b><small>' + s[2] + '</small></span><span class="switch"><input type="checkbox" checked><i></i></span></label>'; }).join("");
+    function count() { var n = $$("#tp-steps input").filter(function (x) { return x.checked; }).length; $("#tp-count").textContent = n + " of " + steps.length + " steps on"; setOff(go, n ? "" : "Switch on at least one step to start"); }
+    $$("#tp-steps input").forEach(function (x) { x.onchange = count; }); count();
+    go.onclick = function () {
+      var on = $$("#tp-steps input").map(function (x, i) { return x.checked ? steps[i] : null; }).filter(Boolean);
+      if (!on.length) return;
+      $$("#tp-steps input").forEach(function (x) { x.disabled = true; });
+      setOff(go, "Working…"); note.textContent = "Working — you can leave this page; it keeps going."; state.className = "st neutral"; state.textContent = "Running";
+      stages(out, on.map(function (s) { return s[1] + " — " + s[3]; }), function () {
+        out.classList.add("filled"); out.innerHTML = job.kind === "boq" ? boqHTML() : textHTML("text");
+        note.textContent = "Done · saved to History and Prism Artifacts"; state.className = "st ok"; state.textContent = "Completed";
+        go.innerHTML = pix("parrow") + "Open History"; setOff(go, ""); go.onclick = function () { location.href = "history.html"; };
+        MOCK.runs.unshift({ id: "n" + Date.now(), day: "Today", when: "now", title: job.prompt, tool: job.kind === "boq" ? "BOQ" : "", by: on[on.length - 1][3], status: "ok", out: job.kind, icon: job.kind === "boq" ? "sheet" : "file" });
+        try { sessionStorage.removeItem("pk-task"); } catch (e) {}
+        toast("Task finished");
       }, 900);
     };
   }
@@ -1321,6 +1358,6 @@
   /* ═════════════════════════ boot ═════════════════════════ */
   try { var w = localStorage.getItem("pk-wall"); if (w) document.body.dataset.wall = w; } catch (e) {}
   ({ home: homeInit, history: historyInit, artifacts: artifactsInit, settings: settingsInit, boq: function () { boqInit("boq"); }, bom: function () { boqInit("bom"); },
-     gerber: gerberInit, step: stepInit, inquiry: inquiryInit, email: emailInit, leads: leadsInit, whatsapp: whatsappInit }[PAGE] || function () {})();
+     task: taskInit, gerber: gerberInit, step: stepInit, inquiry: inquiryInit, email: emailInit, leads: leadsInit, whatsapp: whatsappInit }[PAGE] || function () {})();
   route();
 })();

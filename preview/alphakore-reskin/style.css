@@ -931,3 +931,38 @@ body.nofx .card, body.nofx .side, body.nofx .phead { box-shadow: 0 0 0 1px var(-
 .dh > div:not(.acts) { flex: 1; min-width: 0; }
 .dh h2 { overflow-wrap: anywhere; }
 .iconbtn { flex: none; }
+
+
+/* ── Dashboard: insights + demo videos ───────────────────────────────────── */
+.dash .insights, .dash .vids { grid-column: 1 / -1; }
+.sech { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; margin-bottom: .55rem; }
+.istats { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: .8rem; }
+.istat { display: flex; flex-direction: column; padding: .85rem 1rem .8rem; transition: transform .2s, box-shadow .2s; }
+.istat:hover { transform: translateY(-2px); box-shadow: var(--shadow), 0 0 0 1px var(--line2); }
+.istat .n { font: 700 2.3rem/1 var(--dot); color: var(--ink); letter-spacing: .01em; }
+.istat .t { margin-top: .5rem; font-weight: 500; color: var(--ink); font-size: .92rem; }
+.istat .s { color: var(--mute); font-size: .8rem; margin-top: .15rem; }
+.vgrid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .8rem; }
+.vtile { display: flex; flex-direction: column; text-align: left; padding: .6rem .6rem .8rem; gap: .15rem; cursor: pointer; }
+.vtile .th { position: relative; aspect-ratio: 16 / 8; border-radius: .7rem; background: #1b1b19 center / cover; display: grid; place-items: center; color: rgba(255,255,255,.55); margin-bottom: .45rem; overflow: hidden; }
+.vtile .th > svg { width: 1.6rem; height: 1.6rem; }
+.vtile .play { position: absolute; inset: auto auto .5rem .5rem; width: 1.9rem; height: 1.9rem; border-radius: 50%; background: #fff; color: var(--ink); display: grid; place-items: center; }
+.vtile .play svg { width: .9rem; height: .9rem; }
+.vtile .dur { position: absolute; right: .5rem; bottom: .5rem; font: 500 .68rem var(--mono); letter-spacing: .06em; background: rgba(0,0,0,.6); color: #fff; padding: .15rem .4rem; border-radius: .3rem; }
+.vtile b { font-weight: 500; color: var(--ink); padding: 0 .3rem; } .vtile small { color: var(--mute); font-size: .8rem; padding: 0 .3rem; }
+.vtile.soon { cursor: not-allowed; } .vtile.soon .th { opacity: .75; } .vtile.soon .play { display: none; }
+@media (max-width: 1180px) { .istats { grid-template-columns: repeat(3, minmax(0, 1fr)); } .vgrid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* ── Task section (its own screen) ───────────────────────────────────────── */
+.taskpg { padding: 1.2rem 1.6rem 1.4rem; max-width: 78rem; }
+.tphead h1 { font: 400 1.9rem/1.2 var(--sans); letter-spacing: -.03em; color: var(--ink); margin: .5rem 0 .4rem; max-width: 52rem; }
+.tphead .link { margin-bottom: .6rem; }
+.tpfiles { display: flex; gap: .4rem; flex-wrap: wrap; }
+.tpgrid { display: grid; grid-template-columns: minmax(0, 26rem) minmax(0, 1fr); gap: 1.05rem; margin-top: 1.1rem; align-items: start; }
+.tpplan, .tpans { padding: 1.1rem 1.2rem 1.2rem; }
+.tpplan .plan { margin: .8rem 0 1rem; }
+.tpact { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }
+.tpact #tp-note { flex: 1 0 100%; }
+.tpact .sp { flex: 1; }
+.tpans .out { min-height: 22rem; }
+@media (max-width: 1000px) { .tpgrid { grid-template-columns: 1fr; } }

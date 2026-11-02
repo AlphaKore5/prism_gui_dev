@@ -281,7 +281,7 @@ class DashboardCentral(QWidget):
             grad.setColorAt(1.0, QColor(255, 255, 255, 30))
             painter.fillRect(self.rect(), grad)
         else:
-            painter.fillRect(self.rect(), QColor("#ffffff"))  # the default: plain white
+            painter.fillRect(self.rect(), QColor(theme.STONE))  # the default: AlphaKore stone
 
     def set_background(self, path: str):
         if path and os.path.exists(path):

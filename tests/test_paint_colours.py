@@ -50,7 +50,9 @@ def _rgba_tokens() -> set:
 
 def test_every_rgba_token_is_readable_by_the_themes_own_helpers():
     tokens = _rgba_tokens()
-    assert {"OK_BG", "WARN_BG", "ERR_BG", "INFO_BG", "CARD"} <= tokens
+    # CARD left this set in the AlphaKore re-skin: the card is a solid white hex now,
+    # not frosted rgba. The guard is unchanged for every token that is still rgba.
+    assert {"OK_BG", "WARN_BG", "ERR_BG", "INFO_BG"} <= tokens
     for name in tokens:
         value = getattr(theme, name)
         assert theme.qcolor(value).isValid(), name

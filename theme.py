@@ -34,27 +34,37 @@ import paths
 NEUTRAL = {
     100: "#f5f5f7", 200: "#e5e5ea", 300: "#d1d1d6", 400: "#a1a1aa",
     500: "#71717a", 600: "#52525b", 700: "#3f3f46", 800: "#27272a",
-    900: "#09090b",
+    900: "#111110",
 }
 ACCENT_RAMP = {
     100: "rgba(0, 0, 0, 0.04)", 200: "rgba(0, 0, 0, 0.07)", 300: "rgba(0, 0, 0, 0.12)", 400: "#a1a1aa",
     500: "#71717a", 600: "#52525b", 700: "#3f3f46", 800: "#27272a",
-    900: "#09090b",
+    900: "#111110",
 }
 
 # ── core roles ──────────────────────────────────────────────────────────────
-TEXT = "#09090b"
-ACCENT = "#09090b"
-ACCENT_2 = "#27272a"
+# AlphaKore brand (alphakore.org): the one source for the family look. Ink is
+# the text and primary-button colour. Red is for brand marks only (the small
+# label squares, the dot on a primary button) and is never a status colour.
+STONE = "#EEEDEA"                    # warm canvas
+INK = "#111110"
+MUTE = "#6B6A65"                     # 4.5:1 on STONE and on white (the site's #8C8B86 fails)
+BRAND_RED = "#C8161D"
+BRAND_OK, BRAND_OK_BG = "#1F6B43", "#E4EFE7"
+BRAND_ERR, BRAND_ERR_BG = "#A3141A", "#F7E3E1"
+
+TEXT = INK
+ACCENT = INK
+ACCENT_2 = "#2A2A28"
 
 # ── the six surfaces, one value each ────────────────────────────────────────
-CANVAS = "transparent"               # pure transparent canvas over dashboard wallpaper
-CARD = "rgba(255, 255, 255, 0.65)"   # light frosted glassmorphism card surface
-WELL = "rgba(0, 0, 0, 0.03)"         # inset subtle well inside a card
-HAIRLINE = "rgba(0, 0, 0, 0.07)"     # hairline: card borders, row separators
-DIVIDER = "rgba(0, 0, 0, 0.12)"      # divider: the heavier rule between regions
-BORDER = "rgba(0, 0, 0, 0.10)"       # border: the drawn edge of a control
-RAIL = "transparent"                 # transparent glass navbar
+CANVAS = STONE                       # warm stone page
+CARD = "#FFFFFF"                     # solid white card
+WELL = "#F6F5F2"                     # inset well inside a card
+HAIRLINE = "#E6E5E1"                 # hairline: card borders, row separators
+DIVIDER = "#D8D7D2"                  # divider: the heavier rule between regions
+BORDER = "#D8D7D2"                   # border: the drawn edge of a control
+RAIL = "#FFFFFF"                     # sidebar card
 
 # Retired duplicates, kept as names because other files import them.
 BG = CANVAS
@@ -208,8 +218,8 @@ def register_tones(dark: bool | None = None) -> dict:
 
 
 TAG_TONES = {
-    "tagAccent": ("rgba(0, 0, 0, 0.06)", "#09090b"),
-    "tagOutline": ("rgba(255, 255, 255, 0.85)", "#09090b"),
+    "tagAccent": ("rgba(0, 0, 0, 0.06)", "#111110"),
+    "tagOutline": ("rgba(255, 255, 255, 0.85)", "#111110"),
     "tagNeutral": ("rgba(0, 0, 0, 0.05)", "#27272a"),
     "tagOk": (OK_BG, OK_INK),
     "tagWarn": (WARN_BG, WARN_INK),
@@ -284,7 +294,7 @@ def status_key(name: str) -> str:
 # A resting card in a grid gets no shadow: shadow on everything is what makes
 # every element look like it is hovering, and it is also the reason
 # shadows_enabled() defaults off.
-SHADOW_INK = "#09090b"
+SHADOW_INK = "#111110"
 SHADOW_CARD = (26, 8, 0.08)     # resting card
 SHADOW_RAISED = (48, 16, 0.12)  # hero card, modals
 SHADOW_HOVER = (32, 10, 0.14)   # stat card under the cursor
@@ -368,15 +378,13 @@ CARD_GAP = SPACE_4              # 16 — gutter between cards in a grid
 ROW_GAP = SPACE_3               # 12 — between rows inside one card
 
 # ── type ────────────────────────────────────────────────────────────────────
-FONT_BODY = "Barlow"
-FONT_HEADING = "Barlow Condensed"
-# No mono face is vendored — it is wanted for ids, keys, device codes and
-# paths, which are short and rare, and shipping a fourth font file to set nine
-# characters of licence id is not worth the bundle size. A stack is used
-# instead; every desktop this runs on has at least one of these.
-FONT_MONO = "DejaVu Sans Mono"
-FONT_MONO_STACK = ('"JetBrains Mono", "DejaVu Sans Mono", "Menlo", '
-                   '"Consolas", monospace')
+# AlphaKore family: Geist for text and headings, Geist Mono for labels and
+# numbers, Doto (dot-matrix) for the display greeting and big numbers.
+FONT_BODY = "Geist"
+FONT_HEADING = "Geist"
+FONT_DISPLAY = "Doto"
+FONT_MONO = "Geist Mono"
+FONT_MONO_STACK = '"Geist Mono", "JetBrains Mono", "DejaVu Sans Mono", "Menlo", "Consolas", monospace'
 _FONT_DIR = paths.resource("assets", "fonts")
 
 # Eight levels and nothing else.
@@ -399,9 +407,9 @@ _FONT_DIR = paths.resource("assets", "fonts")
 # that already construct QFont(family, points).
 TYPE = {
     # level          family         px  weight  colour
-    "PAGE_TITLE": (FONT_HEADING,    26,   600,  "#09090b"),
-    "SECTION":    (FONT_HEADING,    20,   600,  "#09090b"),
-    "CARD_TITLE": (FONT_HEADING,    16,   600,  "#09090b"),
+    "PAGE_TITLE": (FONT_HEADING,    26,   600,  "#111110"),
+    "SECTION":    (FONT_HEADING,    20,   600,  "#111110"),
+    "CARD_TITLE": (FONT_HEADING,    16,   600,  "#111110"),
     "BODY":       (FONT_BODY,       15,   400,  "#18181b"),
     "SUPPORT":    (FONT_BODY,       14,   400,  "#18181b"),
     "META":       (FONT_BODY,       13,   500,  "#3f3f46"),
@@ -473,8 +481,9 @@ def type_css(level: str = "BODY", colour: str = "") -> str:
 
 
 def load_fonts() -> None:
-    """Register the vendored Barlow family. The whole system is built on the
-    Barlow / Barlow Condensed pairing — without it Qt silently falls back to a
+    """Register the vendored Geist, Geist Mono and Doto faces (plus the older
+    Barlow files, still used by a few painted widgets). The system is built on the
+    AlphaKore pairing — without it Qt silently falls back to a
     default sans and every heading loses its condensed proportions, so the
     fonts ship with the app rather than being assumed present on the box."""
     if not os.path.isdir(_FONT_DIR):
@@ -542,20 +551,20 @@ def apply_role(hue: int) -> None:
     """Keep theme monochrome and consistent across all roles."""
     global ACCENT, ACCENT_2, ACCENT_RAMP, RAIL
     global INFO, INFO_INK, INFO_BG, TAG_TONES, STATUS, _BADGE_CYCLE
-    ACCENT = "#09090b"
+    ACCENT = "#111110"
     ACCENT_2 = "#27272a"
     ACCENT_RAMP = {
         100: "rgba(0, 0, 0, 0.04)", 200: "rgba(0, 0, 0, 0.07)", 300: "rgba(0, 0, 0, 0.12)", 400: "#a1a1aa",
         500: "#71717a", 600: "#52525b", 700: "#3f3f46", 800: "#27272a",
-        900: "#09090b",
+        900: "#111110",
     }
     RAIL = "#ffffff"
     INFO = "#27272a"
-    INFO_INK = "#09090b"
+    INFO_INK = "#111110"
     INFO_BG = "rgba(0, 0, 0, 0.04)"
     TAG_TONES = dict(TAG_TONES)
-    TAG_TONES["tagAccent"] = ("rgba(0, 0, 0, 0.05)", "#09090b")
-    TAG_TONES["tagOutline"] = (CARD, "#09090b")
+    TAG_TONES["tagAccent"] = ("rgba(0, 0, 0, 0.05)", "#111110")
+    TAG_TONES["tagOutline"] = (CARD, "#111110")
     STATUS = dict(STATUS)
     for key in ("planning", "running", "streaming"):
         label, _ink, _bg, dot = STATUS[key]
@@ -576,7 +585,7 @@ def role_stylesheet(qss: str, hue: int) -> str:
         if new_accent != ACCENT:
             qss = qss.replace(ACCENT, new_accent)
     swaps = {
-        "#4480bb": "#09090b",
+        "#4480bb": "#111110",
         "#628fbb": "#27272a",
         "#eff6fe": "rgba(0, 0, 0, 0.04)",
         "#d8ebfd": "rgba(0, 0, 0, 0.08)",
@@ -645,7 +654,7 @@ def badge_initial(tool: str) -> str:
     return (tool or "?").strip()[:1].upper() or "?"
 
 
-def over(alpha: float, fg: str = "#09090b", bg: str = None) -> str:
+def over(alpha: float, fg: str = "#111110", bg: str = None) -> str:
     """`fg` at `alpha` composited onto `bg`, as a solid hex."""
     base = bg or "#f4f4f5"
     fv, bv = fg.lstrip("#"), base.lstrip("#")
