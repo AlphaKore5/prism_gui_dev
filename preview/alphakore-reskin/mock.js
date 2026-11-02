@@ -141,3 +141,57 @@ var MOCK = {
     [/.*/, "I can help with BOQ, Gerber, STEP, inquiries, reels and settings. Try asking \"how do I make a BOQ?\""]
   ]
 };
+
+/* BOQ / BOM working data (shapes follow addons/boq/measured.py and pricing.py) */
+MOCK.measured = {
+  boq: [ // [trust, section, item, measured as, layer, value (m / m² / nos), kind]
+    ["ok", "Ductwork", "Supply duct 600 × 300", "length", "M-DUCT-SUPPLY-600x300", 186.4, "len"],
+    ["ok", "Ductwork", "Supply duct 450 × 250", "length", "M-DUCT-SUPPLY-450x250", 142.8, "len"],
+    ["warn", "Ductwork", "Return duct 500 × 300", "length", "M-DUCT-RETURN", 98.2, "len"],
+    ["ok", "Dampers", "Volume control damper, 300 × 200", "count", "M-VCD", 18, "cnt"],
+    ["bad", "Dampers", "Fire damper, 90 min, 400 × 300", "count", "M-FD", 8, "cnt"],
+    ["ok", "Air terminals", "Supply grille with VCD, 450 × 150", "count", "M-GRILLE-S", 64, "cnt"],
+    ["ok", "Air terminals", "Return air grille, 600 × 300", "count", "M-GRILLE-R", 22, "cnt"],
+    ["ok", "Insulation", "Nitrile rubber, 13 mm, on supply duct", "area", "M-INSUL", 642.5, "area"]
+  ],
+  bom: [
+    ["ok", "Plates — IS 2062 E250", "Side plate, 12 mm", "area", "S-PLATE-12", 3.40, "area"],
+    ["ok", "Plates — IS 2062 E250", "Base plate, 16 mm", "area", "S-PLATE-16", 2.52, "area"],
+    ["warn", "Plates — IS 2062 E250", "Gussets, 10 mm", "count", "S-GUSSET", 8, "cnt"],
+    ["ok", "Sections", "ISMC 150 channel", "length", "S-ISMC150", 9.6, "len"],
+    ["ok", "Sections", "ISA 65 × 65 × 6 angle", "length", "S-ISA65", 6.6, "len"],
+    ["bad", "Hardware", "Hex bolt M16 × 60, grade 8.8", "count", "S-BOLT-M16", 48, "cnt"]
+  ]
+};
+MOCK.warnings = {
+  boq: ["M-DUCT-RETURN: paired with M-DUCT-SUPPLY-600x300 by the HVAC duct-pairing rule — worth a look before pricing.",
+        "M-FD: 2 of the 8 fire-damper blocks sit outside the drawing border. Prism can't resolve this by itself — a person must check it.",
+        "Look-alike layers M-GRILLE-S and M-GRILLE-SUP: same block, counted once."],
+  bom: ["S-GUSSET: 2 gussets overlap on the GA view — check the count.", "S-BOLT-M16: bolts are drawn as a symbol on a remote block. A person must check the count."]
+};
+MOCK.allLayers = { boq: ["0", "DEFPOINTS", "A-WALL", "A-DOOR", "A-GRID", "M-DUCT-SUPPLY-600x300", "M-DUCT-SUPPLY-450x250", "M-DUCT-RETURN", "M-VCD", "M-FD", "M-GRILLE-S", "M-GRILLE-SUP", "M-GRILLE-R", "M-INSUL", "M-TEXT"],
+                   bom: ["0", "S-PLATE-12", "S-PLATE-16", "S-GUSSET", "S-ISMC150", "S-ISA65", "S-BOLT-M16", "S-DIM", "S-TEXT"] };
+/* rates: your rate list, and Prism's indicative starter rates (₹ per unit) */
+MOCK.rates = {
+  mine: { "Supply duct 600 × 300": 1420, "Supply duct 450 × 250": 1180, "Return duct 500 × 300": 1260, "Volume control damper, 300 × 200": 2200, "Supply grille with VCD, 450 × 150": 950,
+          "Return air grille, 600 × 300": 1100, "Nitrile rubber, 13 mm, on supply duct": 410, "Side plate, 12 mm": 7400, "Base plate, 16 mm": 9800, "ISMC 150 channel": 1650, "ISA 65 × 65 × 6 angle": 610, "Hex bolt M16 × 60, grade 8.8": 38 },
+  starter: { "Supply duct 600 × 300": 1350, "Supply duct 450 × 250": 1100, "Return duct 500 × 300": 1200, "Volume control damper, 300 × 200": 2000, "Fire damper, 90 min, 400 × 300": 6400,
+             "Supply grille with VCD, 450 × 150": 900, "Return air grille, 600 × 300": 1050, "Nitrile rubber, 13 mm, on supply duct": 380, "Side plate, 12 mm": 7000, "Base plate, 16 mm": 9300,
+             "Gussets, 10 mm": 450, "ISMC 150 channel": 1550, "ISA 65 × 65 × 6 angle": 580, "Hex bolt M16 × 60, grade 8.8": 35 }
+};
+MOCK.takeoff = {
+  layers: [["Supply duct", "ductwork", 41], ["Return duct", "ductwork", 18], ["Diffuser", "terminal", 64], ["Grille", "terminal", 22], ["Damper", "damper", 26], ["Room text", "text", 112]],
+  warnings: ["Page 3 has no scale bar — the scale you set was used.", "6 duct labels could not be read by OCR; their runs were measured by length only."]
+};
+
+/* Plain-language reasons for items a person should look at (BOQ wizard, for first-time users) */
+MOCK.plain = {
+  "M-DUCT-RETURN": "Prism matched this duct to the supply duct running next to it. Please check the length is right.",
+  "M-FD": "2 of the 8 fire dampers are drawn outside the sheet border. Is 8 the right number?",
+  "S-GUSSET": "Two gussets overlap in the drawing, so one may be counted twice. Is 8 the right number?",
+  "S-BOLT-M16": "The bolts are drawn as one symbol, not one by one. Is 48 the right number?"
+};
+MOCK.examples = {
+  boq: ["HVAC ductwork for Sargam Tower B", "CCTV, cabling and fibre for this site", "Materials for one 36x24 jaw crusher, 100 TPH"],
+  bom: ["Parts list for this magnetic separator", "BOM for one 36x24 jaw crusher, 100 TPH"]
+};

@@ -34,6 +34,7 @@ EXTRA_ICONS = """
   <symbol id="i-video" viewBox="0 0 24 24"><rect x="3.5" y="6.5" width="12" height="11" rx="2"/><path d="m15.5 10.5 5-3v9l-5-3"/></symbol>
   <symbol id="i-expand" viewBox="0 0 24 24"><path d="M14 4.5h5.5V10M10 19.5H4.5V14M19.5 4.5 14 10M4.5 19.5 10 14"/></symbol>
   <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="pcheck" viewBox="0 0 18 18"><g fill="#fff"><rect x="2" y="9" width="2" height="2"/><rect x="5" y="12" width="2" height="2"/><rect x="8" y="9" width="2" height="2"/><rect x="11" y="6" width="2" height="2"/><rect x="14" y="3" width="2" height="2"/></g></symbol>
 """
 SPRITE = part("sprite.svg").replace("</defs></svg>", EXTRA_ICONS + "</defs></svg>")
 
@@ -185,37 +186,65 @@ def front(title, sub, attach_label, steps, asks):
       </div>"""
 
 
-# ── BOQ / BOM dialog (addons/boq/dialog.py — BOM is the same dialog in mode "bom") ──
+# ── BOQ / BOM — a four-step helper for people who have never used AI ──
+# Owner, 2026-11-03: "for those people who have never used ai, so the UI UX should be so easy".
+# One question per step, everyday words. Every control of Hitarth's dialog (addons/boq/dialog.py)
+# is still reachable: experts' settings, the full measured table, Input measurements, PDF takeoff,
+# History, Make with drawing (= "Double-check with AI"), Open in browser, file formats, follow-up.
 def boq_dialog(mode):
     noun = "BOM" if mode == "bom" else "BOQ"
     doc = "Bill of Materials" if mode == "bom" else "Bill of Quantities"
-    if mode == "bom":
-        ph = ('Just say it — for example:&#10;"Parts list to fabricate this over-band magnetic separator"  (attach the GA drawing)'
-              '&#10;"BOM for one 36x24 jaw crusher, 100 TPH"  (no drawing needed)')
-    else:
-        ph = ('Just say it — for example:&#10;"BOQ for CCTV, cabling and fibre for this site"  (attach the drawing)'
-              '&#10;"materials to build one 36x24 jaw crusher, 100 TPH"  (no drawing needed)')
+    what = "parts list" if mode == "bom" else "bill of quantities"
     writers = ["Prism Agent Claude", "Prism Agent Deep", "Claude", "Grok", "Kimi 2.6", "DeepSeek", "Gemini", "ChatGPT"]
-    body = f"""      <h3>What do you need a {noun} for?</h3>
-      <textarea class="ta ask" placeholder="{ph_attr(ph)}" aria-label="What do you need a {noun} for?"></textarea>
-      {ASK_CHIPS}
-      <div class="note">You can also attach a sample BOQ or your usual template above — Prism will match its style, logo and layout. This is separate from the drawing, which is only ever sent to an AI after you say so, in "Make with drawing".</div>
-      <div class="row">{chip("Input measurements…", "clip", 'id="d-meas"')}</div>
-      <div class="meta"><span class="pair">Write with {select(writers, "Write with")}</span><span class="pair">· Research with {select(["No research", "Perplexity", "ChatGPT", "Claude"], "Research with")}</span>
-        {chip("History", "clock", 'id="d-hist"')}<span class="pair">· File format {select(["Let the tool decide", "Word document (.docx)", "CSV", "PDF"], "File format")}</span>
-        <span class="pair">· Industry {select(["General", "HVAC"], "Industry")}</span></div>
-      <details class="more"><summary>{ic("right")}More options (optional)</summary>
-        <div class="meta" style="flex-direction:column;align-items:stretch">
-          <input class="field2" placeholder="Drawing unit, if you know it — e.g. meters">
-          <input class="field2" placeholder="Only include layers containing… (comma separated)">
-          <input class="field2" placeholder="What the drawing's symbols mean, if the sheet doesn't say — e.g. circles = light points">
-          <label class="opt"><input type="checkbox" class="ck" checked> Estimate items the drawing doesn't contain (marked as an estimate)</label>
-        </div></details>
-      <div class="out js-out">Your {noun} will appear here.</div>"""
-    foot = (light("Open in browser", "ext", 'id="d-open" ' + off(f"Make a {noun} first")) + light("Make with drawing", "eye", 'id="d-mwd" ' + off(f"Make a {noun} first, then attach the drawing"))
-            + '<span class="sp"></span>' + light("Close", None, "data-close") + dark(f"Make my {noun}", attrs='id="d-make"'))
+    steps = ["What you have", "Check the count", f"Make the {noun}", "Add prices"]
+    stepper = "".join(f'<button class="wsn{" on" if n == 0 else ""}" data-go="{n + 1}" disabled title="Finish the step before first"><span class="num">{n + 1}</span><span>{t}</span></button>' for n, t in enumerate(steps))
+    s1 = f"""      <section class="wstep" data-step="1">
+        <h3 class="wq">What is this {noun} for?</h3>
+        <p class="wsub">Say it in your own words — one line is enough.</p>
+        <div class="askline"><textarea class="ta ask" id="w-ask" rows="2" placeholder="e.g. {esc(("Parts list for this magnetic separator" if mode == "bom" else "HVAC ductwork for Sargam Tower B"))}" aria-label="What is this {noun} for?"></textarea>
+          {chip("Speak", "mic", 'title="Say it instead of typing"', cls="js-speak")}</div>
+        <div class="examples" id="w-ex"><span class="muted small">Or pick one:</span></div>
+        <div class="drop" id="w-drop">
+          <span class="dropic">{ic("file")}</span>
+          <div class="droptx"><b>Add your drawing</b><p>DXF or PDF. Prism measures it on this computer — the drawing itself is never sent to AI unless you say yes.</p></div>
+          {dark("Choose drawing", "pplus", 'id="w-choose"')}
+        </div>
+        <div class="att js-att" id="w-files"></div>
+        <div class="group" id="d-ext" hidden><div class="label">Your measurements</div><pre class="extview" id="d-extview"></pre><div class="okmsg" id="d-extmsg"></div></div>
+        <ul class="wlinks">
+          <li class="muted">{ic("help")}No drawing? That's fine — describe the job above and Prism lists the items.</li>
+          <li class="hvacon" id="w-hvac" hidden>{ic("check")}HVAC drawing rules are on — because your request says HVAC.</li>
+          <li><button id="w-sample">{ic("sheet")}Make it look like my company's {noun}</button><span class="muted small" id="w-samplename"></span></li>
+          <li><button id="d-meas">{ic("clip")}I already have some measurements</button></li>
+          {"" if mode == "bom" else '<li id="w-takeoff-li" hidden><button id="w-takeoff">' + ic("file") + 'My HVAC drawing is a PDF tender — measure it</button></li>'}
+          <li><button id="d-hist">{ic("clock")}Open a past {noun}</button></li>
+          <li><button id="w-dwg">{ic("help")}My drawing is a .dwg file</button></li>
+        </ul>
+        <details class="more experts"><summary>{ic("right")}Settings for experts (optional)</summary>
+          <p class="muted small">Prism picks good defaults. Change these only if you know you need to.</p>
+          <div class="meta"><span class="pair">Write with {select(writers, "Write with", 'id="d-writer"')}</span><span class="pair">Research with {select(["No research", "Perplexity", "ChatGPT", "Claude"], "Research with", 'id="d-research"')}</span>
+            <span class="pair">File format {select(["Let the tool decide", "Word document (.docx)", "CSV", "PDF"], "File format", 'id="d-format"')}</span>
+            <span class="pair">Industry {select(["General", "HVAC"], "Industry", 'id="d-industry"')}</span></div>
+          <div class="meta" style="flex-direction:column;align-items:stretch">
+            <input class="field2" placeholder="Drawing unit, if you know it — e.g. meters" aria-label="Drawing unit">
+            <input class="field2" placeholder="Only include layers containing… (comma separated)" aria-label="Only include layers">
+            <input class="field2" placeholder="What the drawing's symbols mean, if the sheet doesn't say — e.g. circles = light points" aria-label="Legend">
+            <label class="opt"><input type="checkbox" class="ck" checked> Estimate items the drawing doesn't contain (marked as an estimate)</label>
+          </div>
+          {"" if mode == "bom" else chip("HVAC PDF takeoff…", "clip", 'id="d-takeoff" hidden')}
+        </details>
+      </section>"""
+    body = f"""<div class="wiz">
+      <nav class="wsteps" aria-label="Steps">{stepper}</nav>
+{s1}
+      <section class="wstep" data-step="2" id="w-s2" hidden></section>
+      <section class="wstep" data-step="3" id="w-s3" hidden><div class="out js-out" hidden></div></section>
+      <section class="wstep" data-step="4" id="w-s4" hidden></section>
+    </div>"""
+    foot = (light("Back", "left", 'id="w-back" hidden') + '<span class="sp"></span>' + light("Close", None, "data-close")
+            + light("Skip prices", None, 'id="w-skip" hidden') + dark("Next: count it", attrs='id="w-next" ' + off("Add a drawing or describe the job first")))
     return modal("make", "sheet" if mode == "boq" else "box", doc,
-                 "Attach a drawing and it is measured here, on this machine. Nothing is measured by an AI.", body, foot)
+                 f"Make a {what} from your drawing in four easy steps.", body, foot, size="wizw")
 
 
 def build_boq():

@@ -59,16 +59,18 @@
       (danger ? '<button class="btn danger-solid sm" id="ask-ok">' + ok + '</button>' : '<button class="btn dark sm" id="ask-ok">' + pix("parrow") + ok + '</button>'));
     var done = false;
     $("#ask-ok", m).onclick = function () { done = true; m.classList.remove("on"); cb && cb(true); };
-    m.querySelector(".scrim").onclick = m.querySelector("[data-close].iconbtn").onclick = function () { if (!done) { m.classList.remove("on"); cb && cb(false); } };
+    // Cancel, the ✕ and the backdrop all answer "no" — and say so
+    [m.querySelector(".scrim"), m.querySelector("[data-close].iconbtn"), m.querySelector(".df [data-close]")].forEach(function (x) { x.onclick = function (e) { e.stopPropagation(); if (!done) { done = true; m.classList.remove("on"); cb && cb(false); } }; });
     showModal(m);
   }
   /* form: form(title, sub, icon, bodyHtml, okLabel, onOk(modal) -> false keeps it open) */
-  function form(title, sub, icon, body, ok, onOk, cls) {
-    var m = makeModal("formm", cls || "");
+  function form(title, sub, icon, body, ok, onOk, cls, mid) {
+    var m = makeModal(mid || "formm", cls || "");
     m.querySelector(".dlg").className = "dlg " + (cls || "");
     m.querySelector(".dlg").innerHTML = dialogShell(title, sub, icon, body,
       '<span class="sp"></span><button class="btn light plain sm" data-close>Cancel</button><button class="btn dark sm" id="form-ok">' + pix("parrow") + ok + '</button>');
-    $("#form-ok", m).onclick = function () { if (onOk(m) !== false) m.classList.remove("on"); };
+    var okb = m.querySelector("#form-ok"); okb.removeAttribute("id"); okb.className += " form-ok";
+    okb.onclick = function () { if (onOk(m) !== false) m.classList.remove("on"); };
     showModal(m); return m;
   }
   function info(title, sub, icon, body, cls) {
@@ -624,51 +626,291 @@
     show(location.hash.slice(1));
   }
 
-  /* ═════════════════════════ BOQ / BOM ═════════════════════════ */
+  /* ═════════════════════════ BOQ / BOM — four easy steps ═════════════════════════
+     For people who have never used AI (owner, 2026-11-03), following Hitarth's rules in
+     prism_gui/BOQ-CHANGES-TODO.md (item numbers in the comments):
+       1 What you have → 2 Check the count → 3 Make the BOQ → 4 Add prices (prices only once a BOQ exists, item 10). */
+  function money(v) { return "₹" + Math.round(v).toLocaleString("en-IN"); }
   function boqInit(mode) {
-    var d = $("#make"), ta = $("textarea", d), out = $(".js-out", d), holder = $(".js-att", d), st = { files: [], made: false };
-    var make = $("#d-make"), ob = $("#d-open"), mwd = $("#d-mwd"), noun = mode === "bom" ? "BOM" : "BOQ";
+    var d = $("#make"), noun = mode === "bom" ? "BOM" : "BOQ", what = mode === "bom" ? "parts" : "items";
+    var ta = $("#w-ask"), next = $("#w-next"), back = $("#w-back"), skip = $("#w-skip"), out = $(".js-out", d);
+    var FALLBACK = ["Claude", "Kimi 2.6"];   // addons/boq/agents.py FALLBACK_ORDER (item 2, 24)
+    var st = { step: 1, reached: 1, files: [], sample: "", ext: "", rows: null, fromText: false, counted: false, unit: "m", how: "count",
+               priceMode: "", rates: null, rateName: "", cont: 0, gst: 18, igst: false, made: false, priced: false, verified: false, rev: 1, change: "", hvacRun: false };
     function drawing() { return st.files.filter(function (f) { return /Drawing/.test(f[1]); })[0]; }
-    function upd() {
-      setOff(make, ta.value.trim() || st.files.length ? "" : "Describe the " + noun + " or attach a drawing first");
-      setOff(ob, st.made ? "" : "Make a " + noun + " first");
-      setOff(mwd, !st.made ? "Make a " + noun + " first, then attach the drawing" : drawing() ? "" : "Attach the drawing first");
+    function isPdf() { var f = drawing(); return f && /\.pdf$/i.test(f[0]); }
+    // item 12b / 26: HVAC rules and the HVAC PDF takeoff engage only when the request itself says HVAC
+    function hvac() { return mode === "boq" && /hvac/i.test(ta.value); }
+    function writer() { return $("#d-writer").value; }
+    function unitOf(r) { return r[6] === "cnt" ? "nos" : r[6] === "area" ? "m²" : "m"; }
+    function qty(r) { return r[6] === "cnt" ? r[5] : Math.round(r[5] * 10) / 10; }
+    function show(r) { var q = qty(r); if (r[6] === "len" && st.unit === "ft") return [(Math.round(q * 3.28084 * 10) / 10).toLocaleString("en-IN"), "ft"];
+      if (r[6] === "area" && st.unit === "ft") return [(Math.round(q * 10.7639)).toLocaleString("en-IN"), "ft²"]; return [q.toLocaleString("en-IN"), unitOf(r)]; }
+    function totals() { var sub = 0; (st.rows || []).forEach(function (r) { var rate = st.rates && st.rates[r[2]]; if (rate) sub += rate * qty(r); });
+      var cont = sub * st.cont / 100, gst = (sub + cont) * st.gst / 100; return { sub: sub, cont: cont, gst: gst, total: sub + cont + gst }; }
+    function fname(priced) { return noun + " — " + (ta.value.trim() || (drawing() ? drawing()[0].replace(/\.\w+$/, "") : "new")).slice(0, 36) + (st.rev > 1 ? " v" + st.rev : "") + (priced ? " (priced)" : "") + ".xlsx"; }
+
+    /* ── navigation ── */
+    function go(n) {
+      st.step = n; st.reached = Math.max(st.reached, n);
+      $$(".wstep", d).forEach(function (s) { s.hidden = +s.dataset.step !== n; });
+      $$(".wsn", d).forEach(function (b) { var k = +b.dataset.go; b.classList.toggle("on", k === n); b.classList.toggle("done", k < st.reached && k !== n);
+        if (k <= st.reached) { b.disabled = false; b.removeAttribute("title"); } else { b.disabled = true; b.title = "Finish the step before first"; } });
+      $(".db", d).scrollTop = 0;
+      if (n === 2) step2(); if (n === 3) step3(); if (n === 4) step4();
+      foot();
     }
-    ta.addEventListener("input", upd); upd();
-    $(".js-speak", d).onclick = function () { speak(this, ta, mode, upd); };
-    $(".js-add", d).onclick = function () { pickFile(this, "drawing,sample", function (f) { attachTo(holder, st, f, upd); }); };
-    $(".js-fav", d).onclick = function () { favourites(this, mode, ta, upd); };
+    $$(".wsn", d).forEach(function (b) { b.onclick = function () { if (!b.disabled) go(+b.dataset.go); }; });
+    function foot() {
+      back.hidden = st.step === 1; skip.hidden = !(st.step === 3 && st.made);
+      skip.innerHTML = "Finish without prices";
+      if (st.step === 1) {
+        var why = "";
+        if (!ta.value.trim() && !drawing()) why = st.ext ? "Say in one line what the " + noun + " is for — e.g. \"" + MOCK.examples[mode][0] + "\"" : "Add a drawing or describe the job first";
+        next.innerHTML = pix("parrow") + (drawing() || st.ext ? "Next: count it" : "Next: list the " + what); setOff(next, why);
+      }
+      if (st.step === 2) { next.innerHTML = pix("parrow") + "Next: make the " + noun; setOff(next, st.counted ? "" : "Prism is still counting"); }
+      if (st.step === 3) { next.innerHTML = pix("parrow") + "Next: add prices"; setOff(next, st.made ? "" : "Make the " + noun + " first — prices are added to it afterwards"); }
+      if (st.step === 4) { next.innerHTML = pix("pcheck") + "Done"; setOff(next, st.priceMode && st.priceMode !== "none" && !st.priced ? "Press \"Add these prices to my " + noun + "\" first, or pick No prices" : ""); }
+    }
+    next.onclick = function () {
+      if (next.disabled) return;
+      if (st.step === 1) { if (st.reached < 2 || st.dirty) { st.counted = false; st.rows = null; st.made = false; st.reached = 2; } st.dirty = false; go(2); }
+      else if (st.step === 2) go(3);
+      else if (st.step === 3) go(4);
+      else { hideModal(d); toast("Your " + noun + " is saved in Prism Artifacts"); }
+    };
+    back.onclick = function () { go(Math.max(1, st.step - 1)); };
+    skip.onclick = function () { hideModal(d); toast("Saved " + fname(false) + " in Prism Artifacts — you can add prices later"); };
+
+    /* ── step 1: what you have ── */
+    var ex = $("#w-ex");
+    MOCK.examples[mode].forEach(function (t) { var b = document.createElement("button"); b.className = "chip sm"; b.textContent = t; b.onclick = function () { ta.value = t; ta.dispatchEvent(new Event("input")); }; ex.appendChild(b); });
+    function hvacUi() { var on = hvac(); var n = $("#w-hvac"); if (n) n.hidden = !on; var li = $("#w-takeoff-li"); if (li) li.hidden = !on; var tk = $("#d-takeoff"); if (tk) tk.hidden = !on; if (on) $("#d-industry").value = "HVAC"; }
+    ta.addEventListener("input", function () { st.dirty = true; hvacUi(); foot(); });
+    $(".js-speak", d).onclick = function () { speak(this, ta, mode, function () { hvacUi(); foot(); }); };
+    function addDrawing(f) {
+      st.files = st.files.filter(function (x) { return !/Drawing/.test(x[1]); }); st.files.push(f); st.dirty = true;
+      var h = $("#w-files"); h.innerHTML = "";
+      h.appendChild(fileChip(f, function () { st.files = st.files.filter(function (x) { return x !== f; }); $("#w-drop").classList.remove("has"); $(".droptx b", d).textContent = "Add your drawing"; st.dirty = true; foot(); }));
+      $("#w-drop").classList.add("has"); $(".droptx b", d).textContent = "Drawing added"; $(".droptx p", d).textContent = f[0] + " — Prism will measure it on this computer.";
+      $("#w-choose").innerHTML = pix("pplus") + "Change drawing";
+      foot(); toast("Added " + f[0]);      // no industry guessed from the file name (item 12b)
+    }
+    $("#w-choose").onclick = function () { pickFile(this, "drawing", addDrawing, "Choose your drawing"); };
+    $("#w-drop").addEventListener("click", function (e) { if (e.target === this || e.target.closest(".droptx,.dropic")) $("#w-choose").click(); });
+    // item 9: the sample is a style reference only, kept apart from the drawing; the hint turns into a confirmation
+    $("#w-sample").onclick = function () { pickFile(this, "sample", function (f) { st.sample = f[0]; $("#w-samplename").textContent = "✓ " + f[0] + " — used for the look only; your drawing is not sent with it"; toast("Prism will copy the look of " + f[0]); }, "Your company's " + noun); };
+    $("#w-dwg").onclick = function () { info("My drawing is a .dwg file", "Two clicks in AutoCAD and you're ready", "help", '<div class="doc"><ol class="sum"><li>Open the drawing in AutoCAD.</li><li>Choose <b>File → Save As</b>.</li><li>Pick <b>AutoCAD DXF</b> as the type and save.</li><li>Add that .dxf file here.</li></ol><p class="muted small">Most other CAD programs have the same "Save as DXF" option. Prism measures DXF directly; a .dwg needs an extra converter this computer does not have.</p></div>', "sm"); };
+    // item 18: paste or upload measurements — the request still says what the BOQ is for
     $("#d-meas").onclick = function () {
-      var rows = [["Floor height", "3.2", "m"], ["Duct run, level 3", "", "m"], ["Number of floors", "14", "nos"]];
-      form("Input measurements", "Type the figures you know. Prism uses them as given and measures the rest.", "clip",
-        '<table class="tbl edit"><thead><tr><th>What</th><th class="n">Value</th><th>Unit</th></tr></thead><tbody>' + rows.map(function (r) {
-          return '<tr><td><input class="cell" value="' + r[0] + '"></td><td class="n"><input class="cell n" value="' + r[1] + '" placeholder="—"></td><td><input class="cell" value="' + r[2] + '"></td></tr>'; }).join("") +
-        '</tbody></table><button class="chip" id="m-row" style="margin-top:.6rem">' + ic("plus") + 'Add a row</button>', "Use these", function (m) { toast("Measurements added — Prism will use them as given"); });
-      $("#m-row").onclick = function () { $("#formm tbody").insertAdjacentHTML("beforeend", '<tr><td><input class="cell" placeholder="What"></td><td class="n"><input class="cell n" placeholder="—"></td><td><input class="cell" placeholder="Unit"></td></tr>'); };
+      form("I already have some measurements", "Type or paste them, one per line. Prism uses them exactly as given.", "clip",
+        '<textarea class="ta" id="f-meas" rows="7" placeholder="For example:&#10;Duct run, level 3 — 42.5 m&#10;Floor height — 3.2 m&#10;Number of floors — 14"></textarea><div class="row" style="margin-top:.6rem"><button class="chip" id="f-up">' + ic("clip") + 'Upload a file…</button><span class="muted small" id="f-upname"></span></div>',
+        "Use these measurements", function (m) { var v = $("#f-meas", m).value.trim(); if (!v) { toast("Paste some measurements, or upload a file, first."); return false; }
+          st.ext = v; st.dirty = true; $("#d-ext").hidden = false; $("#d-extview").textContent = v; $("#d-extmsg").textContent = "Loaded: " + v.split("\n").filter(Boolean).length + " measurements — Prism uses them as given."; foot();
+          toast(ta.value.trim() ? "Measurements added" : "Measurements added — now say in one line what the " + noun + " is for"); if (!ta.value.trim()) ta.focus(); });
+      $("#f-up").onclick = function () { pickFile(this, "doc", function (f) { $("#f-upname").textContent = "Loaded: " + f[0]; $("#f-meas").value = "Duct run, level 3 — 42.5 m\nFloor height — 3.2 m\nNumber of floors — 14\nShaft height — 46.0 m"; }, "Text, JSON or CSV"); };
     };
     $("#d-hist").onclick = function () {
-      menu(this, MOCK.runs.filter(function (r) { return r.tool === noun; }).concat([{ title: noun === "BOQ" ? "BOQ for CCTV, cabling and fibre — Vraj site" : "BOM for one 36x24 jaw crusher", day: "Last week", when: "", out: mode }])
-        .map(function (r) { return { label: esc(r.title.slice(0, 54)), hint: r.day + " " + r.when, icon: "clock", on: function () { out.classList.add("filled"); out.innerHTML = outFor(mode); st.made = true; upd(); toast("Opened the past " + noun); } }; }), "Past " + noun + "s");
+      menu(this, MOCK.runs.filter(function (r) { return r.tool === noun; }).concat([{ title: noun === "BOQ" ? "BOQ for CCTV, cabling and fibre — Vraj site" : "BOM for one 36x24 jaw crusher", day: "Last week", when: "" }])
+        .map(function (r) { return { label: esc(r.title.slice(0, 54)), hint: r.day + " " + r.when, icon: "clock", on: function () {
+          ta.value = r.title; hvacUi(); st.rows = rowsFor(); st.counted = true; st.made = true; st.reached = 3; go(3); toast("Opened the past " + noun); } }; }), "Your past " + noun + "s");
     };
-    make.onclick = function () {
-      if (make.disabled) return; setOff(make, "Working…");
-      stages(out, ["Measure — reading " + (drawing() ? drawing()[0] : "your description"), "Check — " + (mode === "bom" ? "parts against the GA drawing" : "layers, blocks and lengths"), "Write — " + $("select", d).value], function () {
-        out.classList.add("filled"); out.innerHTML = mode === "bom" ? bomHTML() : boqHTML(drawing() && drawing()[0]);
-        st.made = true; upd(); make.innerHTML = pix("parrow") + "Make it again"; toast("Your " + noun + " is ready — saved to Prism Artifacts");
-        MOCK.runs.unshift({ id: "n" + Date.now(), day: "Today", when: "now", title: ta.value || "Bill from " + (drawing() || ["drawing"])[0], tool: noun, by: $("select", d).value, status: "ok", out: mode, icon: mode === "bom" ? "box" : "sheet" });
-      });
-    };
-    ob.onclick = function () { if (!ob.disabled) { var w = window.open("", "_blank"); if (w) { w.document.write('<title>' + noun + '</title><link rel="stylesheet" href="' + location.href.replace(/[^/]*$/, "") + 'style.css"><body style="padding:2rem;overflow:auto;height:auto">' + out.innerHTML + '</body>'); w.document.close(); } else toast("Opened in your browser"); } };
-    mwd.onclick = function () {
-      if (mwd.disabled) return;
-      ask("Send the drawing to an AI?", "You are permitting " + drawing()[0] + " to be sent to " + $("select", d).value + " so it can check the " + noun + " against the drawing. Until now nothing has left this computer.", "Send and verify", function (ok) {
+    var tk = $("#d-takeoff"); if (tk) tk.onclick = function () { takeoff(); };
+    var tk2 = $("#w-takeoff"); if (tk2) tk2.onclick = function () { takeoff(); };
+
+    /* ── step 2: check what Prism counted (item 13: red = a person must check, yellow = worth a look) ── */
+    function rowsFor() {
+      var rows = MOCK.measured[mode].map(function (r) { return r.slice(); });
+      // without "HVAC" in the request the duct-pairing rule does not run, so it flags nothing (item 12b)
+      if (mode === "boq" && !hvac()) rows.forEach(function (r) { if (r[4] === "M-DUCT-RETURN") r[0] = "ok"; });
+      return rows;
+    }
+    var REASON_OFF = "The HVAC duct-pairing rule did not run — your request doesn't say HVAC.";
+    function step2() {
+      var s = $("#w-s2");
+      if (!st.counted) {
+        st.hvacRun = hvac();
+        var src = drawing() ? "Reading " + drawing()[0] : st.ext ? "Reading your measurements" : "Working out the " + what + " from your description";
+        s.innerHTML = '<h3 class="wq">Counting…</h3><p class="wsub">' + esc(src) + '. This happens on this computer.</p><div class="out"></div>';
+        stages($(".out", s), drawing() ? ["Opening your drawing", "Counting and measuring every " + (mode === "bom" ? "part" : "item"), st.hvacRun ? "Applying the HVAC drawing rules (your request says HVAC)" : "Checking for anything unusual"] : ["Reading what you wrote", "Listing the " + what + " a job like this needs"], function () {
+          st.rows = rowsFor(); st.fromText = !drawing() && !st.ext;
+          if (st.fromText) st.rows.forEach(function (r) { r[0] = "ok"; });
+          st.counted = true; step2(); foot();
+        }, 650);
+        foot(); return;
+      }
+      var must = st.rows.filter(function (r) { return r[0] === "bad"; }), worth = st.rows.filter(function (r) { return r[0] === "warn"; }), good = st.rows.filter(function (r) { return r[0] === "ok" || r[0] === "edit"; });
+      var flagged = must.concat(worth);
+      var card = function (r) { var i = st.rows.indexOf(r), v = show(r), m = r[0] === "bad";
+        return '<div class="lookcard' + (m ? " must" : "") + '" data-i="' + i + '"><div class="lc1"><span class="st ' + (m ? "err" : "warn") + '">' + (m ? "You must check" : "Worth a look") + '</span><b>' + esc(r[2]) + '</b><span class="big3 mono">' + v[0] + ' <small>' + v[1] + '</small></span></div>' +
+          '<p>' + esc(MOCK.plain[r[4]] || "Prism isn't sure about this one.") + '</p><div class="row"><button class="btn dark sm" data-ok="' + i + '">' + pix("pcheck") + 'Yes, it\'s right</button><button class="btn light plain sm" data-chg="' + i + '">' + ic("pencil") + 'Change the number</button></div></div>'; };
+      s.innerHTML = '<h3 class="wq">' + (st.fromText ? "Here is what a job like this needs" : "Prism found " + st.rows.length + " " + what) + '</h3>' +
+        '<p class="wsub">' + (st.fromText ? "These are estimates from your description — check the numbers, change any that are wrong." :
+          (must.length ? '<b class="errc">' + must.length + ' you must check</b>' : "") + (must.length && worth.length ? " · " : "") + (worth.length ? '<b class="warnc">' + worth.length + ' worth a look</b>' : "") + (flagged.length ? ". The rest look right." : "Everything looks right.")) + '</p>' +
+        (mode === "boq" && !st.fromText ? (st.hvacRun ? '<div class="hvacon">' + ic("check") + 'HVAC drawing rules were used — your request says HVAC.</div>' : '<div class="muted small">' + ic("help") + REASON_OFF + ' Add the word HVAC to your request in step 1 if this is an HVAC drawing.</div>') : "") +
+        (isPdf() && st.hvacRun ? '<div class="tipcard">' + ic("help") + '<div><b>This drawing is a PDF</b><p>For duct lengths to come out right, tell Prism the drawing scale.</p></div><button class="btn light plain sm" id="w-scale">Set the scale</button></div>' : "") +
+        (flagged.length ? '<div class="looklist">' + must.map(card).join("") + worth.map(card).join("") + '</div>' : "") +
+        '<div class="goodlist"><div class="goodh">' + ic("check") + '<b>' + (st.fromText ? good.length + " estimated " + what : good.length + ' ' + (good.length === 1 ? "looks" : "look") + ' right') + '</b><span class="sp"></span><label class="muted small">Show lengths in <select class="sel" id="w-unit"><option value="m">metres</option><option value="ft">feet</option></select></label></div>' +
+        good.map(function (r) { var i = st.rows.indexOf(r), v = show(r);
+          return '<div class="goodrow"><span>' + esc(r[2]) + (r[0] === "edit" ? ' <span class="tag">checked by you</span>' : "") + '</span><button class="cellbtn" data-chg="' + i + '" title="Change this number">' + v[0] + ' <small>' + v[1] + '</small></button></div>'; }).join("") + '</div>' +
+        '<div class="row"><button class="chip" id="w-full">' + ic("list") + 'See the full table</button><button class="chip" id="w-csv">' + ic("file") + 'Save the count to the Desktop (CSV)</button></div>';
+      $("#w-unit").value = st.unit; $("#w-unit").onchange = function () { st.unit = this.value; step2(); };
+      $$("[data-ok]", s).forEach(function (b) { b.onclick = function () { st.rows[+b.dataset.ok][0] = "edit"; st.made = false; toast("Thanks — marked as checked by you"); step2(); }; });
+      $$("[data-chg]", s).forEach(function (b) { b.onclick = function () { var r = st.rows[+b.dataset.chg];
+        form("Change the number", esc(r[2]), "pencil", '<div class="fgrid"><label>The right number</label><div class="line"><input class="field2 mono" id="f-num" value="' + qty(r) + '" inputmode="decimal"><span class="muted">' + unitOf(r) + '</span></div></div>', "Save", function (m) {
+          var v = parseFloat($("#f-num", m).value.replace(/,/g, "")); if (!(v >= 0)) { toast("Type a number"); return false; } r[5] = v; r[0] = "edit"; st.made = false; step2(); toast("Saved — " + r[2] + ": " + v + " " + unitOf(r)); }, "sm"); }; });
+      var sc = $("#w-scale"); if (sc) sc.onclick = takeoff;
+      $("#w-csv").onclick = function () { toast("Saved to your Desktop → " + (drawing() ? drawing()[0].replace(/\.\w+$/, "") : noun) + "-quantities.csv"); };
+      $("#w-full").onclick = function () {
+        var T = { ok: ["OK", "ok"], warn: ["Look", "warn"], bad: ["Check", "err"], edit: ["Edited", "info"] };
+        var ws = MOCK.warnings[mode].filter(function (w) { return st.hvacRun || !/duct-pairing/.test(w); });
+        info("The full table", "Everything Prism measured" + (drawing() ? " in " + esc(drawing()[0]) : ""), "list",
+          '<div class="mtools"><span class="muted small">All ' + MOCK.allLayers[mode].length + ' layers: ' + MOCK.allLayers[mode].map(esc).join(", ") + '</span></div>' +
+          '<button class="warnbar" id="fw">⚠ ' + ws.length + ' rules &amp; warnings ▾</button><ul class="warnlist" id="fwl" hidden>' + ws.map(function (w) { return "<li>" + esc(w) + "</li>"; }).join("") + '</ul>' +
+          '<div class="out filled"><div class="tscroll"><table class="tbl"><thead><tr><th>Trust</th><th>Item</th><th>Measured as</th><th>Layer</th><th class="n">Value</th><th>Unit</th></tr></thead><tbody>' +
+          st.rows.map(function (r) { var t = T[r[0]]; return '<tr><td><span class="st ' + t[1] + '">' + t[0] + '</span></td><td>' + esc(r[2]) + '</td><td class="u">' + r[3] + '</td><td class="mono small">' + esc(r[4]) + '</td><td class="n">' + qty(r) + '</td><td class="u">' + unitOf(r) + '</td></tr>'; }).join("") +
+          '</tbody></table></div></div><div class="row" style="margin-top:.7rem"><button class="chip" data-toast="Saved to your Desktop as CSV">' + ic("file") + 'Save as CSV (Desktop)</button></div>', "wide");
+        $("#fw").onclick = function () { var l = $("#fwl"); l.hidden = !l.hidden; };
+      };
+    }
+
+    /* ── step 3: make the BOQ — two ways, both from the start (item 8) ── */
+    function table(priced) {
+      var n = 0, sec = "", t = totals();
+      return '<div class="tscroll"><table class="tbl"><thead><tr><th class="idx">#</th><th>Item</th><th class="n">Qty</th><th>Unit</th><th class="n">Rate (₹)</th><th class="n">Amount (₹)</th></tr></thead><tbody>' +
+        st.rows.map(function (r) { var h = ""; if (r[1] !== sec) { sec = r[1]; h = '<tr class="grp"><td></td><td colspan="5">' + esc(sec) + '</td></tr>'; } n++; var rate = priced && st.rates && st.rates[r[2]];
+          return h + '<tr><td class="idx">' + n + '</td><td>' + esc(r[2]) + '</td><td class="n">' + qty(r) + '</td><td class="u">' + unitOf(r) + '</td><td class="n' + (rate ? "" : " nil") + '">' + (rate ? rate.toLocaleString("en-IN") : "—") + '</td><td class="n' + (rate ? "" : " nil") + '">' + (rate ? Math.round(rate * qty(r)).toLocaleString("en-IN") : "—") + '</td></tr>'; }).join("") +
+        '</tbody>' + (priced && st.rates ? '<tfoot><tr><td></td><td>Total with ' + (st.gst ? st.gst + '% GST' : 'no GST') + '</td><td></td><td></td><td></td><td class="n">' + Math.round(t.total).toLocaleString("en-IN") + '</td></tr></tfoot>' : '') + '</table></div>';
+    }
+    // items 2 and 22: a live window for every run, with Stop and "Use another AI"
+    function runLive(box, title, lines, done) {
+      var stopped = false, fb = 0;
+      box.innerHTML = '<div class="live"><div class="liveh"><b>' + title + '</b><span class="sp"></span><span class="mono small muted" id="lv-who">' + esc(writer()) + '</span></div><div class="out" id="lv-out"></div>' +
+        '<div class="row"><button class="btn light plain sm" id="lv-fb">' + ic("clock") + 'Taking too long? Use another AI</button><button class="btn light plain sm danger" id="lv-stop">' + ic("x") + 'Stop</button></div></div>';
+      stages($("#lv-out", box), lines, function () { if (!stopped) done(); }, 750);
+      $("#lv-stop", box).onclick = function () { stopped = true; box.innerHTML = '<div class="tipcard">' + ic("x") + '<div><b>Stopped</b><p>Nothing was changed. ' + (st.made ? "Your last " + noun + " is still there." : "") + '</p></div><button class="btn light plain sm" id="lv-again">Try again</button></div>'; $("#lv-again", box).onclick = function () { step3(); }; foot(); };
+      $("#lv-fb", box).onclick = function () { var to = FALLBACK.filter(function (a) { return a !== writer(); })[fb++ % 2]; $("#d-writer").value = to; $("#lv-who", box).textContent = to; toast("Switched to " + to + " — it carries on from where it was"); };
+    }
+    function step3() {
+      var s = $("#w-s3");
+      if (!st.made && !s.querySelector(".live")) {
+        var card = function (k, icon, t, p, off) { return '<button class="choice2' + (st.how === k ? " on" : "") + '" data-how="' + k + '"' + (off ? ' disabled title="' + esc(off) + '"' : "") + '><span class="ftile">' + ic(icon) + '</span><b>' + t + '</b><p>' + p + '</p></button>'; };
+        s.innerHTML = '<h3 class="wq">How should Prism make your ' + noun + '?</h3><p class="wsub">Most people pick the first one.</p><div class="choices two">' +
+          card("count", "list", "From the count (recommended)", "Your drawing stays on this computer. Only the checked numbers go to AI to write the " + noun + ".") +
+          card("drawing", "eye", "With the drawing", "AI reads the drawing itself as well. Prism asks you first — the drawing leaves this computer only if you say yes.", drawing() ? "" : "Add a drawing in step 1 to use this") + '</div>' +
+          '<div class="row"><button class="btn dark" id="w-make">' + pix("parrow") + 'Make my ' + noun + '</button>' + (st.sample ? '<span class="muted small">In the style of ' + esc(st.sample) + '</span>' : "") + '</div>';
+        $$("[data-how]", s).forEach(function (b) { b.onclick = function () { if (b.disabled) return; st.how = b.dataset.how; step3(); }; });
+        $("#w-make", s).onclick = function () { st.how === "drawing" ? consent(false) : make(false); };
+        return;
+      }
+      if (!st.made) return;
+      s.innerHTML = '<div class="donehd"><span class="donei">' + ic("check") + '</span><div><h3 class="wq">Your ' + noun + ' is ready</h3><p class="wsub">' + st.rows.length + ' ' + what + ' · prices are added in the next step' + (st.verified ? ' · checked against the drawing by AI' : '') + '</p></div></div>' +
+        '<div class="filecard">' + ic("sheet") + '<div><b>' + esc(fname(false)) + '</b><small>Saved in Prism Artifacts' + (st.sample ? ' · in the style of ' + esc(st.sample) : '') + '</small></div><span class="sp"></span>' +
+          '<button class="btn dark sm" id="w-xls">' + pix("parrow") + 'Open in Excel</button><button class="btn light plain sm" id="d-open">' + ic("ext") + 'Open in browser</button><button class="btn light plain sm" id="w-more" title="Other formats and the folder">' + ic("more") + '</button></div>' +
+        (st.change ? '<div class="revnote">' + ic("pencil") + 'Version ' + st.rev + ': ' + esc(st.change) + '</div>' : "") +
+        '<div class="out filled">' + table(false) + '</div>' +
+        '<div class="fu"><div class="label">Want to change something? Just type it</div><div class="line"><input class="field2" id="d-fu-text" placeholder="e.g. split the ductwork floor by floor" aria-label="What should change"><button class="btn dark sm" id="d-fu-send">' + pix("parrow") + 'Change it</button></div>' +
+          '<div class="row"><span class="muted small">Ideas:</span>' + ["Split it floor by floor", "Add 5% for wastage", "Group by material"].map(function (x) { return '<button class="chip sm" data-idea="' + x + '">' + x + '</button>'; }).join("") + '</div></div>' +
+        (drawing() ? '<div class="tipcard ai">' + ic("eye") + '<div><b>' + (st.verified ? "Checked against the drawing" : "Check it against the drawing?") + '</b><p>' + (st.verified ? "AI read your drawing and checked every line." : "AI reads your drawing and checks every line, then remakes the " + noun + ". Prism asks you first.") + '</p></div>' +
+          '<button class="btn light plain sm" id="d-mwd">' + (st.verified ? "Check again" : "Verify and remake") + '</button></div>' : "");
+      $("#w-xls").onclick = function () { toast("Opened " + fname(false) + " in Excel"); };
+      $("#d-open").onclick = function () { var w = window.open("", "_blank"); if (w) { w.document.write('<title>' + noun + '</title><link rel="stylesheet" href="' + location.href.replace(/[^/]*$/, "") + 'style.css"><body style="padding:2rem;overflow:auto;height:auto">' + $(".out.filled", s).innerHTML + '</body>'); w.document.close(); } else toast("Opened in your browser"); };
+      $("#w-more").onclick = function () { menu(this, [["Word document (.docx)", "file"], ["PDF", "file"], ["CSV", "list"]].map(function (f) { return { label: "Save as " + f[0], icon: f[1], on: function () { toast("Saved as " + f[0] + " in Prism Artifacts"); } }; }).concat([{ sep: 1 }, { label: "Show in folder", icon: "folder", on: function () { toast("Opened Prism Artifacts in your file manager"); } }]), "More"); };
+      $$("[data-idea]", s).forEach(function (b) { b.onclick = function () { $("#d-fu-text").value = b.dataset.idea; $("#d-fu-text").focus(); }; });
+      function change() { var v = $("#d-fu-text").value.trim(); if (!v) { toast("Type what should change first"); $("#d-fu-text").focus(); return; }
+        st.made = false; foot(); runLive(s, "Changing your " + noun + "…", ["Carrying your follow-up on — " + writer(), "Saving it as a new file"], function () { st.change = v; st.rev++; st.made = true; step3(); foot(); toast("Done — saved as " + fname(false)); }); }   // item 4: new file shown
+      $("#d-fu-send").onclick = change; $("#d-fu-text").onkeydown = function (e) { if (e.key === "Enter") change(); };
+      var mw = $("#d-mwd", s); if (mw) mw.onclick = function () { consent(true); };
+    }
+    function make(again) {
+      var s = $("#w-s3"); st.made = false; foot();
+      var lines = ["Putting the " + what + " in order"]; if ($("#d-research").value !== "No research") lines.push("Checking the standards that apply — " + $("#d-research").value);
+      lines.push("Writing your " + noun + (st.sample ? " in your company's format" : "") + " — " + writer()); lines.push("Saving it as a spreadsheet");
+      runLive(s, "Making your " + noun + "…", lines, function () { st.made = true; step3(); foot(); toast("Done. Check the numbers against the drawing and the saved file.");
+        MOCK.runs.unshift({ id: "n" + Date.now(), day: "Today", when: "now", title: ta.value || noun + " from " + (drawing() || ["your measurements"])[0], tool: noun, by: writer(), status: "ok", out: mode, icon: mode === "bom" ? "box" : "sheet" }); });
+    }
+    // item 32: off by default, explicit permission every time the drawing would leave the computer
+    function consent(verify) {
+      ask("Send your drawing to AI?", "Prism will send " + drawing()[0] + " to " + writer() + " so it can read the drawing itself" + (verify ? " and check every line of your " + noun : "") + ". Until now the drawing has not left this computer. Is that OK?", "Yes, send it", function (ok) {
         if (!ok) { toast("Nothing was sent"); return; }
-        stages(out, ["Sending the drawing", "Verifying every line against it", "Writing the " + noun + " again"], function () {
-          out.classList.add("filled"); out.innerHTML = (mode === "bom" ? bomHTML() : boqHTML(drawing()[0])).replace("Written up by", "Verified against the drawing · written up by"); toast("Verified against the drawing");
-        });
+        var s = $("#w-s3"); st.made = false; foot();
+        runLive(s, verify ? "Verifying against the drawing…" : "Making your " + noun + " from the drawing…", ["Sending your drawing to " + writer(), verify ? "Checking every line against it" : "Reading the drawing and the count together", "Writing the " + noun], function () {
+          st.verified = true; if (verify) { st.rev++; st.change = "checked against the drawing"; } st.made = true; step3(); foot(); toast(verify ? "Verified against the drawing — saved as " + fname(false) : "Made with the drawing"); });
       });
-    };
-    $$(".js-try").forEach(function (b) { b.addEventListener("click", function () { setTimeout(upd, 60); }); });
+    }
+
+    /* ── step 4: add prices — only now that the BOQ exists (item 10) ── */
+    function step4() {
+      var s = $("#w-s4");
+      var card = function (k, icon, t, p) { return '<button class="choice2' + (st.priceMode === k ? " on" : "") + '" data-pm="' + k + '"><span class="ftile">' + ic(icon) + '</span><b>' + t + '</b><p>' + p + '</p></button>'; };
+      var html = '<h3 class="wq">Add prices to your ' + noun + '?</h3><p class="wsub">Optional. Prism fills them into the ' + noun + ' you just made.</p><div class="choices">' +
+        card("mine", "sheet", "Use my price list", st.priceMode === "mine" && st.rateName ? "✓ " + esc(st.rateName) : "Pick your rate sheet (Excel, PDF or Word).") +
+        card("starter", "spark", "Use typical prices", "Good for a first estimate. Check them before you send a quote.") +
+        card("none", "x", "No prices", "Leave the price columns empty for you to fill.") + '</div>';
+      if (st.rates && st.priceMode !== "none") {
+        var t = totals(), miss = 0;
+        html += '<div class="pricelist"><div class="goodh">' + ic("bars") + '<b>Prices</b><span class="sp"></span><span class="muted small">Click a price to change it</span></div>' + st.rows.map(function (r) {
+          var rate = st.rates[r[2]]; if (!rate) miss++;
+          return '<div class="prow' + (rate ? "" : " miss") + '"><span>' + esc(r[2]) + '<small>' + qty(r) + ' ' + unitOf(r) + '</small></span><label class="rateb">₹<input class="cell n rate" data-k="' + esc(r[2]) + '" value="' + (rate || "") + '" placeholder="add price" aria-label="Price for ' + esc(r[2]) + '"><small>per ' + unitOf(r) + '</small></label><b class="mono">' + (rate ? money(rate * qty(r)) : "—") + '</b></div>'; }).join("") + '</div>' +
+          (miss ? '<p class="warnc small">' + miss + (miss === 1 ? " item has" : " items have") + ' no price yet — type one in, or leave it empty. Nothing is guessed.</p>' : "") +
+          '<div class="bigtotal"><span>Total, including ' + (st.gst ? st.gst + "% GST" : "no GST") + (st.cont ? " and " + st.cont + "% extra" : "") + '</span><b class="mono">' + money(t.total) + '</b></div>' +
+          '<details class="more"><summary>' + ic("right") + 'Tax and extras</summary><div class="ptot"><label>GST <select class="sel" id="p-gst"><option value="18">18%</option><option value="12">12%</option><option value="0">None</option></select></label>' +
+          '<label class="lbl-ck"><input type="checkbox" class="ck" id="p-igst"' + (st.igst ? " checked" : "") + '> Customer is in another state (IGST)</label><label>Extra for contingency <select class="sel" id="p-cont"><option value="0">none</option><option value="3">3%</option><option value="5">5%</option><option value="10">10%</option></select></label>' +
+          '<div class="sums"><span>Sub-total ' + money(t.sub) + (st.cont ? ' · contingency ' + money(t.cont) : '') + (st.gst ? (st.igst ? ' · IGST ' + money(t.gst) : ' · CGST ' + money(t.gst / 2) + ' + SGST ' + money(t.gst / 2)) : '') + '</span></div></div></details>' +
+          (st.priced ? '<div class="filecard">' + ic("sheet") + '<div><b>' + esc(fname(true)) + '</b><small>Prices filled into your ' + noun + ' · saved in Prism Artifacts</small></div><span class="sp"></span><button class="btn dark sm" id="p-xls">' + pix("parrow") + 'Open in Excel</button><button class="btn light plain sm" id="p-more">' + ic("more") + '</button></div>'
+            : '<div class="row"><button class="btn dark" id="p-fill">' + pix("parrow") + 'Add these prices to my ' + noun + '</button></div>');
+      }
+      s.innerHTML = html;
+      $$("[data-pm]", s).forEach(function (b) { b.onclick = function () { var k = b.dataset.pm; st.priced = false;
+        if (k === "mine") { pickFile(b, "doc", function (f) { st.priceMode = "mine"; st.rates = Object.assign({}, MOCK.rates.mine); st.rateName = f[0]; step4(); foot(); toast("Prices taken from " + f[0]); }, "Your price list"); return; }
+        st.priceMode = k; st.rates = k === "starter" ? Object.assign({}, MOCK.rates.starter) : null; st.rateName = k === "starter" ? "Typical prices" : ""; step4(); foot(); }; });
+      $$(".rate", s).forEach(function (inp) { inp.onchange = function () { var v = parseFloat(this.value); if (v > 0) st.rates[this.dataset.k] = v; else delete st.rates[this.dataset.k]; st.priced = false; step4(); foot(); }; });
+      var g = $("#p-gst", s); if (g) { g.value = st.gst; g.onchange = function () { st.gst = +this.value; st.priced = false; step4(); foot(); $("details.more", s).open = true; }; }
+      var c = $("#p-cont", s); if (c) { c.value = st.cont; c.onchange = function () { st.cont = +this.value; st.priced = false; step4(); foot(); $("details.more", s).open = true; }; }
+      var ig = $("#p-igst", s); if (ig) ig.onchange = function () { st.igst = this.checked; st.priced = false; step4(); foot(); $("details.more", s).open = true; };
+      var pf = $("#p-fill", s); if (pf) pf.onclick = function () { setOff(pf, "Filling in…"); var o = document.createElement("div"); o.className = "out"; pf.parentNode.replaceWith(o);
+        stages(o, ["Filling the prices into your " + noun, "Adding the totals and GST", "Saving it"], function () { st.priced = true; step4(); foot(); toast("Prices added — saved as " + fname(true)); }, 550); };
+      var px = $("#p-xls", s); if (px) px.onclick = function () { toast("Opened " + fname(true) + " in Excel"); };
+      var pm = $("#p-more", s); if (pm) pm.onclick = function () { menu(this, ["Word document (.docx)", "PDF", "CSV"].map(function (f) { return { label: "Save as " + f, icon: "file", on: function () { toast("Saved the priced " + noun + " as " + f); } }; }), "More"); };
+    }
+
+    /* ── HVAC PDF takeoff (takeoff.py) — offered only when the request says HVAC (item 26) ── */
+    function takeoff() {
+      var tst = { pdf: isPdf() ? drawing()[0] : "", scale: "1 : 100", done: false };
+      var m = form("Measure from a PDF drawing", "Tell Prism the scale, then it measures the ducts — on this computer.", "file",
+        '<div class="fgrid"><label>PDF drawing</label><div class="line"><button class="chip" id="t-pick">' + ic("file") + (tst.pdf ? "Change PDF…" : "Pick a PDF…") + '</button><span class="mono small" id="t-name">' + esc(tst.pdf) + '</span></div>' +
+        '<label>Drawing scale:</label><div class="line"><select class="sel" id="t-scale"><option>1 : 50</option><option selected>1 : 100</option><option>1 : 200</option><option>I don\'t know</option></select><button class="chip" id="t-measure">' + ic("expand") + 'Measure…</button></div>' +
+        '<label>Text</label><label class="lbl-ck"><input type="checkbox" class="ck" id="t-ocr" checked> Read text labels (OCR)</label></div>' +
+        '<p class="muted small" style="margin-top:.5rem">Don\'t know the scale? Press Measure… and click two points you know the real distance between.</p>' +
+        '<div class="row" style="margin-top:.8rem"><button class="btn dark sm" id="t-extract"' + (tst.pdf ? "" : ' disabled title="Pick a PDF first."') + '>' + pix("parrow") + 'Extract</button></div><div id="t-out"></div>', "Use these measurements", function () {
+          if (!tst.done) { toast("Press Extract first"); return false; }
+          st.rows = rowsFor(); st.counted = true; st.fromText = false; st.hvacRun = true; st.made = false; if (st.step === 2) step2(); foot(); toast("Measured from the PDF");
+        }, "mid");
+      $("#t-pick", m).onclick = function () { pickFile(this, "drawing,doc", function (f) { tst.pdf = f[0].replace(/\.\w+$/, ".pdf"); $("#t-name", m).textContent = tst.pdf; setOff($("#t-extract", m), ""); }, "PDF drawing"); };
+      $("#t-scale", m).onchange = function () { tst.scale = this.value; };
+      $("#t-measure", m).onclick = function () {
+        form("Measure a known dimension", "Click two points on the drawing that you know the real distance between, then type it.", "expand",
+          '<div class="render small2"><svg viewBox="0 0 320 120"><rect x="20" y="20" width="280" height="80" fill="#F6F5F2" stroke="#111110"/><circle cx="40" cy="100" r="5" fill="#C8161D"/><circle cx="280" cy="100" r="5" fill="#C8161D"/><path d="M40 100H280" stroke="#C8161D" stroke-dasharray="4 4"/></svg></div>' +
+          '<div class="fgrid"><label>Real distance between the two points:</label><input class="field2" id="t-dist" placeholder="feet, e.g. 6.0"></div>', "Use this scale", function (mm) {
+            var v = parseFloat($("#t-dist", mm).value); if (!(v > 0)) { toast("Type the real distance first"); return false; }
+            tst.scale = "1 : " + Math.round(v * 16); $("#t-scale", m).insertAdjacentHTML("beforeend", "<option selected>" + tst.scale + " (measured)</option>"); toast("Scale set: " + tst.scale); }, "sm", "formm2");
+      };
+      $("#t-extract", m).onclick = function () {
+        var b = this; if (b.disabled) return; setOff(b, "Reading…"); var o = $("#t-out", m); o.innerHTML = '<div class="out" style="margin-top:.8rem"></div>';
+        stages($(".out", o), ["Reading the drawing — a large PDF can take a minute…", $("#t-ocr", m).checked ? "Reading text labels (OCR)" : "Skipping text labels", "Finding duct runs and symbols"], function () {
+          tst.done = true; setOff(b, "");
+          o.innerHTML = '<div class="okline">' + ic("check") + '14 duct run(s) measured.</div><button class="warnbar" id="t-map">▸ Layer mapping (' + MOCK.takeoff.layers.length + ' found)</button><ul class="maplist" id="t-maplist" hidden>' +
+            MOCK.takeoff.layers.map(function (l) { return '<li><b>' + l[0] + '</b><span class="tag">' + l[1] + '</span><span class="mono small">' + l[2] + ' found</span><button class="chip sm" data-prev="' + l[0] + '">Preview this layer on the drawing</button></li>'; }).join("") + '</ul>' +
+            '<button class="warnbar" id="t-w">⚠ ' + MOCK.takeoff.warnings.length + ' warning(s) from the extraction ▾</button><ul class="warnlist" id="t-wl" hidden>' + MOCK.takeoff.warnings.map(function (w) { return "<li>" + esc(w) + "</li>"; }).join("") + '</ul>';
+          $("#t-map", m).onclick = function () { var l = $("#t-maplist", m); l.hidden = !l.hidden; this.textContent = (l.hidden ? "▸" : "▾") + " Layer mapping (" + MOCK.takeoff.layers.length + " found)"; };
+          $("#t-w", m).onclick = function () { var l = $("#t-wl", m); l.hidden = !l.hidden; };
+          $$("[data-prev]", m).forEach(function (pb) { pb.onclick = function () { info("Layer preview — " + pb.dataset.prev, tst.pdf, "eye", '<div class="render big">' + ISO + '<span class="cap">' + esc(pb.dataset.prev) + ' highlighted in red</span></div>', "sm"); }; });
+        }, 600);
+      };
+    }
+    $$(".js-try").forEach(function (b) { b.addEventListener("click", function () { setTimeout(function () { if (b.dataset.fill) ta.value = b.dataset.fill; hvacUi(); foot(); }, 60); }); });
+    hvacUi(); go(1);
   }
 
   /* ═════════════════════════ GERBER ═════════════════════════ */

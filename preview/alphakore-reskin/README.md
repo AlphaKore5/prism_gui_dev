@@ -39,6 +39,27 @@ the others through the sidebar.
   mark, the Prism crystal, the Prism painting and the two videos in `media/` come from
   alphakore.org.
 
+## BOQ / BOM: four easy steps for people who have never used AI
+
+`boq.html` and `bom.html` open a step-by-step helper instead of one dense dialog:
+**1 What you have → 2 Check the count → 3 Make the BOQ → 4 Add prices**.
+It uses everyday words, has one main button per step, and asks only about the items that need a person.
+
+It follows Hitarth's rules in `BOQ-CHANGES-TODO.md` (item numbers):
+
+- **Item 10:** prices come after the BOQ exists.
+- **Item 8:** "From the count" and "With the drawing" are both offered before any BOQ exists.
+- **Items 12b and 26:** HVAC rules and the PDF take-off switch on only when the request says HVAC.
+- **Item 13:** red means a person must check; yellow means worth a look.
+- **Item 18:** pasted measurements still need the request line.
+- **Items 2 and 22:** the progress window has Stop and Use another AI.
+- **Item 4:** each change is saved as a new file (v2, v3…).
+- **Item 32:** Prism asks permission every time the drawing would leave the computer.
+- **Item 30:** research is off by default.
+- **Item 9:** the sample template is kept separate from the drawing.
+
+Every expert control is still there: Settings for experts, the full measured table, Input measurements, PDF take-off, History and file formats.
+
 ## Brand tokens
 
 | Token | Value | Use |

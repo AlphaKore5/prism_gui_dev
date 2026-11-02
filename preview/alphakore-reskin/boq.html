@@ -57,6 +57,7 @@
   <symbol id="i-video" viewBox="0 0 24 24"><rect x="3.5" y="6.5" width="12" height="11" rx="2"/><path d="m15.5 10.5 5-3v9l-5-3"/></symbol>
   <symbol id="i-expand" viewBox="0 0 24 24"><path d="M14 4.5h5.5V10M10 19.5H4.5V14M19.5 4.5 14 10M4.5 19.5 10 14"/></symbol>
   <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="pcheck" viewBox="0 0 18 18"><g fill="#fff"><rect x="2" y="9" width="2" height="2"/><rect x="5" y="12" width="2" height="2"/><rect x="8" y="9" width="2" height="2"/><rect x="11" y="6" width="2" height="2"/><rect x="14" y="3" width="2" height="2"/></g></symbol>
 </defs></svg>
 <div class="app">
   <aside class="side">
@@ -102,27 +103,53 @@
 </div>
 <div class="modal" id="make" data-hash role="dialog" aria-modal="true" aria-labelledby="make-t">
   <div class="scrim" data-close></div>
-  <div class="dlg">
-    <div class="dh"><span class="tile"><svg class="i"><use href="#i-sheet"/></svg></span><div><h2 id="make-t">Bill of Quantities</h2><p>Attach a drawing and it is measured here, on this machine. Nothing is measured by an AI.</p></div></div>
+  <div class="dlg wizw">
+    <div class="dh"><span class="tile"><svg class="i"><use href="#i-sheet"/></svg></span><div><h2 id="make-t">Bill of Quantities</h2><p>Make a bill of quantities from your drawing in four easy steps.</p></div></div>
     <div class="db">
-      <h3>What do you need a BOQ for?</h3>
-      <textarea class="ta ask" placeholder="Just say it — for example:&#10;&quot;BOQ for CCTV, cabling and fibre for this site&quot;  (attach the drawing)&#10;&quot;materials to build one 36x24 jaw crusher, 100 TPH&quot;  (no drawing needed)" aria-label="What do you need a BOQ for?"></textarea>
-      <div class="row"><button class="chip js-speak" ><svg class="i"><use href="#i-mic"/></svg>Speak</button><button class="chip js-add" ><svg class="i"><use href="#i-clip"/></svg>Add file</button><button class="chip js-fav" ><svg class="i"><use href="#i-folder"/></svg>Favourites</button></div><div class="att js-att"></div>
-      <div class="note">You can also attach a sample BOQ or your usual template above — Prism will match its style, logo and layout. This is separate from the drawing, which is only ever sent to an AI after you say so, in "Make with drawing".</div>
-      <div class="row"><button class="chip" id="d-meas"><svg class="i"><use href="#i-clip"/></svg>Input measurements…</button></div>
-      <div class="meta"><span class="pair">Write with <select class="sel" aria-label="Write with" ><option>Prism Agent Claude</option><option>Prism Agent Deep</option><option>Claude</option><option>Grok</option><option>Kimi 2.6</option><option>DeepSeek</option><option>Gemini</option><option>ChatGPT</option></select></span><span class="pair">· Research with <select class="sel" aria-label="Research with" ><option>No research</option><option>Perplexity</option><option>ChatGPT</option><option>Claude</option></select></span>
-        <button class="chip" id="d-hist"><svg class="i"><use href="#i-clock"/></svg>History</button><span class="pair">· File format <select class="sel" aria-label="File format" ><option>Let the tool decide</option><option>Word document (.docx)</option><option>CSV</option><option>PDF</option></select></span>
-        <span class="pair">· Industry <select class="sel" aria-label="Industry" ><option>General</option><option>HVAC</option></select></span></div>
-      <details class="more"><summary><svg class="i"><use href="#i-right"/></svg>More options (optional)</summary>
-        <div class="meta" style="flex-direction:column;align-items:stretch">
-          <input class="field2" placeholder="Drawing unit, if you know it — e.g. meters">
-          <input class="field2" placeholder="Only include layers containing… (comma separated)">
-          <input class="field2" placeholder="What the drawing's symbols mean, if the sheet doesn't say — e.g. circles = light points">
-          <label class="opt"><input type="checkbox" class="ck" checked> Estimate items the drawing doesn't contain (marked as an estimate)</label>
-        </div></details>
-      <div class="out js-out">Your BOQ will appear here.</div>
+<div class="wiz">
+      <nav class="wsteps" aria-label="Steps"><button class="wsn on" data-go="1" disabled title="Finish the step before first"><span class="num">1</span><span>What you have</span></button><button class="wsn" data-go="2" disabled title="Finish the step before first"><span class="num">2</span><span>Check the count</span></button><button class="wsn" data-go="3" disabled title="Finish the step before first"><span class="num">3</span><span>Make the BOQ</span></button><button class="wsn" data-go="4" disabled title="Finish the step before first"><span class="num">4</span><span>Add prices</span></button></nav>
+      <section class="wstep" data-step="1">
+        <h3 class="wq">What is this BOQ for?</h3>
+        <p class="wsub">Say it in your own words — one line is enough.</p>
+        <div class="askline"><textarea class="ta ask" id="w-ask" rows="2" placeholder="e.g. HVAC ductwork for Sargam Tower B" aria-label="What is this BOQ for?"></textarea>
+          <button class="chip js-speak" title="Say it instead of typing"><svg class="i"><use href="#i-mic"/></svg>Speak</button></div>
+        <div class="examples" id="w-ex"><span class="muted small">Or pick one:</span></div>
+        <div class="drop" id="w-drop">
+          <span class="dropic"><svg class="i"><use href="#i-file"/></svg></span>
+          <div class="droptx"><b>Add your drawing</b><p>DXF or PDF. Prism measures it on this computer — the drawing itself is never sent to AI unless you say yes.</p></div>
+          <button class="btn dark sm" id="w-choose"><span class="ic"><svg><use href="#pplus"/></svg></span>Choose drawing</button>
+        </div>
+        <div class="att js-att" id="w-files"></div>
+        <div class="group" id="d-ext" hidden><div class="label">Your measurements</div><pre class="extview" id="d-extview"></pre><div class="okmsg" id="d-extmsg"></div></div>
+        <ul class="wlinks">
+          <li class="muted"><svg class="i"><use href="#i-help"/></svg>No drawing? That's fine — describe the job above and Prism lists the items.</li>
+          <li class="hvacon" id="w-hvac" hidden><svg class="i"><use href="#i-check"/></svg>HVAC drawing rules are on — because your request says HVAC.</li>
+          <li><button id="w-sample"><svg class="i"><use href="#i-sheet"/></svg>Make it look like my company's BOQ</button><span class="muted small" id="w-samplename"></span></li>
+          <li><button id="d-meas"><svg class="i"><use href="#i-clip"/></svg>I already have some measurements</button></li>
+          <li id="w-takeoff-li" hidden><button id="w-takeoff"><svg class="i"><use href="#i-file"/></svg>My HVAC drawing is a PDF tender — measure it</button></li>
+          <li><button id="d-hist"><svg class="i"><use href="#i-clock"/></svg>Open a past BOQ</button></li>
+          <li><button id="w-dwg"><svg class="i"><use href="#i-help"/></svg>My drawing is a .dwg file</button></li>
+        </ul>
+        <details class="more experts"><summary><svg class="i"><use href="#i-right"/></svg>Settings for experts (optional)</summary>
+          <p class="muted small">Prism picks good defaults. Change these only if you know you need to.</p>
+          <div class="meta"><span class="pair">Write with <select class="sel" aria-label="Write with" id="d-writer"><option>Prism Agent Claude</option><option>Prism Agent Deep</option><option>Claude</option><option>Grok</option><option>Kimi 2.6</option><option>DeepSeek</option><option>Gemini</option><option>ChatGPT</option></select></span><span class="pair">Research with <select class="sel" aria-label="Research with" id="d-research"><option>No research</option><option>Perplexity</option><option>ChatGPT</option><option>Claude</option></select></span>
+            <span class="pair">File format <select class="sel" aria-label="File format" id="d-format"><option>Let the tool decide</option><option>Word document (.docx)</option><option>CSV</option><option>PDF</option></select></span>
+            <span class="pair">Industry <select class="sel" aria-label="Industry" id="d-industry"><option>General</option><option>HVAC</option></select></span></div>
+          <div class="meta" style="flex-direction:column;align-items:stretch">
+            <input class="field2" placeholder="Drawing unit, if you know it — e.g. meters" aria-label="Drawing unit">
+            <input class="field2" placeholder="Only include layers containing… (comma separated)" aria-label="Only include layers">
+            <input class="field2" placeholder="What the drawing's symbols mean, if the sheet doesn't say — e.g. circles = light points" aria-label="Legend">
+            <label class="opt"><input type="checkbox" class="ck" checked> Estimate items the drawing doesn't contain (marked as an estimate)</label>
+          </div>
+          <button class="chip" id="d-takeoff" hidden><svg class="i"><use href="#i-clip"/></svg>HVAC PDF takeoff…</button>
+        </details>
+      </section>
+      <section class="wstep" data-step="2" id="w-s2" hidden></section>
+      <section class="wstep" data-step="3" id="w-s3" hidden><div class="out js-out" hidden></div></section>
+      <section class="wstep" data-step="4" id="w-s4" hidden></section>
     </div>
-    <div class="df"><button class="btn light plain sm" id="d-open" disabled title="Make a BOQ first" aria-label="Make a BOQ first"><svg class="i"><use href="#i-ext"/></svg>Open in browser</button><button class="btn light plain sm" id="d-mwd" disabled title="Make a BOQ first, then attach the drawing" aria-label="Make a BOQ first, then attach the drawing"><svg class="i"><use href="#i-eye"/></svg>Make with drawing</button><span class="sp"></span><button class="btn light plain sm" data-close>Close</button><button class="btn dark sm" id="d-make"><span class="ic"><svg><use href="#parrow"/></svg></span>Make my BOQ</button></div>
+    </div>
+    <div class="df"><button class="btn light plain sm" id="w-back" hidden><svg class="i"><use href="#i-left"/></svg>Back</button><span class="sp"></span><button class="btn light plain sm" data-close>Close</button><button class="btn light plain sm" id="w-skip" hidden>Skip prices</button><button class="btn dark sm" id="w-next" disabled title="Add a drawing or describe the job first" aria-label="Add a drawing or describe the job first"><span class="ic"><svg><use href="#parrow"/></svg></span>Next: count it</button></div>
   </div>
 </div>
 <button class="edge" title="Open Lumi, Prism's helper"><svg class="i"><use href="#i-left"/></svg></button>
