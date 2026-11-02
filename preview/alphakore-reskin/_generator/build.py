@@ -475,6 +475,40 @@ def video_dialog(mid, title, sub, q, ph, choice, utils, make):
     return modal(mid, "video", title, sub, body, foot)
 
 
+def sub1(s, a, b):
+    assert s.count(a) == 1, a[:50]
+    return s.replace(a, b, 1)
+
+
+def build_task():
+    """The Task section: where a task is planned and run. Opened by the composer's send button."""
+    body = f"""      <div class="taskpg" id="taskpg">
+        <div class="tphead">
+          <a class="link" href="index.html">{ic("left")} Home</a>
+          <span class="label">Task</span>
+          <h1 id="tp-title">New task</h1>
+          <div class="tpfiles" id="tp-files"></div>
+        </div>
+        <div class="tpgrid">
+          <div class="card tpplan">
+            <div class="planh"><span class="label">Prism's plan</span><span class="mono muted" id="tp-count"></span></div>
+            <p class="muted small">Prism made this plan from what you asked. Switch off any step you don't want, then start.</p>
+            <div class="plan" id="tp-steps"></div>
+            <div class="tpact"><span class="mono muted" id="tp-note">Nothing has run yet.</span><span class="sp"></span>
+              <a class="btn light plain sm" href="index.html">Not now</a>
+              <button class="btn dark sm" id="tp-go"><span class="ic"><svg><use href="#parrow"/></svg></span>Start work</button></div>
+          </div>
+          <div class="card tpans">
+            <div class="planh"><span class="label">Answer</span><span class="st neutral" id="tp-state">Waiting to start</span></div>
+            <div class="out" id="tp-out">The answer appears here once the steps finish.</div>
+          </div>
+        </div>
+      </div>
+      <div class="card blank" id="tp-empty" hidden style="min-height:18rem"><div><span class="ftile">{ic("spark")}</span><h2>No task yet</h2>
+        <p>Describe what you need on Home and press send. Prism makes a plan, and it appears here.</p><a class="btn dark sm" href="index.html">{ic("left")} Back to Home</a></div></div>"""
+    page("task.html", "Task", "index.html", "task", body)
+
+
 def build_home():
     h = part("home.html")
     tiles = [("inquiry.html", "inbox", "Email Inquiry"), ("boq.html", "sheet", "BOQ"), ("gerber.html", "chip", "Gerber"),
@@ -483,6 +517,17 @@ def build_home():
     grid = "".join(f'<a class="ad" href="{u}"><span class="tile">{ic(i)}</span><b>{l}</b><span class="rd">Ready</span></a>' for u, i, l in tiles)
     h = re.sub(r'<div class="adgrid">.*?</div>\n          </div>', f'<div class="adgrid">{grid}</div>\n          </div>', h, flags=re.S)
     h = re.sub(r'<ul class="acts">.*?</ul>', '<ul class="acts" id="h-acts"></ul>', h, flags=re.S)
+    # Insights ("Today") and demo videos sit under the composer, above Recent activity.
+    insights = """        <section class="insights" aria-label="Today at a glance">
+          <div class="sech"><span class="label">Today</span><span class="mono muted">Numbers from your inquiries, runs and plan</span></div>
+          <div class="istats" id="h-insights"></div>
+        </section>
+        <section class="vids" aria-label="See Prism work">
+          <div class="sech"><span class="label">See Prism work</span><span class="mono muted">Short demos, about a minute each</span></div>
+          <div class="vgrid" id="h-vids"></div>
+        </section>
+"""
+    h = sub1(h, '        <div class="lower">', insights + '        <div class="lower">')
     reps = [
         ('<textarea placeholder="What can I take care of today?" aria-label="Describe a task"></textarea>',
          '<textarea id="task" placeholder="What can I take care of today?" aria-label="Describe a task"></textarea>\n            <div class="att" id="h-att"></div>'),
@@ -555,6 +600,7 @@ def build_core():
 
 if __name__ == "__main__":
     build_home()
+    build_task()
     build_core()
     build_inquiry()
     build_boq()

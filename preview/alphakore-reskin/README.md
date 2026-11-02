@@ -14,7 +14,8 @@ the others through the sidebar.
 
 | Page | What it shows |
 |---|---|
-| `index.html` | Home: composer, Try chips, demo, Recent activity, Add-ons. Reel / Studio and Motion Graphics open from here (`#reel`, `#motion`). |
+| `index.html` | Home: composer, Try chips, demo, **Today** (insight numbers), **See Prism work** (one short demo per feature; only Reel has a recording so far, the rest say why they are off), Recent activity, Add-ons. Reel / Studio and Motion Graphics open from here (`#reel`, `#motion`). |
+| `task.html` | The Task section, its own screen: Prism's plan, switch steps on or off, Start work, the answer. Opens from the composer's send button on Home. |
 | `history.html` | Every past run: search, filters, select and delete, open a run to see its answer. |
 | `artifacts.html` | Generated files by day; open any of them. |
 | `settings.html` | All eight sections: Licence, Profile, Agents, Language, Connections, Appearance, Privacy & data, Help & contact. |
