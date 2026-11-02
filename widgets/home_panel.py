@@ -710,18 +710,18 @@ class HomePanel(QWidget):
 
         salutation = QLabel(f"{_greeting()},")
         salutation.setStyleSheet(
-            f"font-family: '{theme.FONT_BODY}'; font-size: 22px; "
-            f"font-weight: 700; color: #09090b;"
+            f"font-family: '{theme.FONT_BODY}'; font-size: 18px; "
+            f"font-weight: 400; color: {theme.INK};"
         )
         greet_stack.addWidget(salutation)
 
         who = (identity.display_name(self.cfg) or "").split(" ")[0]
         if not who:
             who = "there"
-        name_lbl = QLabel(f"{who},")
+        name_lbl = QLabel(f"{who.upper()},")
         name_lbl.setStyleSheet(
-            f"font-family: '{theme.FONT_HEADING}'; font-size: 44px; "
-            f"font-weight: 800; color: #000000; line-height: 1.1;"
+            f"font-family: '{theme.FONT_DISPLAY}'; font-size: 48px; "
+            f"font-weight: 700; color: {theme.INK};"
         )
         C.track(name_lbl, -0.02)
         greet_stack.addWidget(name_lbl)
@@ -729,18 +729,18 @@ class HomePanel(QWidget):
         sub_lbl = QLabel(i18n.t("Let's turn ideas into outcomes."))
         sub_lbl.setStyleSheet(
             f"font-family: '{theme.FONT_BODY}'; font-size: 18px; "
-            f"font-weight: 600; color: #09090b;"
+            f"font-weight: 400; color: {theme.MUTE};"
         )
         greet_stack.addWidget(sub_lbl)
         greet_row.addLayout(greet_stack, stretch=1)
 
-        motto = QLabel(i18n.t("Less work. More possibilities."))
+        motto = QLabel(i18n.t("Less work. More possibilities.").upper())
         motto.setStyleSheet(
-            f"font-family: '{theme.FONT_BODY}'; font-size: 13.5px; "
-            f"font-weight: 600; color: #09090b; "
-            f"background: rgba(255, 255, 255, 0.85); "
-            f"border: 1px solid rgba(0, 0, 0, 0.12); border-radius: 999px; "
-            f"padding: 6px 14px;"
+            f"font-family: '{theme.FONT_MONO}'; font-size: 11px; "
+            f"font-weight: 500; color: {theme.INK}; "
+            f"background: #ffffff; "
+            f"border: 1px solid {theme.BORDER}; border-radius: 999px; "
+            f"padding: 7px 14px;"
         )
         motto.setAlignment(Qt.AlignCenter)
         greet_row.addWidget(motto, alignment=Qt.AlignRight | Qt.AlignVCenter)

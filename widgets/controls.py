@@ -85,9 +85,47 @@ def track(widget, em: float):
     return widget
 
 
+def has_wallpaper(widget) -> bool:
+    """Whether the person picked a wallpaper (Settings > Appearance). Only then
+    do cards stay frosted glass over it; by default they are flat AlphaKore
+    cards: solid white, one hairline."""
+    central = widget.window().findChild(QWidget, "central")
+    pix = getattr(central, "_bg_orig", None)
+    return bool(pix is not None and not pix.isNull())
+
+
+def paint_flat_card(widget, painter, rect: QRectF, radius: float) -> bool:
+    """Paint the flat card and return True, or return False when a wallpaper is
+    set and the caller should paint its glass instead."""
+    if has_wallpaper(widget):
+        return False
+    painter.setPen(QPen(QColor(theme.HAIRLINE), 1))
+    painter.setBrush(QColor(theme.CARD))
+    painter.drawRoundedRect(rect.adjusted(0.5, 0.5, -0.5, -0.5), radius, radius)
+    return True
+
+
+class _Kicker(QLabel):
+    """Uppercase mono label led by the AlphaKore red square (.kick)."""
+
+    _SQ = 6                     # square edge
+    _GAP = 6                    # square to text
+
+    def __init__(self, text: str, parent=None):
+        super().__init__(text, parent)
+        self.setContentsMargins(self._SQ + self._GAP, 0, 0, 0)
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        p = QPainter(self)
+        p.fillRect(0, (self.height() - self._SQ) // 2, self._SQ, self._SQ,
+                   QColor(theme.BRAND_RED))
+        p.end()
+
+
 def kicker(text: str, muted: bool = False) -> QLabel:
-    """Condensed, tracked, uppercase section label (.kick)."""
-    lbl = QLabel(text.upper())
+    """Mono, tracked, uppercase section label with a red square (.kick)."""
+    lbl = _Kicker(text.upper())
     lbl.setObjectName("kickMuted" if muted else "kick")
     return track(lbl, 0.12)
 
@@ -353,6 +391,12 @@ class Card(QFrame):
 
         r = QRectF(self.rect())
         radius = float(self._radius)
+        if paint_flat_card(self, painter, r, radius):
+            if self._stripe:
+                painter.setPen(Qt.NoPen)
+                painter.setBrush(QColor(theme.INK))
+                painter.drawRect(QRectF(r.left() + radius, r.top(), r.width() - 2 * radius, 3))
+            return
 
         # ── Clip all painting to the rounded rect ──────────────────────────
         clip = QPainterPath()
@@ -1172,6 +1216,11 @@ class PageHeader(QFrame):
         painter.setRenderHint(QPainter.Antialiasing, True)
         painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
         r = QRectF(self.rect())
+
+        if not has_wallpaper(self):
+            painter.setPen(QPen(QColor(theme.HAIRLINE), 1))
+            painter.drawLine(QPointF(r.left(), r.bottom() - 0.5), QPointF(r.right(), r.bottom() - 0.5))
+            return
 
         central = self.window().findChild(QWidget, "central")
         if central and hasattr(central, "get_blurred_pixmap"):

@@ -449,16 +449,16 @@ QToolTip {
 /* LABEL — the uppercase tracked micro-label. Tracking is set on the QFont by
    controls.kicker(); QSS cannot express it. */
 #kick, #colHead {
-    font-family: "Geist";
-    font-size: 12px;
-    font-weight: 600;
+    font-family: "Geist Mono";
+    font-size: 11px;
+    font-weight: 500;
     color: #6b6a65;
 }
 
 #kickMuted {
-    font-family: "Geist";
-    font-size: 12px;
-    font-weight: 600;
+    font-family: "Geist Mono";
+    font-size: 11px;
+    font-weight: 500;
     color: #6b6a65;
 }
 
@@ -1721,36 +1721,37 @@ QSplitter::handle { background: #EFEEEA; }
 
 /* ── chrome ──────────────────────────────────────────────────────────── */
 QStatusBar {
-    background: rgba(15, 17, 23, 0.75);
-    color: #cbd5e1;
-    border-top: 1px solid rgba(255, 255, 255, 0.10);
-    font-size: 13px;
+    background: #111110;
+    color: #EEEDEA;
+    border-top: none;
+    font-family: "Geist Mono";
+    font-size: 11px;
 }
 
 QStatusBar::item { border: none; }
 
 QMenu {
-    background: rgba(18, 20, 26, 0.95);
-    border: 1px solid rgba(255, 255, 255, 0.20);
+    background: #ffffff;
+    border: 1px solid #D8D7D2;
     border-radius: 8px;
     padding: 4px;
-    color: #ffffff;
+    color: #111110;
 }
 
 QMenu::item {
     padding: 7px 20px 7px 12px;
     border-radius: 6px;
-    color: #ffffff;
+    color: #111110;
 }
 
 QMenu::item:selected {
-    background: rgba(255, 255, 255, 0.15);
-    color: #ffffff;
+    background: #EFEEEA;
+    color: #111110;
 }
 
 QMenu::separator {
     height: 1px;
-    background: rgba(255, 255, 255, 0.15);
+    background: #E6E5E1;
     margin: 4px 0;
 }
 

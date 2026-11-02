@@ -751,6 +751,8 @@ class Sidebar(QFrame):
 
         r = QRectF(self.rect())
         radius = 20.0
+        if C.paint_flat_card(self, painter, r, radius):
+            return
 
         clip = QPainterPath()
         clip.addRoundedRect(r, radius, radius)
