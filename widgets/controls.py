@@ -35,7 +35,7 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import (
     QAction, QPainter, QPen, QFont, QFontMetrics, QBrush, QColor, QPainterPath,
-    QLinearGradient, QRadialGradient, QPixmap,
+    QLinearGradient, QRadialGradient, QPixmap, QIcon,
 )
 from PySide6.QtWidgets import (
     QAbstractButton, QButtonGroup, QFrame, QGraphicsDropShadowEffect,
@@ -892,6 +892,30 @@ _VARIANTS = {
 }
 
 
+def brand_dot_icon(size: int = 22, glyph: str = "arrow") -> QIcon:
+    """The AlphaKore primary-button mark: a red dot carrying a pixel arrow
+    (glyph="arrow") or a pixel plus (glyph="plus")."""
+    ratio = 2
+    pm = QPixmap(size * ratio, size * ratio)
+    pm.setDevicePixelRatio(ratio)
+    pm.fill(Qt.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing, True)
+    p.setPen(Qt.NoPen)
+    p.setBrush(QColor(theme.BRAND_RED))
+    p.drawEllipse(QRectF(0, 0, size, size))
+    p.setRenderHint(QPainter.Antialiasing, False)
+    p.setBrush(QColor("#FFFFFF"))
+    u = max(2.0, size / 11)                       # one "pixel" of the arrow
+    cx, cy = size / 2, size / 2
+    cells = (((-1.5, 0), (0, 0), (1.5, 0), (0, -1.5), (0, 1.5)) if glyph == "plus"
+             else ((-2.5, 0), (-1.0, 0), (0.5, 0), (2.0, 0), (0.5, -1.5), (0.5, 1.5)))
+    for dx, dy in cells:
+        p.drawRect(QRectF(cx + dx * u - u / 2, cy + dy * u - u / 2, u, u))
+    p.end()
+    return QIcon(pm)
+
+
 def button(text: str, variant: str = "secondary", icon_name: str = "",
            small: bool = False, on_click=None) -> QPushButton:
     """One button, in one of the four variants.
@@ -924,6 +948,9 @@ def button(text: str, variant: str = "secondary", icon_name: str = "",
             variant, theme.ACCENT_RAMP[700] if variant in ("tertiary", "link")
             else theme.NEUTRAL[800])
         icons.button_icon(btn, icon_name, 15, ink)
+    elif variant == "primary":
+        btn.setIcon(brand_dot_icon(22))
+        btn.setIconSize(QSize(22, 22))
     if on_click is not None:
         btn.clicked.connect(on_click)
     return btn

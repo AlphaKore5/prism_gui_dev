@@ -52,7 +52,7 @@
      6px   R_CHIP     pills, chips, badges, step marks, menu items, indicators
      8px   R_CONTROL  buttons, inputs, rows, small cards — every one of them
     12px   R_CARD     cards, panels, modals, dialogs, tables, group boxes
-   999px   R_PILL     the special case: a true capsule at any height
+   999px   R_PILL     half the control's height: Qt draws a 999px radius as a SQUARE, so give each pill its own
      4px   R_MICRO    NOT a scale step — half the width of a progress bar or a
                       scrollbar handle, i.e. the radius that makes it a capsule
    Adding a value outside this scale is what makes an app stop feeling like one
@@ -391,7 +391,7 @@ QToolTip {
 #railPrimary {
     background: #111110;
     border: 1px solid #111110;
-    border-radius: 8px;
+    border-radius: 24px;
     color: #ffffff;
     font-family: "Geist";
     font-weight: 600;
@@ -583,7 +583,7 @@ QToolTip {
 QPushButton, #secondaryBtn {
     background: #ffffff;
     border: 1px solid #D8D7D2;
-    border-radius: 8px;
+    border-radius: 17px;
     padding: 5px 16px;
     min-height: 28px;
     font-family: "Geist";
@@ -622,7 +622,7 @@ QPushButton:disabled, #secondaryBtn:disabled {
 #primaryBtn, #primary {
     background: #111110;
     border: 1px solid #111110;
-    border-radius: 8px;
+    border-radius: 17px;
     color: #ffffff;
     padding: 6px 20px;
     min-height: 34px;
@@ -663,7 +663,7 @@ QPushButton:disabled, #secondaryBtn:disabled {
 #ghostBtn, #tertiaryBtn {
     background: transparent;
     border: 2px solid transparent;
-    border-radius: 8px;
+    border-radius: 17px;
     color: #2a2a28;
     padding: 5px 8px;
     min-height: 18px;
@@ -828,7 +828,7 @@ QPushButton:disabled, #secondaryBtn:disabled {
 #chipBtn {
     background: #ffffff;
     border: 1px solid #D8D7D2;
-    border-radius: 999px;
+    border-radius: 16px;
     padding: 5px 13px;
     min-height: 18px;
     font-family: "Geist";
@@ -990,7 +990,7 @@ QListWidget:focus {
    Capsule rather than rounded-rect: a search box is the one input that reads
    faster as a pill, and it is always the first thing in a toolbar. */
 #searchField {
-    border-radius: 999px;
+    border-radius: 16px;
     padding: 6px 14px;
     background: #ffffff;
     border: 1px solid #D8D7D2;
@@ -1284,7 +1284,7 @@ QListWidget::item:selected {
 #tagAccent, #tagOutline, #tagNeutral, #tagWarn, #tagErr, #tagOk {
     font-size: 12px;
     padding: 3px 11px;
-    border-radius: 999px;
+    border-radius: 11px;
 }
 
 #tagAccent { background: #F6F5F2; color: #111110; border: 1px solid #E6E5E1; }
@@ -1383,7 +1383,7 @@ QTabBar {
 QTabBar::tab {
     background: transparent;
     border: 2px solid transparent;
-    border-radius: 8px;
+    border-radius: 17px;
     padding: 6px 15px;
     margin: 0 4px 4px 0;
     font-family: "Geist";
@@ -1965,7 +1965,7 @@ QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
 #homeSearchPill {
     background: #ffffff;
     border: 1px solid #E6E5E1;
-    border-radius: 999px;
+    border-radius: 16px;
     padding: 3px 12px;
 }
 
@@ -2010,7 +2010,7 @@ QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
 #promptChipBtn {
     background: #F6F5F2;
     border: 1px solid #E6E5E1;
-    border-radius: 999px;
+    border-radius: 15px;
     padding: 5px 12px;
     font-size: 13px;
     font-weight: 500;
@@ -2025,7 +2025,7 @@ QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
 #promptSendBtn {
     background: #111110;
     border: none;
-    border-radius: 999px;
+    border-radius: 18px;
     min-width: 36px;
     max-width: 36px;
     min-height: 36px;
@@ -2039,7 +2039,7 @@ QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
 #tryChip {
     background: #ffffff;
     border: 1px solid #E6E5E1;
-    border-radius: 999px;
+    border-radius: 14px;
     padding: 4px 12px;
     font-size: 13px;
     color: #2a2a28;
@@ -2060,7 +2060,7 @@ QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
     background: #ffffff;
     color: #111110;
     border: none;
-    border-radius: 999px;
+    border-radius: 18px;
     padding: 7px 16px;
     font-weight: 600;
     font-size: 14px;

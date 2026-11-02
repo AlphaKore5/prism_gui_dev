@@ -827,7 +827,7 @@ class HomePanel(QWidget):
             f"font-family: '{theme.FONT_MONO}'; font-size: 11px; "
             f"font-weight: 500; color: {theme.INK}; "
             f"background: #ffffff; "
-            f"border: 1px solid {theme.BORDER}; border-radius: 999px; "
+            f"border: 1px solid {theme.BORDER}; border-radius: 15px; "
             f"padding: 7px 14px;"
         )
         motto.setAlignment(Qt.AlignCenter)
