@@ -744,3 +744,28 @@ def test_the_demo_keeps_a_draft_apart_from_what_is_live(editor):
     assert got["status"] == "published" and got["unpublished_changes"] is True and "live" not in got
     assert demo_platform.handle("ai/agents/publish", {"agent_id": aid})["version"] == 2
     assert demo_platform.handle("ai/agents/get", {"agent_id": aid})["agent"]["unpublished_changes"] is False
+
+
+def test_try_it_bubbles_are_as_tall_as_their_words_however_tall_the_tab_is():
+    # In a tab taller than its content the spare height went into the chat, so "hey" was drawn as a 280px-tall black pill.
+    from PySide6.QtWidgets import QVBoxLayout, QWidget
+    from addons.whatsapp.agent_train import TrainPanel
+
+    class _Editor:
+        agent = {"status": "published", "published_version": 6}
+        draft = {"settings": {}}
+
+    host = QWidget()
+    QVBoxLayout(host).addWidget(TrainPanel(_Editor()))
+    panel = host.layout().itemAt(0).widget()
+    panel._bubble("customer", "hey")
+    panel._bubble("bot", "Hi there! Welcome to Alpha.Kore. We are excited to help turn your ideas into real solutions.")
+    host.resize(1000, 800)
+    host.show()
+    host.layout().activate()
+    panel.layout().activate()
+    from PySide6.QtWidgets import QLabel
+    bubbles = [l for l in panel.findChildren(QLabel) if l.text() in ("hey",) or l.text().startswith("Hi there")]
+    assert len(bubbles) == 2
+    for lab in bubbles:
+        assert lab.height() <= lab.heightForWidth(lab.width()) + 4, (lab.text(), lab.height())
