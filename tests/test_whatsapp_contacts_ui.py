@@ -727,3 +727,17 @@ def test_a_centred_row_wraps_to_a_second_line_instead_of_overflowing(served):
     wide = row.layout().heightForWidth(1000)
     narrow = row.layout().heightForWidth(220)
     assert narrow > wide
+
+
+def test_every_detail_and_attribute_keeps_room_for_its_value(served):
+    # Letting wrapped labels shrink to the room they are given squeezed the right-hand value of each "Source ... whatsapp" row to nothing.
+    from addons.whatsapp.profile_panel import ProfilePanel
+    panel = ProfilePanel()
+    panel._c = {"id": "k1", "name": "Hitarth", "phone": "919998555392", "source": "whatsapp", "first_msg_tag": "Hello, what are your services?",
+                "email": "h@example.com", "attrs": {"City": "Vadodara"}, "created_at": "2026-11-02T10:00:00Z", "last_seen": "2026-11-03T12:08:00Z"}
+    panel._render()
+    panel.resize(395, 900)
+    panel.show()
+    for word in ("whatsapp", "Hello, what are your services?", "h@example.com", "Vadodara"):
+        label = next(l for l in panel.findChildren(QLabel) if l.text() == word)
+        assert label.isVisible() and label.width() > 40 and label.height() > 10, word

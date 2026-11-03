@@ -259,10 +259,9 @@ class ProfilePanel(QFrame):
                 continue
             line = QHBoxLayout()
             line.addWidget(C.label(k, level="SUPPORT", colour=theme.NEUTRAL[600]))
-            line.addStretch(1)
             val = C.label(str(v), level="SUPPORT", weight=600, wrap=True)
             val.setAlignment(Qt.AlignRight)
-            line.addWidget(val)
+            line.addWidget(val, stretch=1)                      # the value takes the rest of the row, so it can wrap and is never squeezed out
             col.addLayout(line)
         return box
 
@@ -297,10 +296,9 @@ class ProfilePanel(QFrame):
         for k, v in sorted(attrs.items()):
             line = QHBoxLayout()
             line.addWidget(C.label(k, level="SUPPORT", colour=theme.NEUTRAL[600]))
-            line.addStretch(1)
             val = C.label(str(v), level="SUPPORT", weight=600, wrap=True)
             val.setAlignment(Qt.AlignRight)
-            line.addWidget(val)
+            line.addWidget(val, stretch=1)                      # the value takes the rest of the row, so it can wrap and is never squeezed out
             col.addLayout(line)
         return box
 

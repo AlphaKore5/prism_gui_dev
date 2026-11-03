@@ -42,3 +42,38 @@ def test_a_row_discarded_right_after_it_was_added_never_becomes_a_window(discard
     QMetaObject.invokeMethod(row, "_q_showIfNotHidden", Qt.DirectConnection)    # what the event loop delivers next
     assert not row.isVisible()
     host.close()
+
+
+class _WindowWatch:
+    """Records every top-level widget that is shown while it is installed."""
+
+    def __init__(self):
+        from PySide6.QtCore import QEvent, QObject
+
+        outer = self
+
+        class _Filter(QObject):
+            def eventFilter(self, obj, event):
+                if event.type() == QEvent.Show and isinstance(obj, QWidget) and obj.isWindow():
+                    outer.seen.append(type(obj).__name__)
+                return False
+
+        self.seen: list = []
+        self._filter = _Filter()
+
+    def __enter__(self):
+        _app.installEventFilter(self._filter)
+        return self
+
+    def __exit__(self, *_):
+        _app.removeEventFilter(self._filter)
+
+
+def test_building_a_message_bubble_never_shows_a_window():
+    # The bubble's text label was shown before it was placed in the bubble, so each message flashed a small window of its own while a
+    # conversation loaded.
+    from addons.whatsapp.thread import Bubble
+    with _WindowWatch() as watch:
+        for text in ("Hello there", "", "[template] order_ready_test"):
+            Bubble({"direction": "in", "text": text, "created_at": "2026-11-03T12:09:00+0530", "status": "read"}, tail=True)
+    assert watch.seen == []

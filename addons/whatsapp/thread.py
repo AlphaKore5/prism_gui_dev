@@ -303,8 +303,8 @@ class Bubble(QFrame):
         self.body.setWordWrap(True)
         self.body.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self.body.setStyleSheet(f"color: {theme.TEXT}; background: transparent;")
-        self.body.setVisible(bool(text) or self.media_block is None)
         col.addWidget(self.body)
+        self.body.setVisible(bool(text) or self.media_block is None)        # after it has a parent: shown before that, it is a window of its own
         self.meta = _Meta()
         self.meta.clicked.connect(lambda: self.retry.emit(self))
         col.addWidget(self.meta, alignment=Qt.AlignRight)
