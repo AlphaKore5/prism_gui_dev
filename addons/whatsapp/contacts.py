@@ -134,6 +134,7 @@ class ContactsPage(QWidget):
         self.table.setAlternatingRowColors(False)
         self.table.setFrameShape(QFrame.NoFrame)
         self.table.horizontalHeader().setHighlightSections(False)
+        self.table.horizontalHeader().setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)       # the cells are left-aligned; a centred heading sits off its column
         self.table.horizontalHeader().setSectionsClickable(True)
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)

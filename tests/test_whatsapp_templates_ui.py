@@ -607,3 +607,69 @@ def test_the_demo_lint_applies_the_rules_the_service_does():
     assert run("MARKETING", [{"type": "CAROUSEL", "cards": [{"components": []}]}, body]) >= {"bad_card_count"}
     assert run("AUTHENTICATION", [{"type": "BODY", "add_security_recommendation": True}]) == {"auth_needs_otp_button"}
     assert "looks_promotional" in run("UTILITY", [{"type": "BODY", "text": "Hello there, our big sale ends on Friday so do come and see us."}])
+
+
+# ── the name, as Meta takes it ───────────────────────────────────────────────
+
+@pytest.mark.parametrize("typed,cleaned,dropped", [
+    ("Diwali Offer", "diwali_offer", ""),
+    ("team-update 2", "team_update_2", ""),
+    ("sale!", "sale", "!"),
+    ("a" * 600, "a" * 512, ""),
+    ("ok_name", "ok_name", "")])
+def test_clean_name_gives_the_name_meta_accepts_and_reports_what_it_dropped(typed, cleaned, dropped):
+    assert T.clean_name(typed) == (cleaned, dropped)
+
+
+def test_typing_or_pasting_a_name_fixes_it_in_the_field_and_names_what_was_left_out(editor):
+    editor.name_edit.setText("Alphakore Team Update!")
+    assert editor.name_edit.text() == "alphakore_team_update"
+    assert editor.name_note.isVisibleTo(editor) and "!" in editor.name_note.text()
+    editor.name_edit.setText("alphakore_team_update_2")
+    assert not editor.name_note.isVisibleTo(editor)
+    assert editor.data()["name"] == "alphakore_team_update_2"
+
+
+def test_a_resubmitted_name_is_left_exactly_as_it_is(calls, monkeypatch):
+    monkeypatch.setattr(ui, "PlatformWorker", _worker(calls))
+    with mock.patch.object(T, "PlatformWorker", _worker(calls)):
+        ed = T.TemplateEditor(prefill={"name": "Kept_As_Is", "language": "en_US", "category": "UTILITY", "status": "REJECTED",
+                                       "components": [{"type": "BODY", "text": "Hello there, your order is packed and leaves tomorrow."}]},
+                              mode="resubmit")
+        assert ed.name_edit.text() == "Kept_As_Is"
+
+
+def test_the_check_box_asks_for_a_name_instead_of_saying_ready(editor):
+    editor.body_edit.setPlainText("Hello there, your order is packed and leaves our warehouse tomorrow morning.")
+    editor._show_checks([], pending=False)
+    labels = " ".join(l.text() for l in editor.check_box.findChildren(QLabel))
+    assert "name" in labels.lower() and "ready to submit" not in labels
+    editor.name_edit.setText("order_packed")
+    editor._show_checks([], pending=False)
+    assert "ready to submit" in " ".join(l.text() for l in editor.check_box.findChildren(QLabel))
+
+
+def test_a_capped_preview_keeps_every_line_of_a_long_message(editor):
+    # The campaign page puts the preview in a card in a scroll area and caps it at 300px while the column offers more: the layout measured
+    # the message at the column's width, found one line, and cut the last words off the several it really takes.
+    from PySide6.QtWidgets import QFrame, QScrollArea, QVBoxLayout, QWidget
+    scroll = QScrollArea()
+    scroll.setWidgetResizable(True)
+    host = QWidget()
+    hl = QVBoxLayout(host)
+    card = QFrame()
+    cl = QVBoxLayout(card)
+    p = T.TemplatePreview()
+    p.setMaximumWidth(300)
+    cl.addWidget(p)
+    hl.addWidget(card)
+    hl.addStretch(1)
+    scroll.setWidget(host)
+    p.set_content("", "Hello Asha, our Diwali offer on Asha ends on Friday so do reply soon and we will be very glad to hear from you.", "", [], {}, "")
+    scroll.resize(900, 500)
+    scroll.show()
+    for lay in (hl, cl, p.layout(), p.bubble.layout()):
+        lay.activate()
+    assert p.width() <= 300
+    assert p.text.heightForWidth(p.text.width()) > 2 * p.text.fontMetrics().height()
+    assert p.text.height() >= p.text.heightForWidth(p.text.width())

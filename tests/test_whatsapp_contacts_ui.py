@@ -700,3 +700,30 @@ def test_an_agents_rules_can_be_edited_and_saved(served, calls):
     dlg._remove(dlg._editors[1].parentWidget(), dlg._editors[1])
     dlg._save()
     assert len(dlg._editors) == 1 and dlg.result() == 1
+
+
+def test_the_profile_never_slides_sideways_and_its_rows_fit_a_narrow_panel(served, calls):
+    # A row of three pills and a row of four buttons were wider than the panel, so the whole page could be dragged left and the
+    # left edge of every row was cut off. The rows now wrap, and the page is pinned in place.
+    from addons.whatsapp.profile_panel import ProfilePanel
+    panel = ProfilePanel()
+    panel.load("k1", {"id": "k1", "name": "Asha Patel", "phone": "919812300001", "opted_in": True, "window_open": True, "state": "intervened"})
+    panel.resize(290, 760)
+    panel.show()
+    assert panel._host.minimumSizeHint().width() <= 290
+    from PySide6.QtWidgets import QScrollArea
+    bar = panel.findChildren(QScrollArea)[0].horizontalScrollBar()
+    bar.setRange(0, 80)
+    bar.setValue(40)
+    assert bar.value() == 0
+
+
+def test_a_centred_row_wraps_to_a_second_line_instead_of_overflowing(served):
+    from PySide6.QtWidgets import QPushButton, QWidget
+    row = ui.centered_row(*[QPushButton("A button %d" % i) for i in range(4)])
+    host = QWidget()
+    host.resize(300, 300)
+    row.setParent(host)
+    wide = row.layout().heightForWidth(1000)
+    narrow = row.layout().heightForWidth(220)
+    assert narrow > wide

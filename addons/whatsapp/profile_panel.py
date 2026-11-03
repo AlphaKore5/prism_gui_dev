@@ -106,7 +106,7 @@ class ProfilePanel(QFrame):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        ui.no_sideways(scroll)
         scroll.viewport().setAutoFillBackground(False)
         outer.addWidget(scroll)
         self._host = ui.see_through(QWidget())
@@ -195,6 +195,7 @@ class ProfilePanel(QFrame):
         self._col.addWidget(self._journey_block())
         self._col.addWidget(self._consent_block(c))
         self._col.addStretch(1)
+        ui.let_text_wrap(self._host)
 
     def _title(self, text: str) -> QWidget:
         return C.label(text.upper(), level="LABEL", colour=theme.NEUTRAL[500])
@@ -229,36 +230,22 @@ class ProfilePanel(QFrame):
                 line.addWidget(copy)
             line.addStretch(1)
             head.addLayout(line)
-        pills = QHBoxLayout()
-        pills.setSpacing(theme.SPACE_1)
-        pills.addStretch(1)
-        pills.addWidget(C.Pill(i18n.t("Opted out") if c.get("opted_out") else i18n.t("Opted in") if c.get("opted_in") else i18n.t("Not asked yet"),
-                               "warn" if c.get("opted_out") else "ok" if c.get("opted_in") else "quiet"))
+        pills = [C.Pill(i18n.t("Opted out") if c.get("opted_out") else i18n.t("Opted in") if c.get("opted_in") else i18n.t("Not asked yet"),
+                        "warn" if c.get("opted_out") else "ok" if c.get("opted_in") else "quiet")]
         if c.get("blocked"):
-            pills.addWidget(C.Pill(i18n.t("Blocked"), "err"))
-        pills.addWidget(C.Pill(i18n.t("Window open") if c.get("window_open") else i18n.t("Window closed"), "ok" if c.get("window_open") else "quiet"))
+            pills.append(C.Pill(i18n.t("Blocked"), "err"))
+        pills.append(C.Pill(i18n.t("Window open") if c.get("window_open") else i18n.t("Window closed"), "ok" if c.get("window_open") else "quiet"))
         state = {"active": i18n.t("With the bot"), "requesting": i18n.t("Needs a person"), "intervened": i18n.t("With an agent"),
                  "human_takeover": i18n.t("With an agent"), "closed": i18n.t("Resolved")}.get(c.get("state") or "")
         if state:
-            pills.addWidget(C.Pill(state, "info" if c.get("state") == "requesting" else "quiet"))
-        pills.addStretch(1)
-        head.addLayout(pills)
-        actions = QHBoxLayout()
-        actions.setSpacing(theme.SPACE_2)
-        actions.addStretch(1)
-        actions.addWidget(C.button(i18n.t("Edit"), "secondary", small=True, on_click=self._edit))
-        actions.addWidget(C.button(i18n.t("Send a template"), "secondary", small=True, on_click=lambda: self.sendTemplate.emit(dict(self._c or {}))))
-        actions.addStretch(1)
-        head.addLayout(actions)
-        sell = QHBoxLayout()
-        sell.setSpacing(theme.SPACE_2)
-        sell.addStretch(1)
+            pills.append(C.Pill(state, "info" if c.get("state") == "requesting" else "quiet"))
+        head.addWidget(ui.centered_row(*pills))
         self.order_btn = C.button(i18n.t("New order"), "secondary", small=True, on_click=lambda: self.startOrder.emit(dict(self._c or {})))
         self.form_btn = C.button(i18n.t("Send a form…"), "secondary", small=True, on_click=lambda: self.sendForm.emit(dict(self._c or {})))
-        sell.addWidget(self.order_btn)
-        sell.addWidget(self.form_btn)
-        sell.addStretch(1)
-        head.addLayout(sell)
+        head.addWidget(ui.centered_row(
+            C.button(i18n.t("Edit"), "secondary", small=True, on_click=self._edit),
+            C.button(i18n.t("Send a template"), "secondary", small=True, on_click=lambda: self.sendTemplate.emit(dict(self._c or {}))),
+            self.order_btn, self.form_btn, h_space=theme.SPACE_2, v_space=theme.SPACE_2))
         return head
 
     def _facts(self, c: dict) -> QWidget:
@@ -367,7 +354,7 @@ class ProfilePanel(QFrame):
     def _consent_block(self, c: dict) -> QWidget:
         box, col = self._box(i18n.t("Messaging"))
         row = QHBoxLayout()
-        row.addWidget(C.label(i18n.t("Opted out of messages"), level="BODY", weight=600), stretch=1)
+        row.addWidget(C.label(i18n.t("Opted out of messages"), level="BODY", weight=600, wrap=True), stretch=1)
         sw = C.ToggleSwitch()
         sw.setChecked(bool(c.get("opted_out")))
         sw.toggled.connect(self._toggle_opt)
@@ -375,7 +362,7 @@ class ProfilePanel(QFrame):
         col.addLayout(row)
         col.addWidget(C.label(i18n.t("Opted-out contacts are skipped by every campaign and can't be written to first."), level="META", colour=theme.NEUTRAL[600], wrap=True))
         row2 = QHBoxLayout()
-        row2.addWidget(C.label(i18n.t("Blocked"), level="BODY", weight=600), stretch=1)
+        row2.addWidget(C.label(i18n.t("Blocked"), level="BODY", weight=600, wrap=True), stretch=1)
         sw2 = C.ToggleSwitch()
         sw2.setChecked(bool(c.get("blocked")))
         sw2.toggled.connect(self._toggle_block)

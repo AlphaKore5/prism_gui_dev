@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import re
 
-from PySide6.QtCore import QTime, QTimer, Qt
+from PySide6.QtCore import QEvent, QTime, QTimer, Qt
 from PySide6.QtWidgets import (QComboBox, QFrame, QHBoxLayout, QLineEdit, QPlainTextEdit,
                                QScrollArea, QVBoxLayout, QWidget)
 
@@ -34,6 +34,21 @@ LANGUAGES = (("en_US", "English (US)"), ("en_GB", "English (UK)"), ("en", "Engli
 
 QUICK, URL, PHONE, COPY = "QUICK_REPLY", "URL", "PHONE_NUMBER", "COPY_CODE"
 NEW, RESUBMIT, DUPLICATE = "new", "resubmit", "duplicate"
+
+
+NAME_MAX = 512
+_NAME_BAD = re.compile(r"[^a-z0-9_]")
+
+
+def clean_name(text: str) -> tuple:
+    """A template name the way Meta takes it: lowercase letters, numbers and underscores, at most 512.
+
+    Capitals become lowercase and spaces or hyphens become underscores, since that is what the person meant.
+    Anything else is dropped, and the second value says what was, so the form can tell them instead of
+    letting a letter vanish without a word."""
+    lowered = text.lower().replace(" ", "_").replace("-", "_")
+    dropped = "".join(dict.fromkeys(_NAME_BAD.findall(lowered)))
+    return _NAME_BAD.sub("", lowered)[:NAME_MAX], dropped
 
 
 def variables_of(text: str) -> list:
@@ -189,6 +204,8 @@ class TemplatePreview(QFrame):
         self.clock.setAlignment(Qt.AlignRight)
         for w in (self.head, self.text, self.foot, self.clock):
             self.inner.addWidget(w)
+        for w in (self.head, self.text, self.foot):
+            w.installEventFilter(self)
         col.addWidget(self.bubble)
         self.buttons = QVBoxLayout()
         self.buttons.setSpacing(theme.SPACE_1)
@@ -204,6 +221,20 @@ class TemplatePreview(QFrame):
         col.addWidget(self.empty)
         col.addStretch(1)
         self.set_content("", "", "", [], {}, "")
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Resize and obj in (self.head, self.text, self.foot):
+            self._fit_text()                                    # the label has just been given its real width
+        return super().eventFilter(obj, event)
+
+    def _fit_text(self):
+        """Give each wrapped line of text the height its width needs. A page that caps this widget's width still offers it the whole
+        column, so the layout measures the message at the wider width, finds one line, and cuts the last words off the real, narrower one."""
+        for lab in (self.head, self.text, self.foot):
+            if lab.isVisibleTo(self) and lab.width() > 0:
+                need = lab.heightForWidth(lab.width())
+                if need > 0 and lab.minimumHeight() != need:
+                    lab.setMinimumHeight(need)
 
     def set_extra(self, text: str):
         """What stands in for a picture, a video, a document, a location, an offer or cards, so the preview says what will be there."""
@@ -229,6 +260,7 @@ class TemplatePreview(QFrame):
             b.setMinimumHeight(34)
             b.setStyleSheet(b.styleSheet() + f" background: {theme.CARD}; border-radius: {theme.R_CONTROL}px;")
             self.buttons.addWidget(b)
+        self._fit_text()
 
 
 class TemplateEditor(PrismDialog):
@@ -264,6 +296,7 @@ class TemplateEditor(PrismDialog):
         form.setSpacing(theme.SPACE_3)
         scroll.setWidget(host)
         cols.addWidget(scroll, stretch=5)
+        self._scroll = scroll
 
         self.start_from = QComboBox()
         self.start_from.setMinimumHeight(38)
@@ -290,15 +323,19 @@ class TemplateEditor(PrismDialog):
         self.name_edit.setPlaceholderText(i18n.t("e.g. diwali_offer"))
         self.name_edit.setMinimumHeight(38)
         self.name_edit.setAccessibleName(i18n.t("Template name"))
-        self.name_edit.textChanged.connect(self._changed)
-        row.addWidget(self._field(i18n.t("Name"), self.name_edit,
-                                  i18n.t("Lowercase letters, numbers and underscores.")), stretch=3)
+        self.name_edit.textChanged.connect(self._name_edited)
+        self.name_note = C.label("", level="META", colour=theme.WARN_INK, wrap=True)
+        self.name_note.hide()
+        name_field = self._field(i18n.t("Name"), self.name_edit,
+                                 i18n.t("Capitals and spaces are changed for you: Meta takes lowercase letters, numbers and underscores."))
+        name_field.layout().addWidget(self.name_note)
+        row.addWidget(name_field, stretch=3, alignment=Qt.AlignTop)
         self.lang = QComboBox()
         self.lang.setMinimumHeight(38)
         for code, name in LANGUAGES:
             self.lang.addItem(name, code)
         self.lang.currentIndexChanged.connect(self._changed)
-        row.addWidget(self._field(i18n.t("Language"), self.lang), stretch=2)
+        row.addWidget(self._field(i18n.t("Language"), self.lang), stretch=2, alignment=Qt.AlignTop)
         form.addLayout(row)
 
         self.category = QComboBox()
@@ -533,6 +570,20 @@ class TemplateEditor(PrismDialog):
             value.clear()
         self._changed()
 
+    def _name_edited(self, text: str):
+        """Make the name one Meta accepts as it is typed or pasted, and say so if a character had to go."""
+        cleaned, dropped = clean_name(text)
+        if cleaned != text and not self.name_edit.isReadOnly():
+            cursor = self.name_edit.cursorPosition() - (len(text) - len(cleaned))
+            self.name_edit.blockSignals(True)
+            self.name_edit.setText(cleaned)
+            self.name_edit.setCursorPosition(max(0, min(cursor, len(cleaned))))
+            self.name_edit.blockSignals(False)
+        self.name_note.setVisible(bool(dropped))
+        if dropped:
+            self.name_note.setText(i18n.t("Removed {chars} — a name can only use a to z, 0 to 9 and underscores.").format(chars=" ".join(dropped)))
+        self._changed()
+
     def buttons(self) -> list:
         return [(k.currentData(), t.text(), v.text()) for k, t, v in self.button_rows if k.currentData()]
 
@@ -609,13 +660,13 @@ class TemplateEditor(PrismDialog):
     def fill(self, template: dict):
         """Put a template (a library entry, or one on file) into the form."""
         name = template.get("name") or template.get("key") or ""
+        if self.mode == RESUBMIT:
+            self.name_edit.setReadOnly(True)                    # the name on file is Meta's, and Meta replaces the rejected version under it
+            self.lang.setEnabled(False)
         if self.mode != DUPLICATE:
             self.name_edit.setText(name)
         elif name:
             self.name_edit.setText(name + "_copy")
-        if self.mode == RESUBMIT:
-            self.name_edit.setReadOnly(True)
-            self.lang.setEnabled(False)
         i = self.lang.findData(template.get("language"))
         if i >= 0:
             self.lang.setCurrentIndex(i)
@@ -794,6 +845,9 @@ class TemplateEditor(PrismDialog):
         elif warns:
             tone_bg, line = theme.WARN_BG, theme.WARN
             self.check_col.addWidget(C.label(i18n.t("Worth a look"), level="SUPPORT", weight=700, colour=theme.WARN_INK))
+        elif not self.name_edit.text().strip() and (self.body_edit.toPlainText().strip() or self.category.currentData() == "AUTHENTICATION"):
+            tone_bg, line = theme.WARN_BG, theme.WARN
+            self.check_col.addWidget(C.label(i18n.t("Give the template a name to continue."), level="SUPPORT", colour=theme.WARN_INK, wrap=True))
         elif (self.body_edit.toPlainText().strip() or self.category.currentData() == "AUTHENTICATION") and not self._missing_samples():
             tone_bg, line = theme.OK_BG, theme.OK
             self.check_col.addWidget(C.label(i18n.t("Nothing Meta is known to refuse — ready to submit"),
@@ -863,4 +917,6 @@ class TemplateEditor(PrismDialog):
             self._show_checks(issues, pending=False)
         else:
             self._show_checks([{"severity": "error", "message": message}], pending=False)
+        if "name" in " ".join(str(i.get("message", "")) for i in (issues or [{"message": message}])).lower():
+            self._scroll.ensureWidgetVisible(self.name_edit)               # the form may be scrolled past the field Meta is objecting to
         self._update_submit()

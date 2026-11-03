@@ -19,14 +19,14 @@ from __future__ import annotations
 import re
 from datetime import datetime, timedelta
 
-from PySide6.QtCore import QRect, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QRect, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QFontMetrics
 from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QPlainTextEdit,
                                QScrollArea, QSizePolicy, QVBoxLayout, QWidget)
 
 import i18n
 import theme
-from addons.whatsapp import media_lib
+from addons.whatsapp import media_lib, ui
 from addons.whatsapp.chat import clock, day_label, parse_ts
 from dialogs.base import PrismDialog
 from widgets import controls as C
@@ -35,6 +35,7 @@ from widgets import icons
 _MAX_TEXT = 4096                      # the licence server's bound on a reply
 _GROUP_GAP = timedelta(minutes=3)
 _PLACEHOLDER = re.compile(r"^\[(image|video|audio|document|sticker)\]\s*")       # the words stored for a message that is only a file
+_TEMPLATE = re.compile(r"^\[template\]\s*(\S.*)$")                                   # the service stores a sent template as "[template] its_name"
 
 
 def _font(px: int, weight: int = 400) -> QFont:
@@ -262,7 +263,7 @@ class Bubble(QFrame):
         corners = {"tl": radius, "tr": radius, "bl": radius, "br": radius}
         if tail:
             corners["br" if self.outbound else "bl"] = small
-        bg = "rgba(22, 163, 74, 0.17)" if self.outbound else "rgba(255, 255, 255, 0.94)"
+        bg = "rgba(224, 244, 232, 0.97)" if self.outbound else "rgba(255, 255, 255, 0.97)"      # near-solid: the scenery behind must not show through the words
         border = "transparent" if self.outbound else theme.HAIRLINE
         self.setStyleSheet(
             f"#waBubble {{ background: {bg}; border: 1px solid {border};"
@@ -286,7 +287,17 @@ class Bubble(QFrame):
         text = msg.get("text") or ""
         if self.media_block is not None:
             text = _PLACEHOLDER.sub("", text)                    # a bare "[image]" is the file itself, not words
+        template = _TEMPLATE.match(text)
+        if template:                                             # say what it is, and show its name as a name, not as stored text
+            kind = QLabel(i18n.t("Template message").upper())
+            kind.setFont(_font(10, 700))
+            kind.setStyleSheet(f"color: {theme.NEUTRAL[600]}; background: transparent;")
+            col.addWidget(kind)
+            text = template.group(1).strip().replace("_", " ")
+            text = text[:1].upper() + text[1:]
         self.body = QLabel(text)
+        if template:
+            self.body.setToolTip(msg.get("text") or "")
         self.body.setFont(_font(14))
         self.body.setWordWrap(True)
         self.body.setTextInteractionFlags(Qt.TextSelectableByMouse)
@@ -337,7 +348,7 @@ class MessageThread(QScrollArea):
         super().__init__(parent)
         self.setWidgetResizable(True)
         self.setFrameShape(QFrame.NoFrame)
-        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        ui.no_sideways(self)
         self.viewport().setAutoFillBackground(False)
         self._host = QWidget()
         self._host.setStyleSheet("background: transparent;")
@@ -538,7 +549,8 @@ class Composer(QFrame):
     submittedMedia = Signal(dict, str)      # the file from the library, and the words under it
     attachRequested = Signal()
 
-    MIN_H, MAX_H = 44, 136
+    MIN_H, MAX_H = 52, 140
+    PAD = 8                                 # room above and below the words inside the box, so one line sits in the middle
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -571,12 +583,15 @@ class Composer(QFrame):
         self.edit = _Entry()
         self.edit.setFrameShape(QFrame.NoFrame)
         self.edit.setFont(_font(14))
-        self._placeholder = i18n.t("Type a message — Enter to send, Shift+Enter for a new line")
+        self._placeholder = i18n.t("Type a message")
         self.edit.setPlaceholderText(self._placeholder)
+        self.edit.setToolTip(i18n.t("Enter sends the message. Shift+Enter starts a new line."))
+        self.edit.document().setDocumentMargin(self.PAD)
         self.edit.setStyleSheet("background: transparent; border: none;")
-        self.edit.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.edit.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)      # on only once the box is as tall as it gets (see _grow)
         self.edit.submitted.connect(self._submit)
         self.edit.textChanged.connect(self._grow)
+        self.edit.installEventFilter(self)
         row.addWidget(self.edit, stretch=1)
         self.count = QLabel("")
         self.count.setFont(_font(11, 600))
@@ -587,10 +602,26 @@ class Composer(QFrame):
         row.addWidget(self.send_btn, alignment=Qt.AlignBottom)
         self._grow()
 
+    def _wanted_height(self) -> int:
+        """The height the words need at the width the box really has: what is typed, or the placeholder while it is empty, so a long
+        one on a narrow window grows the box to show all of it instead of cutting its second line off."""
+        words = int(self.edit.document().size().height())
+        if not self.edit.toPlainText():
+            width = max(60, self.edit.width() - 2 * self.PAD)       # the box's own width: its viewport is resized after this runs
+            shown = self.edit.placeholderText()
+            lines = QFontMetrics(self.edit.font()).boundingRect(QRect(0, 0, width, 10000), Qt.TextWordWrap, shown).height()
+            words = max(words, lines + 2 * self.PAD)
+        return words
+
+    def eventFilter(self, obj, event):
+        if obj is self.edit and event.type() == QEvent.Resize:
+            self._grow()                                            # the box has just been given its real width
+        return super().eventFilter(obj, event)
+
     def _grow(self):
-        doc = self.edit.document()
-        h = int(doc.size().height()) + 14
-        self.setFixedHeight(max(self.MIN_H + 8, min(self.MAX_H, h + 8)))
+        h = self._wanted_height() + 8                               # + the frame's own top and bottom margin
+        self.setFixedHeight(max(self.MIN_H, min(self.MAX_H, h)))
+        self.edit.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded if h > self.MAX_H else Qt.ScrollBarAlwaysOff)
         n = len(self.edit.toPlainText())
         over = n > _MAX_TEXT
         self.count.setVisible(n > _MAX_TEXT - 300)
