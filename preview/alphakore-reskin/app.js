@@ -639,8 +639,8 @@
                priceMode: "", rates: null, rateName: "", cont: 0, gst: 18, igst: false, made: false, priced: false, verified: false, rev: 1, change: "", hvacRun: false };
     function drawing() { return st.files.filter(function (f) { return /Drawing/.test(f[1]); })[0]; }
     function isPdf() { var f = drawing(); return f && /\.pdf$/i.test(f[0]); }
-    // item 12b / 26: HVAC rules and the HVAC PDF takeoff engage only when the request itself says HVAC
-    function hvac() { return mode === "boq" && /hvac/i.test(ta.value); }
+    // item 26: HVAC rules and the HVAC PDF takeoff engage only when the Industry is HVAC — an explicit choice, never guessed from a file
+    function hvac() { return mode === "boq" && ($("#d-industry").value === "HVAC"); }
     function writer() { return $("#d-writer").value; }
     function unitOf(r) { return r[6] === "cnt" ? "nos" : r[6] === "area" ? "m²" : "m"; }
     function qty(r) { return r[6] === "cnt" ? r[5] : Math.round(r[5] * 10) / 10; }
@@ -686,32 +686,32 @@
     /* ── step 1: what you have ── */
     var ex = $("#w-ex");
     MOCK.examples[mode].forEach(function (t) { var b = document.createElement("button"); b.className = "chip sm"; b.textContent = t; b.onclick = function () { ta.value = t; ta.dispatchEvent(new Event("input")); }; ex.appendChild(b); });
-    function hvacUi() { var on = hvac(); var n = $("#w-hvac"); if (n) n.hidden = !on; var li = $("#w-takeoff-li"); if (li) li.hidden = !on; var tk = $("#d-takeoff"); if (tk) tk.hidden = !on; if (on) $("#d-industry").value = "HVAC"; }
+    function hvacUi() { var on = hvac(); var n = $("#w-hvac"); if (n) n.hidden = !on; var li = $("#w-takeoff-li"); if (li) li.hidden = !on; var tk = $("#d-takeoff"); if (tk) tk.hidden = !on; }
     ta.addEventListener("input", function () { st.dirty = true; hvacUi(); foot(); });
     $(".js-speak", d).onclick = function () { speak(this, ta, mode, function () { hvacUi(); foot(); }); };
-    function addDrawing(f) {
+    function addDrawing(f, quiet) {
       st.files = st.files.filter(function (x) { return !/Drawing/.test(x[1]); }); st.files.push(f); st.dirty = true;
       var h = $("#w-files"); h.innerHTML = "";
       h.appendChild(fileChip(f, function () { st.files = st.files.filter(function (x) { return x !== f; }); $("#w-drop").classList.remove("has"); $(".droptx b", d).textContent = "Add your drawing"; st.dirty = true; foot(); }));
       $("#w-drop").classList.add("has"); $(".droptx b", d).textContent = "Drawing added"; $(".droptx p", d).textContent = f[0] + " — Prism will measure it on this computer.";
       $("#w-choose").innerHTML = pix("pplus") + "Change drawing";
-      foot(); toast("Added " + f[0]);      // no industry guessed from the file name (item 12b)
+      foot(); if (!quiet) toast("Added " + f[0]);      // no industry guessed from the file name (item 12b)
     }
     $("#w-choose").onclick = function () { pickFile(this, "drawing", addDrawing, "Choose your drawing"); };
-    $("#w-drop").addEventListener("click", function (e) { if (e.target === this || e.target.closest(".droptx,.dropic")) $("#w-choose").click(); });
+    $("#w-drop").addEventListener("click", function (e) { if (e.target.closest("button")) return; if (e.target === this || e.target.closest(".droptx,.dropic")) $("#w-choose").click(); });
     // item 9: the sample is a style reference only, kept apart from the drawing; the hint turns into a confirmation
-    $("#w-sample").onclick = function () { pickFile(this, "sample", function (f) { st.sample = f[0]; $("#w-samplename").textContent = "✓ " + f[0] + " — used for the look only; your drawing is not sent with it"; toast("Prism will copy the look of " + f[0]); }, "Your company's " + noun); };
+    $("#w-sample").onclick = function () { pickFile(this, "sample", function (f) { st.sample = f[0]; if (mode === "boq") setTpl(f[0]); showTpl(); toast("Prism will copy the look of " + f[0] + (mode === "boq" ? " — saved for every new BOQ" : "")); }, "Your company's " + noun); };
     $("#w-dwg").onclick = function () { info("My drawing is a .dwg file", "Two clicks in AutoCAD and you're ready", "help", '<div class="doc"><ol class="sum"><li>Open the drawing in AutoCAD.</li><li>Choose <b>File → Save As</b>.</li><li>Pick <b>AutoCAD DXF</b> as the type and save.</li><li>Add that .dxf file here.</li></ol><p class="muted small">Most other CAD programs have the same "Save as DXF" option. Prism measures DXF directly; a .dwg needs an extra converter this computer does not have.</p></div>', "sm"); };
     // item 18: paste or upload measurements — the request still says what the BOQ is for
     $("#d-meas").onclick = function () {
       form("I already have some measurements", "Type or paste them, one per line. Prism uses them exactly as given.", "clip",
         '<textarea class="ta" id="f-meas" rows="7" placeholder="For example:&#10;Duct run, level 3 — 42.5 m&#10;Floor height — 3.2 m&#10;Number of floors — 14"></textarea><div class="row" style="margin-top:.6rem"><button class="chip" id="f-up">' + ic("clip") + 'Upload a file…</button><span class="muted small" id="f-upname"></span></div>',
         "Use these measurements", function (m) { var v = $("#f-meas", m).value.trim(); if (!v) { toast("Paste some measurements, or upload a file, first."); return false; }
-          st.ext = v; st.dirty = true; $("#d-ext").hidden = false; $("#d-extview").textContent = v; $("#d-extmsg").textContent = "Loaded: " + v.split("\n").filter(Boolean).length + " measurements — Prism uses them as given."; foot();
+          st.ext = v; st.dirty = true; $("#w-measname").textContent = "✓ " + v.split("\n").filter(Boolean).length + " measurements added — Prism uses them as given"; $("#d-meas").innerHTML = ic("pencil") + "Change"; $("#d-ext").hidden = false; $("#d-extview").textContent = v; $("#d-extmsg").textContent = "Loaded: " + v.split("\n").filter(Boolean).length + " measurements — Prism uses them as given."; foot();
           toast(ta.value.trim() ? "Measurements added" : "Measurements added — now say in one line what the " + noun + " is for"); if (!ta.value.trim()) ta.focus(); });
       $("#f-up").onclick = function () { pickFile(this, "doc", function (f) { $("#f-upname").textContent = "Loaded: " + f[0]; $("#f-meas").value = "Duct run, level 3 — 42.5 m\nFloor height — 3.2 m\nNumber of floors — 14\nShaft height — 46.0 m"; }, "Text, JSON or CSV"); };
     };
-    $("#d-hist").onclick = function () {
+    if ($("#d-hist")) $("#d-hist").onclick = function () {
       menu(this, MOCK.runs.filter(function (r) { return r.tool === noun; }).concat([{ title: noun === "BOQ" ? "BOQ for CCTV, cabling and fibre — Vraj site" : "BOM for one 36x24 jaw crusher", day: "Last week", when: "" }])
         .map(function (r) { return { label: esc(r.title.slice(0, 54)), hint: r.day + " " + r.when, icon: "clock", on: function () {
           ta.value = r.title; hvacUi(); st.rows = rowsFor(); st.counted = true; st.made = true; st.reached = 3; go(3); toast("Opened the past " + noun); } }; }), "Your past " + noun + "s");
@@ -726,14 +726,14 @@
       if (mode === "boq" && !hvac()) rows.forEach(function (r) { if (r[4] === "M-DUCT-RETURN") r[0] = "ok"; });
       return rows;
     }
-    var REASON_OFF = "The HVAC duct-pairing rule did not run — your request doesn't say HVAC.";
+    var REASON_OFF = "The HVAC duct-pairing rule did not run — your industry isn't HVAC.";
     function step2() {
       var s = $("#w-s2");
       if (!st.counted) {
         st.hvacRun = hvac();
         var src = drawing() ? "Reading " + drawing()[0] : st.ext ? "Reading your measurements" : "Working out the " + what + " from your description";
         s.innerHTML = '<h3 class="wq">Counting…</h3><p class="wsub">' + esc(src) + '. This happens on this computer.</p><div class="out"></div>';
-        stages($(".out", s), drawing() ? ["Opening your drawing", "Counting and measuring every " + (mode === "bom" ? "part" : "item"), st.hvacRun ? "Applying the HVAC drawing rules (your request says HVAC)" : "Checking for anything unusual"] : ["Reading what you wrote", "Listing the " + what + " a job like this needs"], function () {
+        stages($(".out", s), drawing() ? ["Opening your drawing", "Counting and measuring every " + (mode === "bom" ? "part" : "item"), st.hvacRun ? "Applying the HVAC drawing rules (your industry is HVAC)" : "Checking for anything unusual"] : ["Reading what you wrote", "Listing the " + what + " a job like this needs"], function () {
           st.rows = rowsFor(); st.fromText = !drawing() && !st.ext;
           if (st.fromText) st.rows.forEach(function (r) { r[0] = "ok"; });
           st.counted = true; step2(); foot();
@@ -745,11 +745,11 @@
       var card = function (r) { var i = st.rows.indexOf(r), v = show(r), m = r[0] === "bad";
         return '<div class="lookcard' + (m ? " must" : "") + '" data-i="' + i + '"><div class="lc1"><span class="st ' + (m ? "err" : "warn") + '">' + (m ? "You must check" : "Worth a look") + '</span><b>' + esc(r[2]) + '</b><span class="big3 mono">' + v[0] + ' <small>' + v[1] + '</small></span></div>' +
           '<p>' + esc(MOCK.plain[r[4]] || "Prism isn't sure about this one.") + '</p><div class="row"><button class="btn dark sm" data-ok="' + i + '">' + pix("pcheck") + 'Yes, it\'s right</button><button class="btn light plain sm" data-chg="' + i + '">' + ic("pencil") + 'Change the number</button></div></div>'; };
-      s.innerHTML = '<h3 class="wq">' + (st.fromText ? "Here is what a job like this needs" : "Prism found " + st.rows.length + " " + what) + '</h3>' +
+      s.innerHTML = (st.ext === "PDF takeoff" ? '<div class="hvacon">' + ic("check") + 'From your HVAC takeoff — ' + esc(drawing() ? drawing()[0] : "") + '</div>' : "") + '<h3 class="wq">' + (st.fromText ? "Here is what a job like this needs" : "Prism found " + st.rows.length + " " + what) + '</h3>' +
         '<p class="wsub">' + (st.fromText ? "These are estimates from your description — check the numbers, change any that are wrong." :
           (must.length ? '<b class="errc">' + must.length + ' you must check</b>' : "") + (must.length && worth.length ? " · " : "") + (worth.length ? '<b class="warnc">' + worth.length + ' worth a look</b>' : "") + (flagged.length ? ". The rest look right." : "Everything looks right.")) + '</p>' +
-        (mode === "boq" && !st.fromText ? (st.hvacRun ? '<div class="hvacon">' + ic("check") + 'HVAC drawing rules were used — your request says HVAC.</div>' : '<div class="muted small">' + ic("help") + REASON_OFF + ' Add the word HVAC to your request in step 1 if this is an HVAC drawing.</div>') : "") +
-        (isPdf() && st.hvacRun ? '<div class="tipcard">' + ic("help") + '<div><b>This drawing is a PDF</b><p>For duct lengths to come out right, tell Prism the drawing scale.</p></div><button class="btn light plain sm" id="w-scale">Set the scale</button></div>' : "") +
+        (mode === "boq" && !st.fromText ? (st.hvacRun ? '<div class="hvacon">' + ic("check") + 'HVAC drawing rules were used — your industry is HVAC.</div>' : '<div class="muted small">' + ic("help") + REASON_OFF + ' Set Industry to HVAC under "More settings" in step 1 if this is an HVAC drawing.</div>') : "") +
+        (isPdf() && st.hvacRun && st.ext !== "PDF takeoff" ? '<div class="tipcard">' + ic("help") + '<div><b>This drawing is a PDF</b><p>For duct lengths to come out right, tell Prism the drawing scale.</p></div><button class="btn light plain sm" id="w-scale">Set the scale</button></div>' : "") +
         (flagged.length ? '<div class="looklist">' + must.map(card).join("") + worth.map(card).join("") + '</div>' : "") +
         '<div class="goodlist"><div class="goodh">' + ic("check") + '<b>' + (st.fromText ? good.length + " estimated " + what : good.length + ' ' + (good.length === 1 ? "looks" : "look") + ' right') + '</b><span class="sp"></span><label class="muted small">Show lengths in <select class="sel" id="w-unit"><option value="m">metres</option><option value="ft">feet</option></select></label></div>' +
         good.map(function (r) { var i = st.rows.indexOf(r), v = show(r);
@@ -805,11 +805,11 @@
         return;
       }
       if (!st.made) return;
-      s.innerHTML = '<div class="donehd"><span class="donei">' + ic("check") + '</span><div><h3 class="wq">Your ' + noun + ' is ready</h3><p class="wsub">' + st.rows.length + ' ' + what + ' · prices are added in the next step' + (st.verified ? ' · checked against the drawing by AI' : '') + '</p></div></div>' +
+      s.innerHTML = '<div class="donehd"><span class="donei">' + ic("check") + '</span><div><h3 class="wq">Your ' + noun + ' is ready</h3><p class="wsub">' + st.rows.length + ' ' + what + (st.priced ? ' · with prices — change them in step 4' : ' · prices are added in the next step') + (st.verified ? ' · checked against the drawing by AI' : '') + '</p></div></div>' +
         '<div class="filecard">' + ic("sheet") + '<div><b>' + esc(fname(false)) + '</b><small>Saved in Prism Artifacts' + (st.sample ? ' · in the style of ' + esc(st.sample) : '') + '</small></div><span class="sp"></span>' +
           '<button class="btn dark sm" id="w-xls">' + pix("parrow") + 'Open in Excel</button><button class="btn light plain sm" id="d-open">' + ic("ext") + 'Open in browser</button><button class="btn light plain sm" id="w-more" title="Other formats and the folder">' + ic("more") + '</button></div>' +
         (st.change ? '<div class="revnote">' + ic("pencil") + 'Version ' + st.rev + ': ' + esc(st.change) + '</div>' : "") +
-        '<div class="out filled">' + table(false) + '</div>' +
+        '<div class="out filled">' + table(st.priced) + '</div>' +
         '<div class="fu"><div class="label">Want to change something? Just type it</div><div class="line"><input class="field2" id="d-fu-text" placeholder="e.g. split the ductwork floor by floor" aria-label="What should change"><button class="btn dark sm" id="d-fu-send">' + pix("parrow") + 'Change it</button></div>' +
           '<div class="row"><span class="muted small">Ideas:</span>' + ["Split it floor by floor", "Add 5% for wastage", "Group by material"].map(function (x) { return '<button class="chip sm" data-idea="' + x + '">' + x + '</button>'; }).join("") + '</div></div>' +
         (drawing() ? '<div class="tipcard ai">' + ic("eye") + '<div><b>' + (st.verified ? "Checked against the drawing" : "Check it against the drawing?") + '</b><p>' + (st.verified ? "AI read your drawing and checked every line." : "AI reads your drawing and checks every line, then remakes the " + noun + ". Prism asks you first.") + '</p></div>' +
@@ -875,42 +875,393 @@
       var pm = $("#p-more", s); if (pm) pm.onclick = function () { menu(this, ["Word document (.docx)", "PDF", "CSV"].map(function (f) { return { label: "Save as " + f, icon: "file", on: function () { toast("Saved the priced " + noun + " as " + f); } }; }), "More"); };
     }
 
-    /* ── HVAC PDF takeoff (takeoff.py) — offered only when the request says HVAC (item 26) ── */
-    function takeoff() {
-      var tst = { pdf: isPdf() ? drawing()[0] : "", scale: "1 : 100", done: false };
-      var m = form("Measure from a PDF drawing", "Tell Prism the scale, then it measures the ducts — on this computer.", "file",
-        '<div class="fgrid"><label>PDF drawing</label><div class="line"><button class="chip" id="t-pick">' + ic("file") + (tst.pdf ? "Change PDF…" : "Pick a PDF…") + '</button><span class="mono small" id="t-name">' + esc(tst.pdf) + '</span></div>' +
-        '<label>Drawing scale:</label><div class="line"><select class="sel" id="t-scale"><option>1 : 50</option><option selected>1 : 100</option><option>1 : 200</option><option>I don\'t know</option></select><button class="chip" id="t-measure">' + ic("expand") + 'Measure…</button></div>' +
-        '<label>Text</label><label class="lbl-ck"><input type="checkbox" class="ck" id="t-ocr" checked> Read text labels (OCR)</label></div>' +
-        '<p class="muted small" style="margin-top:.5rem">Don\'t know the scale? Press Measure… and click two points you know the real distance between.</p>' +
-        '<div class="row" style="margin-top:.8rem"><button class="btn dark sm" id="t-extract"' + (tst.pdf ? "" : ' disabled title="Pick a PDF first."') + '>' + pix("parrow") + 'Extract</button></div><div id="t-out"></div>', "Use these measurements", function () {
-          if (!tst.done) { toast("Press Extract first"); return false; }
-          st.rows = rowsFor(); st.counted = true; st.fromText = false; st.hvacRun = true; st.made = false; if (st.step === 2) step2(); foot(); toast("Measured from the PDF");
-        }, "mid");
-      $("#t-pick", m).onclick = function () { pickFile(this, "drawing,doc", function (f) { tst.pdf = f[0].replace(/\.\w+$/, ".pdf"); $("#t-name", m).textContent = tst.pdf; setOff($("#t-extract", m), ""); }, "PDF drawing"); };
-      $("#t-scale", m).onchange = function () { tst.scale = this.value; };
-      $("#t-measure", m).onclick = function () {
-        form("Measure a known dimension", "Click two points on the drawing that you know the real distance between, then type it.", "expand",
+    /* the HVAC tender-PDF pipeline has its own window (#hvac); offered only when the request says HVAC (item 26) */
+    function takeoff() { location.hash = "hvac"; }
+    var TPL_HINT = $("#w-samplename") ? $("#w-samplename").textContent : "";
+    function showTpl() { var n = $("#w-samplename"); if (n) n.textContent = st.sample ? "✓ " + st.sample + " — the new " + noun + " will look the same. Only the look is copied." : TPL_HINT;
+      var b = $("#w-sample"); if (b) b.innerHTML = ic(st.sample ? "pencil" : "plus") + (st.sample ? "Change" : "Add"); }
+    st.sample = mode === "boq" ? getTpl() : ""; showTpl();
+    $("#d-industry").value = isHvac() ? "HVAC" : "General"; $("#d-industry").onchange = function () { hvacUi(); foot(); }; hvacUi();
+    /* front-page cards and the HVAC window drive the steps through this */
+    PRISM.boq = {
+      start: function (kind, text) {
+        if (kind === "hvac") { location.hash = "hvac"; return; }
+        location.hash = "make"; go(1);
+        setTimeout(function () {
+          if (kind === "drawing") $("#w-choose").click();
+          if (kind === "fast") { ta.value = text || ""; ta.focus(); foot(); toast("Describe the job in one line — Prism lists the items a job like this needs"); }
+          if (kind === "meas") $("#d-meas").click();
+        }, 90);
+      },
+      fromTakeoff: function (pdf) {
+        location.hash = "make";
+        ta.value = "HVAC ductwork from the tender " + pdf; hvacUi();
+        addDrawing([pdf, "Drawing · tender PDF"]);
+        st.ext = "PDF takeoff"; st.rows = rowsFor(); st.counted = true; st.hvacRun = true; st.fromText = false; st.made = false; st.dirty = false; st.reached = 2;
+        go(2); toast("Measurements from the PDF takeoff are in — check the count");
+      },
+      template: function (name) { st.sample = name; showTpl(); },
+      /* Continue a stopped BOQ, or reopen a finished one to change it (follow-up) */
+      resume: function (job, change) {
+        location.hash = "make";
+        Object.assign(st, { step: 1, reached: 1, files: [], ext: "", rows: null, counted: false, made: false, priced: false, verified: false, rev: job.rev || 1, change: "", priceMode: "", rates: null, dirty: false });
+        $("#w-files").innerHTML = ""; $("#w-drop").classList.remove("has"); $(".droptx b", d).textContent = "Add your drawing";
+        ta.value = job.title; hvacUi();
+        if (job.file) addDrawing(job.file, true);
+        if (job.status === "draft") {
+          var n = job.step || 1;
+          if (n >= 2) { st.rows = rowsFor(); st.counted = true; st.hvacRun = hvac(); }
+          st.reached = n; st.dirty = false; go(n); toast("Carry on from \"" + STEPNAME[n] + "\"");
+        } else {
+          st.rows = rowsFor(); st.counted = true; st.hvacRun = hvac(); st.made = true;
+          if (job.priced) { st.priceMode = "starter"; st.rates = Object.assign({}, MOCK.rates.starter); st.rateName = "Typical prices"; st.priced = true; }
+          st.reached = 4; st.dirty = false; go(3);
+          if (change) setTimeout(function () { var f = $("#d-fu-text"); if (f) { f.focus(); f.closest(".fu").classList.add("glowfu"); } toast("Type what to change — Prism saves it as a new version"); }, 120);
+        }
+      }
+    };
+    /* save my place: closing the steps half-way keeps a draft; a finished BOQ goes on the Continue list */
+    var wasOn = d.classList.contains("on");
+    new MutationObserver(function () {
+      var on = d.classList.contains("on");
+      if (wasOn && !on) {
+        var title = (ta.value.trim() || (drawing() ? drawing()[0] : "")).slice(0, 70);
+        if (st.made) {
+          lsSet(DRAFT_KEY, null);
+          var done = (lsGet(DONE_KEY) || []).filter(function (x) { return x.title !== title; });
+          done.unshift({ title: title, file: drawing() || null, status: "ready", priced: !!st.priced, rev: st.rev, when: "Just now" }); lsSet(DONE_KEY, done.slice(0, 5));
+        } else if (title || st.ext) {
+          lsSet(DRAFT_KEY, { title: title || "BOQ from your measurements", file: drawing() || null, status: "draft", step: st.step, when: "Just now" });
+          toast("Saved your place — continue any time from the BOQ page");
+        }
+        PRISM.boqFrontRender && PRISM.boqFrontRender();
+      }
+      wasOn = on;
+    }).observe(d, { attributes: true, attributeFilter: ["class"] });
+    $$(".js-try").forEach(function (b) { b.addEventListener("click", function () { setTimeout(function () { if (b.dataset.fill) ta.value = b.dataset.fill; hvacUi(); foot(); }, 60); }); });
+    hvacUi(); go(1);
+  }
+
+  /* ═════════════════════════ BOQ front page: one question, three choices ═════════════════════════
+     Below it, only when there is something: "Continue where you left off" (at most 3 rows).
+     Unfinished BOQs show where they stopped → Continue. Finished ones → Change it (follow-up) or Open. */
+  /* ═════════ Industry + formats (Hitarth's item 26: the Industry is an explicit choice, never guessed from a file) ═════════
+     Asked once in plain words and remembered; changeable per job. Only HVAC has special measuring rules today (industries.py);
+     "Other" uses general rules + the customer's own words + their format. A saved format belongs to an industry. */
+  var IND_KEY = "pk-industry", OTHER_KEY = "pk-industry-other", FMT_KEY = "pk-boq-formats2";
+  var INDUSTRIES = [["HVAC", "HVAC", "Ducts and air handling. Prism has its own measuring rules for this."], ["Electrical", "Electrical", "General rules for now."], ["CCTV & fibre", "CCTV & fibre", "General rules for now."],
+                    ["Plumbing", "Plumbing", "General rules for now."], ["Other", "Other", "Tell Prism in a few words what you do."]];
+  function getInd() { try { return localStorage.getItem(IND_KEY) || ""; } catch (e) { return ""; } }
+  function getOther() { try { return localStorage.getItem(OTHER_KEY) || ""; } catch (e) { return ""; } }
+  function setInd(v, other) { try { if (v) localStorage.setItem(IND_KEY, v); else localStorage.removeItem(IND_KEY); if (other != null) localStorage.setItem(OTHER_KEY, other); } catch (e) {} }
+  function indName() { var i = getInd(); return !i ? "Not set" : i === "Other" ? (getOther() || "Other") : i; }
+  function isHvac() { return getInd() === "HVAC"; }
+  function getFmts() { return lsGet(FMT_KEY) || []; }
+  function fmtFor(ind) { return getFmts().filter(function (f) { return f.industry === ind; })[0] || null; }
+  function askIndustry(cb) {
+    var cur = getInd();
+    form("What kind of work does your company do?", "Asked once. Prism uses it to pick the right measuring rules and wording. You can change it any time.", "chip",
+      '<div class="indlist">' + INDUSTRIES.map(function (o) { return '<label class="indopt"><input type="radio" class="rd2" name="ind" value="' + o[0] + '"' + (cur === o[0] ? " checked" : "") + '><span><b>' + o[1] + '</b><small>' + o[2] + '</small></span></label>'; }).join("") + '</div>' +
+      '<input class="field2" id="f-other" placeholder="A few words, e.g. CCTV and fibre for campuses" value="' + esc(getOther()) + '" ' + (cur === "Other" ? "" : "hidden") + ' aria-label="What your company does">', "Save", function (m) {
+        var c = $("input[name=ind]:checked", m); if (!c) { toast("Pick the closest one"); return false; }
+        var other = $("#f-other", m).value.trim(); if (c.value === "Other" && !other) { toast("Write a few words about what you do"); $("#f-other", m).hidden = false; $("#f-other", m).focus(); return false; }
+        setInd(c.value, c.value === "Other" ? other : ""); if (c.value === "Other") toast("Noted — Prism uses general rules for this, and we use your words to decide which industries to add next");
+        cb && cb(); }, "sm");
+    $$("input[name=ind]", $("#formm")).forEach(function (r) { r.onchange = function () { $("#f-other").hidden = r.value !== "Other"; if (r.value === "Other") $("#f-other").focus(); }; });
+  }
+  function ensureInd(cb) { if (getInd()) cb(); else askIndustry(cb); }
+  function addFormat(cb) {
+    pickFile($("#cx-fmt") || document.body, "sample", function (f) {
+      form("Which kind of work is this format for?", esc(f[0]), "sheet", '<div class="fgrid"><label>Industry</label><select class="sel" id="f-find">' + INDUSTRIES.map(function (o) { return '<option value="' + o[0] + '"' + (o[0] === getInd() ? " selected" : "") + '>' + o[1] + '</option>'; }).join("") + '</select></div><p class="muted small">Next time you pick this industry, Prism uses this format by itself. Only the look is copied — never the quantities.</p>',
+        "Save format", function (m) { var ind = $("#f-find", m).value; var l = getFmts().filter(function (x) { return !(x.industry === ind && x.name === f[0]); }); l.unshift({ name: f[0], industry: ind }); lsSet(FMT_KEY, l); toast("Saved — used automatically for " + ind + " BOQs"); cb && cb(f[0]); }, "sm");
+    }, "Your company's BOQ (Excel or Word)");
+  }
+  function ctxChips(host, cur, onChange) {   // the two small chips: Industry ▾ and Format ▾
+    var fm = cur.format;
+    host.innerHTML = '<button class="chip" id="cx-ind" title="Change your industry">' + ic("chip") + 'Industry: <b>' + esc(indName()) + '</b>' + ic("down") + '</button>' +
+      '<button class="chip" id="cx-fmt" title="Your company\'s BOQ format">' + ic("sheet") + 'Format: <b>' + esc(fm || "none") + '</b>' + ic("down") + '</button>';
+    $("#cx-ind", host).onclick = function () { askIndustry(function () { cur.format = (fmtFor(getInd()) || {}).name || ""; onChange(); }); };
+    $("#cx-fmt", host).onclick = function () {
+      var items = getFmts().map(function (f) { return { label: esc(f.name), hint: f.industry, icon: "sheet", check: 1, checked: f.name === cur.format, on: function () { cur.format = f.name; onChange(); toast("Using " + f.name + " — the look only"); } }; });
+      items.push({ sep: 1 }); items.push({ label: "Add a format…", icon: "plus", on: function () { addFormat(function (n) { cur.format = n; onChange(); }); } });
+      if (cur.format) items.push({ label: "Don't use a format", icon: "x", on: function () { cur.format = ""; onChange(); } });
+      menu(this, items, "Your BOQ formats");
+    };
+  }
+
+  var TPL_KEY = "pk-boq-template";
+  function getTpl() { try { return localStorage.getItem(TPL_KEY) || ""; } catch (e) { return ""; } }
+  function setTpl(v) { try { if (v) localStorage.setItem(TPL_KEY, v); else localStorage.removeItem(TPL_KEY); } catch (e) {} }
+  var DRAFT_KEY = "pk-boq-draft", DONE_KEY = "pk-boq-done";
+  function lsGet(k) { try { return JSON.parse(localStorage.getItem(k) || "null"); } catch (e) { return null; } }
+  function lsSet(k, v) { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+  var STEPNAME = ["", "What you have", "Check the count", "Make the BOQ", "Add prices"];
+  function boqJobs() {
+    var jobs = [], dr = lsGet(DRAFT_KEY), done = lsGet(DONE_KEY) || [];
+    if (dr) jobs.push(dr);
+    done.forEach(function (j) { jobs.push(j); });
+    MOCK.boqJobs.forEach(function (j) { if (!jobs.some(function (x) { return x.title === j.title; })) jobs.push(j); });
+    return jobs.slice(0, 3);
+  }
+  function boqFront() {
+    function render() {
+      var jobs = boqJobs(), box = $("#bf-cont"); if (!box) return;
+      box.hidden = !jobs.length;
+      $("#bf-list").innerHTML = jobs.map(function (j, i) {
+        var draft = j.status === "draft";
+        return '<li class="' + (draft ? "draft" : "") + '"><span class="ftile">' + ic(draft ? "clock" : "sheet") + '</span><div class="cx"><b>' + esc(j.title) + '</b><small>' +
+          (draft ? '<span class="st warn">Not finished</span> Stopped at: ' + STEPNAME[j.step || 1] : '<span class="st ok">Ready</span> ' + (j.priced ? "With prices" : "No prices yet") + (j.rev > 1 ? " · version " + j.rev : "")) +
+          ' · ' + esc(j.when) + '</small></div>' +
+          (draft ? '<button class="btn dark sm" data-cont="' + i + '">' + pix("parrow") + 'Continue</button>'
+                 : '<button class="btn light plain sm" data-openjob="' + i + '">' + ic("ext") + 'Open</button><button class="btn dark sm" data-change="' + i + '" title="Change it — say what to change, Prism makes a new version">' + pix("parrow") + 'Change it</button>') +
+          '<button class="iconbtn" data-rmjob="' + i + '" title="Remove from this list (the file stays in Artifacts)">' + ic("x") + '</button></li>';
+      }).join("");
+      $$("[data-cont]").forEach(function (b) { b.onclick = function () { PRISM.boq.resume(jobs[+b.dataset.cont]); }; });
+      $$("[data-change]").forEach(function (b) { b.onclick = function () { PRISM.boq.resume(jobs[+b.dataset.change], true); }; });
+      $$("[data-openjob]").forEach(function (b) { b.onclick = function () { var j = jobs[+b.dataset.openjob]; info(esc(j.title), "Prism Artifacts → BOQ · " + esc(j.when), "sheet", '<div class="out filled">' + outFor("boq") + '</div>', "mid"); }; });
+      $$("[data-rmjob]").forEach(function (b) { b.onclick = function () { var j = jobs[+b.dataset.rmjob];
+        if (j.status === "draft" && lsGet(DRAFT_KEY) && lsGet(DRAFT_KEY).title === j.title) lsSet(DRAFT_KEY, null);
+        else { lsSet(DONE_KEY, (lsGet(DONE_KEY) || []).filter(function (x) { return x.title !== j.title; })); MOCK.boqJobs = MOCK.boqJobs.filter(function (x) { return x !== j; }); }
+        render(); toast("Removed from the list — the file is still in Artifacts"); }; });
+    }
+    $$("[data-start]").forEach(function (c) { c.onclick = function () { PRISM.boq.start(c.dataset.start); }; });
+    PRISM.boqFrontRender = render; render();
+  }
+
+  /* ═════════════════════════ HVAC tender PDF — two easy steps ═════════════════════════
+     Hitarth's flow (hvac_takeoff/, addons/boq/takeoff.py) folded into: 1 Your PDF (+ scale) → 2 Check the ducts.
+     Prism measures straight away with the colours it remembers (item 34); you only answer for the colours
+     it doesn't know. The full colour table + previews (item 33), unclear labels, limits and output files sit behind links. */
+  function hvacPipeline() {
+    var d = $("#hvac"); if (!d) return;
+    var next = $("#h-next"), back = $("#h-back"), H = MOCK.hvac;
+    var hs = { step: 1, reached: 1, pdf: "", scale: "1 : 100", roles: {}, measured: false };
+    function reset() { hs = { step: 1, reached: 1, pdf: "", scale: "1 : 100", roles: {}, measured: false }; H.layers.forEach(function (l) { hs.roles[l[0]] = l[5] || ""; }); }
+    reset();
+    PRISM.hvacSetPdf = function (n) { hs.pdf = n.replace(/\.\w+$/, ".pdf"); hs.measured = false; hs.step = 1; hs.reached = 1; go(1); };
+    var SIMPLE = [["", "Not sure — leave it out"], ["supply", "Supply duct"], ["return", "Return duct"], ["fresh_air", "Fresh air duct"], ["exhaust", "Exhaust duct"], ["diffuser", "Diffuser or grille (count)"], ["ignore", "Not ductwork"]];
+    function label(role) { var r = H.roles.filter(function (x) { return x[0] === role; })[0]; return r ? r[1] : "Not set"; }
+    function has(role) { return Object.keys(hs.roles).some(function (k) { return hs.roles[k] === role; }); }
+    function rows() { return H.summary.filter(function (r) { return r[0] === "Supply" ? has("supply") : r[0] === "Return" ? has("return") : r[0] === "Fresh air" ? has("fresh_air") : false; }); }
+    function runs() { return rows().length * 2 + (has("supply") ? 2 : 0); }
+    function go(n) {
+      hs.step = n; hs.reached = Math.max(hs.reached, n);
+      $$(".wstep", d).forEach(function (s) { s.hidden = +s.dataset.step !== n; });
+      $$(".wsn", d).forEach(function (b) { var k = +b.dataset.go; b.classList.toggle("on", k === n); b.classList.toggle("done", k < hs.reached && k !== n);
+        if (k <= hs.reached) { b.disabled = false; b.removeAttribute("title"); } else { b.disabled = true; b.title = "Finish the step before first"; } });
+      $(".db", d).scrollTop = 0; (n === 1 ? s1 : s2)(); foot();
+    }
+    $$(".wsn", d).forEach(function (b) { b.onclick = function () { if (!b.disabled) go(+b.dataset.go); }; });
+    function foot() {
+      back.hidden = hs.step === 1;
+      if (hs.step === 1) { next.innerHTML = pix("parrow") + "Next: measure the ducts"; setOff(next, hs.pdf ? "" : "Pick your tender PDF first"); }
+      else { next.innerHTML = pix("pcheck") + "Looks right — make the BOQ"; setOff(next, !hs.measured ? "Prism is still measuring" : runs() ? "" : "No ducts measured yet — tell Prism which colour is a duct"); }
+    }
+    next.onclick = function () { if (next.disabled) return; if (hs.step === 1) { hs.measured = false; go(2); } else toBoq(); };
+    back.onclick = function () { go(1); };
+
+    function s1() {
+      var s = $("#h-s1");
+      s.innerHTML = '<h3 class="wq">Add your tender PDF</h3><p class="wsub">Prism measures the ducts off it, on this computer.</p>' +
+        '<div class="drop' + (hs.pdf ? " has" : "") + '" id="h-drop"><span class="dropic">' + ic("file") + '</span><div class="droptx"><b>' + (hs.pdf ? "PDF added" : "Choose the PDF") + '</b><p>' + (hs.pdf ? esc(hs.pdf) : "A PDF made from CAD. A scanned drawing can't be measured.") + '</p></div>' +
+        '<button class="btn dark sm" id="h-pick">' + pix("pplus") + (hs.pdf ? "Change PDF" : "Choose PDF") + '</button></div>' +
+        '<div class="scalerow"><div><b>Drawing scale</b><small>Written in the title block of the drawing, like 1:100.</small></div><select class="sel" id="h-scale"><option>1 : 50</option><option>1 : 100</option><option>1 : 200</option><option>1/8" = 1\'-0"</option><option>1/4" = 1\'-0"</option></select>' +
+        '<button class="link" id="h-measure">Can\'t find it?</button></div>' +
+        '<p class="muted small nodraw">' + ic("help") + 'Have the DWG or DXF of this drawing? Close this and pick "A CAD drawing" — it\'s more exact.</p>';
+      var sel = $("#h-scale"); if (![].some.call(sel.options, function (o) { return o.text === hs.scale; })) sel.insertAdjacentHTML("beforeend", "<option>" + esc(hs.scale) + "</option>"); sel.value = hs.scale;
+      sel.onchange = function () { hs.scale = this.value; hs.measured = false; };
+      $("#h-pick").onclick = function (e) { e.stopPropagation(); pickFile(this, "drawing,doc", function (f) { hs.pdf = f[0].replace(/\.\w+$/, ".pdf"); hs.measured = false; s1(); foot(); }, "Tender PDF"); };
+      $("#h-drop").onclick = function (e) { if (!e.target.closest("button")) $("#h-pick").click(); };
+      $("#h-measure").onclick = function () {
+        form("Find the scale", "Click two points on the drawing you know the real distance between — a door or a grid line — then type that distance.", "expand",
           '<div class="render small2"><svg viewBox="0 0 320 120"><rect x="20" y="20" width="280" height="80" fill="#F6F5F2" stroke="#111110"/><circle cx="40" cy="100" r="5" fill="#C8161D"/><circle cx="280" cy="100" r="5" fill="#C8161D"/><path d="M40 100H280" stroke="#C8161D" stroke-dasharray="4 4"/></svg></div>' +
           '<div class="fgrid"><label>Real distance between the two points:</label><input class="field2" id="t-dist" placeholder="feet, e.g. 6.0"></div>', "Use this scale", function (mm) {
             var v = parseFloat($("#t-dist", mm).value); if (!(v > 0)) { toast("Type the real distance first"); return false; }
-            tst.scale = "1 : " + Math.round(v * 16); $("#t-scale", m).insertAdjacentHTML("beforeend", "<option selected>" + tst.scale + " (measured)</option>"); toast("Scale set: " + tst.scale); }, "sm", "formm2");
-      };
-      $("#t-extract", m).onclick = function () {
-        var b = this; if (b.disabled) return; setOff(b, "Reading…"); var o = $("#t-out", m); o.innerHTML = '<div class="out" style="margin-top:.8rem"></div>';
-        stages($(".out", o), ["Reading the drawing — a large PDF can take a minute…", $("#t-ocr", m).checked ? "Reading text labels (OCR)" : "Skipping text labels", "Finding duct runs and symbols"], function () {
-          tst.done = true; setOff(b, "");
-          o.innerHTML = '<div class="okline">' + ic("check") + '14 duct run(s) measured.</div><button class="warnbar" id="t-map">▸ Layer mapping (' + MOCK.takeoff.layers.length + ' found)</button><ul class="maplist" id="t-maplist" hidden>' +
-            MOCK.takeoff.layers.map(function (l) { return '<li><b>' + l[0] + '</b><span class="tag">' + l[1] + '</span><span class="mono small">' + l[2] + ' found</span><button class="chip sm" data-prev="' + l[0] + '">Preview this layer on the drawing</button></li>'; }).join("") + '</ul>' +
-            '<button class="warnbar" id="t-w">⚠ ' + MOCK.takeoff.warnings.length + ' warning(s) from the extraction ▾</button><ul class="warnlist" id="t-wl" hidden>' + MOCK.takeoff.warnings.map(function (w) { return "<li>" + esc(w) + "</li>"; }).join("") + '</ul>';
-          $("#t-map", m).onclick = function () { var l = $("#t-maplist", m); l.hidden = !l.hidden; this.textContent = (l.hidden ? "▸" : "▾") + " Layer mapping (" + MOCK.takeoff.layers.length + " found)"; };
-          $("#t-w", m).onclick = function () { var l = $("#t-wl", m); l.hidden = !l.hidden; };
-          $$("[data-prev]", m).forEach(function (pb) { pb.onclick = function () { info("Layer preview — " + pb.dataset.prev, tst.pdf, "eye", '<div class="render big">' + ISO + '<span class="cap">' + esc(pb.dataset.prev) + ' highlighted in red</span></div>', "sm"); }; });
-        }, 600);
+            hs.scale = "1 : " + Math.round(v * 16) + " (measured)"; hs.measured = false; s1(); toast("Scale set: " + hs.scale); }, "sm", "formm2");
       };
     }
-    $$(".js-try").forEach(function (b) { b.addEventListener("click", function () { setTimeout(function () { if (b.dataset.fill) ta.value = b.dataset.fill; hvacUi(); foot(); }, 60); }); });
-    hvacUi(); go(1);
+    function measure(lines, then) { var s = $("#h-s2"); s.innerHTML = '<h3 class="wq">Measuring the ducts…</h3><p class="wsub">' + esc(hs.pdf) + ' · scale ' + esc(hs.scale) + '</p><div class="out"></div>'; foot();
+      stages($(".out", s), lines, function () { hs.measured = true; then && then(); s2(); foot(); }, 550); }
+    function overlay() {
+      return '<svg viewBox="0 0 520 240"><rect x="4" y="4" width="512" height="232" fill="#FBFAF8" stroke="#D8D7D2"/><g stroke="#E2E1DC" fill="none"><path d="M4 70h512M4 150h512M120 4v232M260 4v232M400 4v232"/></g>' +
+        '<g stroke-width="7" fill="none" stroke-linecap="round">' + (has("supply") ? '<path d="M40 50h220" stroke="#1F8A5B"/><path d="M260 50v100h200" stroke="#1F8A5B"/><path d="M300 200h160" stroke="#D9502E"/>' : "") +
+        (has("return") ? '<path d="M120 50v150" stroke="#2F6FB5"/><path d="M60 120h50" stroke="#E5953A"/>' : "") + '</g>' +
+        '<g fill="#111110" font-family="Geist Mono" font-size="11">' + (has("supply") ? '<text x="150" y="42">600×300</text><text x="270" y="105">450×250</text><text x="350" y="193">? × ?</text>' : "") + (has("return") ? '<text x="127" y="135">350×250</text>' : "") + '</g></svg>';
+    }
+    function s2() {
+      if (!hs.measured) { measure(["Opening " + hs.pdf, "Using the colours Prism remembers from your last tender", "Measuring the ducts and reading the size labels"]); return; }
+      var s = $("#h-s2"), unk = H.layers.filter(function (l) { return !l[5]; }), open = unk.filter(function (l) { return !hs.roles[l[0]]; }).length;
+      // contextual version of Hitarth's tip: a colour's line set but its poly not
+      var hint = H.layers.filter(function (l) { if (l[2] !== "line" || !/supply|return|fresh|exhaust/.test(hs.roles[l[0]] || "")) return false;
+        var poly = H.layers.filter(function (x) { return x[1] === l[1] && x[2] === "poly"; })[0]; return poly && !hs.roles[poly[0]]; })[0];
+      s.innerHTML = '<h3 class="wq">' + (runs() ? "Prism measured " + runs() + " duct runs" : "No ducts measured yet") + '</h3>' +
+        '<p class="wsub">Here they are, drawn over your PDF. <span class="lg g"></span>size read <span class="lg r"></span>size unknown</p>' +
+        '<div class="overlay">' + overlay() + '</div>' +
+        (unk.length ? '<div class="unk"><div class="unkh"><b>' + (open ? "Prism doesn't know " + open + (open === 1 ? " colour" : " colours") + " yet" : "All colours set") + '</b><small>What is each one? If you\'re not sure, leave it out.</small></div>' +
+          unk.map(function (l) { return '<div class="unkrow"><span class="swatch" style="background:' + l[1] + '"></span><span class="ux">' + (l[2] === "rect" ? "Small boxes" : "Lines") + ' in this colour<small>' + l[3].toLocaleString("en-IN") + ' pieces</small></span>' +
+            '<button class="iconbtn" data-prev="' + l[0] + '" title="See where this colour is on the drawing">' + ic("eye") + '</button><select class="sel" data-k="' + l[0] + '" aria-label="What this colour is">' +
+            SIMPLE.map(function (o) { return '<option value="' + o[0] + '"' + (hs.roles[l[0]] === o[0] ? " selected" : "") + '>' + o[1] + '</option>'; }).join("") + '</select></div>'; }).join("") +
+          (hint ? '<p class="warnc small">Set the ' + hint[1] + ' <b>poly</b> too — a duct is often drawn twice, as a line and a poly.</p>' : "") + '</div>' : "") +
+        '<div class="smalllinks"><button class="link" id="h-all">' + ic("list") + 'All colours</button><button class="link" id="h-unread">' + ic("help") + H.unread.length + ' size labels unclear</button>' +
+        '<button class="link" id="h-files">' + ic("folder") + 'Files saved next to your PDF</button><button class="link" id="h-limits">' + ic("help") + 'What it can\'t measure</button></div>';
+      $$("select[data-k]", s).forEach(function (x) { x.onchange = function () { hs.roles[x.dataset.k] = x.value;
+        measure(["Measuring again with " + (x.value ? label(x.value).toLowerCase() : "that colour left out")], function () { toast(runs() + " duct runs now"); }); }; });
+      $$("[data-prev]", s).forEach(function (b) { b.onclick = function () { preview(b.dataset.prev); }; });
+      $("#h-all").onclick = allColours;
+      $("#h-unread").onclick = function () { info("Size labels Prism couldn't read for sure", "These runs are measured by width only — check them in the BOQ", "help", '<div class="goodlist">' + H.unread.map(function (u) { return '<div class="goodrow"><span class="mono">' + esc(u[0]) + '</span><span class="muted small">' + u[1] + ' · ' + Math.round(u[2] * 100) + '% sure</span></div>'; }).join("") + '</div>', "sm"); };
+      $("#h-files").onclick = function () { var base = hs.pdf.replace(/\.pdf$/i, ""); menu(this, H.outputs.map(function (o) { return { label: esc(base + o[0]), hint: o[1], icon: "file", on: function () { toast("Opened " + base + o[0]); } }; }), "Saved next to your PDF"); };
+      $("#h-limits").onclick = function () { info("What this can't measure yet", "So you know what to add by hand", "help", '<ul class="sum">' + H.limits.map(function (x) { return "<li>" + esc(x) + "</li>"; }).join("") + '</ul>', "sm"); };
+    }
+    function preview(k) { var l = H.layers.filter(function (x) { return x[0] === k; })[0];
+      info("Where this colour is", "Shown in red on the faded drawing", "eye", '<div class="render big"><svg viewBox="0 0 320 200"><rect x="10" y="10" width="300" height="180" fill="#F6F5F2" stroke="#D8D7D2"/>' +
+        '<g stroke="#CBCAC4" fill="none"><path d="M30 40h260M30 100h260M30 160h260M80 20v170M160 20v170M240 20v170"/></g><g stroke="#C8161D" stroke-width="2.4" fill="none">' + (l[2] === "rect" ? '<rect x="60" y="50" width="12" height="12"/><rect x="140" y="50" width="12" height="12"/><rect x="220" y="110" width="12" height="12"/><rect x="100" y="140" width="12" height="12"/>' : '<path d="M30 70h200v60h60M120 70v100"/>') + '</g></svg>' +
+        '<span class="cap">' + (l[2] === "rect" ? "Repeating small boxes — usually grilles or diffusers" : "Long runs — usually ductwork") + '</span></div>', "sm"); }
+    function allColours() {   // the full Layer-mapping table, for experts (item 33/34)
+      var m = form("All colours", "Every colour on the drawing. Prism remembers your choices for the next tender.", "list",
+        '<p class="muted small">Tip: set both the <b>line</b> and <b>poly</b> of a duct colour. Leave <b>rect</b> as Not ductwork.</p><div class="laylist">' + H.layers.map(function (l) {
+          return '<div class="layrow"><span class="swatch" style="background:' + l[1] + '"></span><div class="lt"><b class="mono">' + l[1] + ' · ' + l[2] + '</b><small>' + l[3].toLocaleString("en-IN") + ' pieces' + (l[5] ? ' · <span class="remb">remembered</span>' : '') + '</small></div>' +
+            '<select class="sel" data-ak="' + l[0] + '">' + H.roles.map(function (r) { return '<option value="' + r[0] + '"' + ((hs.roles[l[0]] || "ignore") === r[0] ? " selected" : "") + '>' + r[1] + '</option>'; }).join("") + '</select>' +
+            '<button class="iconbtn" data-aprev="' + l[0] + '" title="See where this colour is">' + ic("eye") + '</button></div>'; }).join("") + '</div>', "Measure again", function (mm) {
+          $$("select[data-ak]", mm).forEach(function (x) { hs.roles[x.dataset.ak] = x.value; });
+          measure(["Measuring again with your colours"], function () { toast(runs() + " duct runs now"); }); }, "mid");
+      $$("[data-aprev]", m).forEach(function (b) { b.onclick = function () { preview(b.dataset.aprev); }; });
+    }
+    function toBoq() {
+      H.layers.forEach(function (l) { if (hs.roles[l[0]]) l[5] = hs.roles[l[0]]; });   // remembered for the next tender (item 34)
+      var pdf = hs.pdf; hideModal(d); reset();
+      setTimeout(function () { PRISM.boq.fromTakeoff(pdf); toast("Prism will remember these colours next time"); }, 60);
+    }
+    document.addEventListener("route", function (e) { if (e.detail === "hvac") go(hs.pdf ? hs.step : 1); });
+    s1(); foot();
+  }
+
+  /* ═════════════════════════ BOQ, drop-first ═════════════════════════
+     No questions up front. Drop a drawing (or describe the job) → Prism counts it → a live, editable table.
+     Only doubtful items are pinned on top ("N left to check"). Prices are a column. Changes are one box at the bottom.
+     Hitarth's rules still hold: HVAC only when the request says so or the person says so (12b/26), prices after the BOQ exists (10),
+     consent before the drawing leaves the computer (32), a change is a new version (4), red = must check / yellow = worth a look (13). */
+  function boqDrop() {
+    var land = $("#bd-land"), work = $("#bd-work"), busy = $("#bd-busy"), tx = $("#bd-text"), mk = $("#bd-make"), st;
+    function fresh() { st = { file: null, text: "", rows: null, fromText: false, hvac: false, rates: null, rateName: "", priceMode: "", gst: 18, rev: 1, change: "", verified: false, writer: "Prism Agent Claude", research: "No research", checked: {}, format: (fmtFor(getInd()) || {}).name || "" }; }
+    fresh();
+    var q = function (r) { return r[6] === "cnt" ? r[5] : Math.round(r[5] * 10) / 10; };
+    var un = function (r) { return r[6] === "cnt" ? "nos" : r[6] === "area" ? "m²" : "m"; };
+    function totals() { var sub = 0; st.rows.forEach(function (r) { var rt = st.rates && st.rates[r[2]]; if (rt) sub += rt * q(r); }); var g = sub * st.gst / 100; return { sub: sub, gst: g, total: sub + g }; }
+    function name() { return (st.text || (st.file ? st.file[0].replace(/\.\w+$/, "") : "new")).slice(0, 44); }
+    function fname() { return "BOQ — " + name() + (st.rev > 1 ? " v" + st.rev : "") + (st.rates ? " (priced)" : "") + ".xlsx"; }
+    function rows0() { var rows = MOCK.measured.boq.map(function (r) { return r.slice(); });
+      if (!st.hvac) rows.forEach(function (r) { if (r[4] === "M-DUCT-RETURN") r[0] = "ok"; });     // duct-pairing rule only runs for HVAC (12b)
+      if (st.fromText) rows.forEach(function (r) { r[0] = "ok"; });
+      return rows; }
+    function saveJob() { var done = (lsGet(DONE_KEY) || []).filter(function (x) { return x.title !== name(); }); done.unshift({ title: name(), file: st.file, status: "ready", priced: !!st.rates, rev: st.rev, when: "Just now" }); lsSet(DONE_KEY, done.slice(0, 5)); }
+
+    /* ── landing ── */
+    function upd() { setOff(mk, tx.value.trim() ? "" : "Describe the job first — or drop a drawing above"); }
+    function ctx() { ctxChips($("#bd-ctx"), st, function () { ctx(); }); }
+    ctx();
+    tx.addEventListener("input", upd); upd();
+    $(".js-speak", land).onclick = function () { speak(this, tx, "boq", upd); };
+    mk.onclick = function () { if (!mk.disabled) ensureInd(function () { ctx(); begin(null, tx.value.trim()); }); };
+    $("#bd-pick").onclick = function (e) { e.stopPropagation(); pickFile(this, "drawing,doc", take, "Choose your drawing"); };
+    var dz = $("#bd-drop");
+    dz.onclick = function (e) { if (!e.target.closest("button")) $("#bd-pick").click(); };
+    dz.onkeydown = function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); $("#bd-pick").click(); } };
+    ["dragenter", "dragover"].forEach(function (ev) { dz.addEventListener(ev, function (e) { e.preventDefault(); dz.classList.add("over"); }); });
+    ["dragleave", "drop"].forEach(function (ev) { dz.addEventListener(ev, function (e) { e.preventDefault(); dz.classList.remove("over"); }); });
+    dz.addEventListener("drop", function (e) { var f = e.dataTransfer && e.dataTransfer.files[0]; if (f) take([f.name, "Drawing · " + Math.max(1, Math.round(f.size / 1024)) + " KB"]); });
+    $("#bd-sample").onclick = function () { tx.value = "HVAC ductwork for Sargam Tower B"; upd(); take(["Sargam-Tower-B-HVAC.dxf", "Drawing · 2.4 MB"]); };
+    function take(f) {
+      ensureInd(function () {
+        ctx();
+        // a PDF goes to the HVAC window only when the Industry is HVAC; otherwise it is a normal drawing (item 26 — never guessed)
+        if (/\.pdf$/i.test(f[0]) && isHvac()) { PRISM.hvacSetPdf(f[0]); location.hash = "hvac"; return; }
+        begin(f, tx.value.trim());
+      });
+    }
+    function begin(f, text) {
+      fresh(); st.file = f; st.text = text; st.fromText = !f; st.hvac = isHvac();
+      land.hidden = true; busy.hidden = false;
+      busy.innerHTML = '<div class="bdwrap"><h2>' + (f ? "Counting…" : "Working out the items…") + '</h2><p class="muted" style="text-align:center">' + esc(f ? f[0] + " — measured on this computer." : text) + '</p><div class="out"></div></div>';
+      stages($(".out", busy), f ? ["Opening your drawing", "Counting and measuring every item", st.hvac ? "Applying the HVAC rules (your industry is HVAC)" : "Checking for anything unusual"] : ["Reading what you wrote", "Listing the items a job like this needs"],
+        function () { st.rows = rows0(); show(); toast(f ? "Counted " + st.rows.length + " items on this computer" : "Here's what a job like this needs — check the numbers"); }, 600);
+    }
+    function show() { busy.hidden = true; land.hidden = true; work.hidden = false; saveJob(); render(); }
+    function home() { fresh(); work.hidden = true; busy.hidden = true; land.hidden = false; tx.value = ""; upd(); ctx(); PRISM.boqFrontRender && PRISM.boqFrontRender(); }
+
+    /* ── the live table ── */
+    function render() {
+      var rows = st.rows, t = totals(), n = 0, sec = "";
+      var flagged = rows.filter(function (r) { return r[0] === "warn" || r[0] === "bad"; });
+      var open = flagged.filter(function (r) { return !st.checked[r[4]]; });
+      var card = function (r) { var i = rows.indexOf(r), must = r[0] === "bad";
+        return '<div class="lookcard' + (must ? " must" : "") + '"><div class="lc1"><span class="st ' + (must ? "err" : "warn") + '">' + (must ? "You must check" : "Worth a look") + '</span><b>' + esc(r[2]) + '</b><span class="big3 mono">' + q(r) + ' <small>' + un(r) + '</small></span></div><p>' + esc(MOCK.plain[r[4]] || "Prism isn't sure about this one.") + '</p>' +
+          '<div class="row"><button class="btn dark sm" data-ok="' + i + '">' + pix("pcheck") + 'Yes, it\'s right</button><button class="btn light plain sm" data-chg="' + i + '">' + ic("pencil") + 'Change the number</button></div></div>'; };
+      var body = rows.map(function (r, i) { var h = ""; if (r[1] !== sec) { sec = r[1]; h = '<tr class="grp"><td></td><td colspan="5">' + esc(sec) + '</td></tr>'; } n++;
+        var rt = st.rates && st.rates[r[2]], fl = (r[0] === "warn" || r[0] === "bad") && !st.checked[r[4]] ? ' <span class="st ' + (r[0] === "bad" ? "err" : "warn") + '">' + (r[0] === "bad" ? "Check" : "Look") + '</span>' : "";
+        return h + '<tr><td class="idx">' + n + '</td><td>' + esc(r[2]) + fl + '</td><td class="n"><button class="cellbtn" data-chg="' + i + '" title="Change this number">' + q(r) + '</button></td><td class="u">' + un(r) + '</td>' +
+          '<td class="n"><input class="cell n rate" data-k="' + esc(r[2]) + '" value="' + (rt || "") + '" placeholder="add price" aria-label="Price for ' + esc(r[2]) + '"></td><td class="n">' + (rt ? money(rt * q(r)) : '<span class="muted">—</span>') + '</td></tr>'; }).join("");
+      work.innerHTML = '<div class="bdwork">' +
+        '<div class="wkhead"><div><span class="muted small">' + esc(st.file ? st.file[0] : "From your description") + (st.rev > 1 ? " · version " + st.rev : "") + '</span><h2>BOQ — ' + esc(name()) + '</h2></div><span class="sp"></span>' +
+          '<button class="chip" id="wk-new">' + ic("plus") + 'New BOQ</button><button class="btn dark sm" id="wk-xls">' + pix("parrow") + 'Open in Excel</button><button class="iconbtn" id="wk-more" title="Other formats and the folder">' + ic("more") + '</button></div>' +
+        '<div class="wkstrip">' + (st.fromText ? '<span class="st warn">Estimated</span><span>From your description — check the numbers.</span>' : '<span class="st ok">Counted here</span><span>Prism counted ' + rows.length + ' items on this computer.</span>') +
+          (st.hvac ? '<span class="hvtag">' + ic("check") + 'HVAC rules on</span>' : "") + '<span class="sp"></span><span class="ctxrow" id="wk-ctx"></span></div>' +
+        (!st.hvac && getInd() ? '<p class="muted small nodraw">' + ic("help") + 'Prism has no special measuring rules for ' + esc(indName()) + ' yet — it uses general rules' + (st.format ? ' and the look of ' + esc(st.format) : '') + '.</p>' : "") +
+        (open.length ? '<div class="pinned"><div class="pinh"><span class="pcount">' + open.length + '</span><b>left to check</b><small>Everything else looks right.</small></div>' + open.map(card).join("") + '</div>'
+                     : flagged.length ? '<div class="hvacon">' + ic("check") + 'All checked — nothing left for you to look at.</div>' : "") +
+        '<div class="pricebar"><b>Prices</b><button class="chip' + (st.priceMode === "mine" ? " on" : "") + '" id="pr-mine">' + ic("sheet") + 'My price list</button><button class="chip' + (st.priceMode === "typ" ? " on" : "") + '" id="pr-typ">' + ic("spark") + 'Typical prices</button>' + (st.rates ? '<button class="chip" id="pr-none">' + ic("x") + 'Clear prices</button>' : "") +
+          '<span class="muted small">' + (st.rates ? "✓ " + esc(st.rateName) + " — click any price to change it" : "Optional. Or type a price straight into the table.") + '</span></div>' +
+        '<div class="out filled"><div class="tscroll"><table class="tbl"><thead><tr><th class="idx">#</th><th>Item</th><th class="n">Qty</th><th>Unit</th><th class="n">Price (₹)</th><th class="n">Amount (₹)</th></tr></thead><tbody>' + body + '</tbody></table></div></div>' +
+        (st.rates ? '<div class="bigtotal"><span>Total, including <select class="sel dk" id="pr-gst"><option value="18">18% GST</option><option value="12">12% GST</option><option value="0">no GST</option></select></span><b class="mono">' + money(t.total) + '</b></div>' : "") +
+        (st.change ? '<div class="revnote">' + ic("pencil") + 'Version ' + st.rev + ': ' + esc(st.change) + '</div>' : "") +
+        '<div class="fu" id="wk-fubox"><div class="label">Want to change something? Just type it</div><div class="line"><input class="field2" id="wk-fu" placeholder="e.g. split the ductwork floor by floor" aria-label="What should change"><button class="btn dark sm" id="wk-send">' + pix("parrow") + 'Change it</button></div>' +
+          '<div class="row"><span class="muted small">Ideas:</span>' + ["Split it floor by floor", "Add 5% for wastage", "Group by material"].map(function (x) { return '<button class="chip sm" data-idea="' + x + '">' + x + '</button>'; }).join("") + '</div></div>' +
+        (st.file ? '<div class="tipcard ai">' + ic("eye") + '<div><b>' + (st.verified ? "Checked against the drawing" : "Want AI to double-check it?") + '</b><p>' + (st.verified ? "AI read your drawing and checked every line." : "AI reads your drawing and checks every line. Prism asks you first — the drawing leaves this computer only if you say yes.") + '</p></div><button class="btn light plain sm" id="wk-ver">' + (st.verified ? "Check again" : "Double-check my BOQ") + '</button></div>' : "") +
+        '<details class="more"><summary>' + ic("right") + 'More settings — most people skip this</summary><div class="meta"><span class="pair">Write with <select class="sel" id="wk-writer">' + ["Prism Agent Claude", "Prism Agent Deep", "Claude", "ChatGPT", "Gemini"].map(function (w) { return "<option" + (w === st.writer ? " selected" : "") + ">" + w + "</option>"; }).join("") + '</select></span>' +
+          '<span class="pair">Research with <select class="sel" id="wk-research">' + ["No research", "Perplexity", "ChatGPT", "Claude"].map(function (w) { return "<option" + (w === st.research ? " selected" : "") + ">" + w + "</option>"; }).join("") + '</select></span></div>' +
+          '<div class="profile"><div class="label">What Prism tells the writer</div><ul><li><b>Industry</b>' + esc(indName()) + '</li><li><b>Rules</b>' + (st.hvac ? 'HVAC measuring and write-up rules' : 'General rules') + '</li><li><b>Format</b>' + (st.format ? 'Copy the look of ' + esc(st.format) + ' (never its numbers)' : 'None — Prism\'s own layout') + '</li><li><b>Drawing</b>' + (st.file ? 'Stays on this computer unless you say yes' : 'None') + '</li></ul></div></details></div>';
+      ctxChips($("#wk-ctx"), st, function () { st.hvac = isHvac(); st.rows = rows0(); st.checked = {}; render(); });
+      wire();
+    }
+    function wire() {
+      var rows = st.rows;
+      $("#wk-new").onclick = function () { home(); };
+      $("#wk-xls").onclick = function () { toast("Opened " + fname() + " in Excel"); };
+      $("#wk-more").onclick = function () { menu(this, [["Word document (.docx)", "file"], ["PDF", "file"], ["CSV", "list"]].map(function (f) { return { label: "Save as " + f[0], icon: f[1], on: function () { toast("Saved as " + f[0] + " in Prism Artifacts"); } }; }).concat([{ sep: 1 }, { label: "Show in folder", icon: "folder", on: function () { toast("Opened Prism Artifacts in your file manager"); } }]), "More"); };
+      $$("[data-ok]", work).forEach(function (b) { b.onclick = function () { st.checked[rows[+b.dataset.ok][4]] = true; render(); toast("Thanks — marked as checked by you"); }; });
+      $$("[data-chg]", work).forEach(function (b) { b.onclick = function () { var r = rows[+b.dataset.chg];
+        form("Change the number", esc(r[2]), "pencil", '<div class="fgrid"><label>The right number</label><div class="line"><input class="field2 mono" id="f-num" value="' + q(r) + '" inputmode="decimal"><span class="muted">' + un(r) + '</span></div></div>', "Save", function (m) {
+          var v = parseFloat($("#f-num", m).value.replace(/,/g, "")); if (!(v >= 0)) { toast("Type a number"); return false; } r[5] = v; st.checked[r[4]] = true; render(); toast("Saved — " + r[2] + ": " + v + " " + un(r)); }, "sm"); }; });
+      $$(".rate", work).forEach(function (inp) { inp.onchange = function () { var v = parseFloat(this.value); st.rates = st.rates || {}; if (!st.rateName) { st.rateName = "Your prices"; st.priceMode = "own"; }
+        if (v > 0) st.rates[this.dataset.k] = v; else delete st.rates[this.dataset.k]; saveJob(); render(); }; });
+      $("#pr-mine").onclick = function () { pickFile(this, "doc", function (f) { st.rates = Object.assign({}, MOCK.rates.mine); st.rateName = f[0]; st.priceMode = "mine"; saveJob(); render(); toast("Prices taken from " + f[0]); }, "Your price list"); };
+      $("#pr-typ").onclick = function () { st.rates = Object.assign({}, MOCK.rates.starter); st.rateName = "Typical prices — check them before you send a quote"; st.priceMode = "typ"; saveJob(); render(); toast("Typical prices added"); };
+      var pn = $("#pr-none"); if (pn) pn.onclick = function () { st.rates = null; st.rateName = ""; st.priceMode = ""; saveJob(); render(); };
+      var g = $("#pr-gst"); if (g) { g.value = st.gst; g.onchange = function () { st.gst = +this.value; render(); }; }
+      $("#wk-writer").onchange = function () { st.writer = this.value; }; $("#wk-research").onchange = function () { st.research = this.value; };
+      $$("[data-idea]", work).forEach(function (b) { b.onclick = function () { $("#wk-fu").value = b.dataset.idea; $("#wk-fu").focus(); }; });
+      function change() { var v = $("#wk-fu").value.trim(); if (!v) { toast("Type what should change first"); $("#wk-fu").focus(); return; }
+        var box = $("#wk-fubox"); box.innerHTML = '<div class="out"></div>';
+        stages($(".out", box), ["Carrying your change on — " + st.writer + (st.format ? " · in the format of " + st.format : ""), "Saving it as a new version"], function () { st.rev++; st.change = v; saveJob(); render(); toast("Done — saved as " + fname()); }, 600); }
+      $("#wk-send").onclick = change; $("#wk-fu").onkeydown = function (e) { if (e.key === "Enter") change(); };
+      var vb = $("#wk-ver"); if (vb) vb.onclick = function () {
+        ask("Send your drawing to AI?", "To double-check, Prism sends " + st.file[0] + " to " + st.writer + ". Until now nothing has left this computer. Is that OK?", "Yes, send it", function (ok) {
+          if (!ok) { toast("Nothing was sent"); return; }
+          var box = $("#wk-fubox"); box.innerHTML = '<div class="out"></div>';
+          stages($(".out", box), ["Sending your drawing to " + st.writer, "Checking every line against it", "Writing the checked BOQ"], function () { st.verified = true; st.rev++; st.change = "checked against the drawing"; saveJob(); render(); toast("Double-checked — every line matches the drawing"); }, 650); }); };
+    }
+
+    /* the HVAC window and the Continue list hand over through this */
+    PRISM.boq = {
+      start: function () {},
+      fromTakeoff: function (pdf) { fresh(); st.file = [pdf, "Drawing · tender PDF"]; st.text = "HVAC ductwork from " + pdf; st.hvac = true; st.rows = rows0(); show(); toast("Measurements from the PDF are in — check the items marked"); },
+      resume: function (job, change) {
+        fresh(); st.file = job.file; st.text = job.title; st.fromText = !job.file; st.hvac = isHvac(); st.rev = job.rev || 1; st.rows = rows0();
+        if (job.priced) { st.rates = Object.assign({}, MOCK.rates.starter); st.rateName = "Typical prices"; st.priceMode = "typ"; }
+        land.hidden = true; busy.hidden = true; work.hidden = false; render();
+        if (change) setTimeout(function () { var f = $("#wk-fu"); if (f) { f.focus(); f.closest(".fu").classList.add("glowfu"); f.scrollIntoView({ block: "center" }); } toast("Type what to change — Prism saves it as a new version"); }, 120);
+        else toast(job.status === "draft" ? "Carry on — your items are below" : "Opened " + job.title);
+      }
+    };
   }
 
   /* ═════════════════════════ GERBER ═════════════════════════ */
@@ -1320,7 +1671,7 @@
 
   /* ═════════════════════════ boot ═════════════════════════ */
   try { var w = localStorage.getItem("pk-wall"); if (w) document.body.dataset.wall = w; } catch (e) {}
-  ({ home: homeInit, history: historyInit, artifacts: artifactsInit, settings: settingsInit, boq: function () { boqInit("boq"); }, bom: function () { boqInit("bom"); },
+  ({ home: homeInit, history: historyInit, artifacts: artifactsInit, settings: settingsInit, boq: function () { boqInit("boq"); boqFront(); hvacPipeline(); }, boqdrop: function () { boqFront(); hvacPipeline(); boqDrop(); }, bom: function () { boqInit("bom"); },
      gerber: gerberInit, step: stepInit, inquiry: inquiryInit, email: emailInit, leads: leadsInit, whatsapp: whatsappInit }[PAGE] || function () {})();
   route();
 })();

@@ -206,21 +206,21 @@ def boq_dialog(mode):
         <div class="examples" id="w-ex"><span class="muted small">Or pick one:</span></div>
         <div class="drop" id="w-drop">
           <span class="dropic">{ic("file")}</span>
-          <div class="droptx"><b>Add your drawing</b><p>DXF or PDF. Prism measures it on this computer — the drawing itself is never sent to AI unless you say yes.</p></div>
+          <div class="droptx"><b>Add your drawing</b><p>DXF or PDF. Measured on this computer — never sent to AI unless you say yes.</p>
+            <small class="dwgh">Only have a .dwg? <button id="w-dwg">How to save it as DXF</button></small></div>
           {dark("Choose drawing", "pplus", 'id="w-choose"')}
         </div>
         <div class="att js-att" id="w-files"></div>
-        <div class="group" id="d-ext" hidden><div class="label">Your measurements</div><pre class="extview" id="d-extview"></pre><div class="okmsg" id="d-extmsg"></div></div>
-        <ul class="wlinks">
-          <li class="muted">{ic("help")}No drawing? That's fine — describe the job above and Prism lists the items.</li>
-          <li class="hvacon" id="w-hvac" hidden>{ic("check")}HVAC drawing rules are on — because your request says HVAC.</li>
-          <li><button id="w-sample">{ic("sheet")}Make it look like my company's {noun}</button><span class="muted small" id="w-samplename"></span></li>
-          <li><button id="d-meas">{ic("clip")}I already have some measurements</button></li>
-          {"" if mode == "bom" else '<li id="w-takeoff-li" hidden><button id="w-takeoff">' + ic("file") + 'My HVAC drawing is a PDF tender — measure it</button></li>'}
-          <li><button id="d-hist">{ic("clock")}Open a past {noun}</button></li>
-          <li><button id="w-dwg">{ic("help")}My drawing is a .dwg file</button></li>
-        </ul>
-        <details class="more experts"><summary>{ic("right")}Settings for experts (optional)</summary>
+        <p class="muted small nodraw">{ic("help")}No drawing? That's fine — describe the job above and Prism lists the items.</p>
+        <div class="hvacon" id="w-hvac" hidden>{ic("check")}HVAC drawing rules are on — because your industry is HVAC.</div>
+        {"" if mode == "bom" else '<div class="tipcard" id="w-takeoff-li" hidden>' + ic("chip") + '<div><b>Is your HVAC drawing a PDF tender?</b><p>Prism can measure the ducts straight off the PDF.</p></div><button class="btn light plain sm" id="w-takeoff">Measure the PDF</button></div>'}
+        <div class="optbox">
+          <div class="optlbl">Optional — add these if you have them</div>
+          <div class="optrow"><span class="ftile">{ic("sheet")}</span><div class="optx"><b>Your company's {noun} format</b><small id="w-samplename">Add one of your past {noun}s (Excel or Word). The new one will look the same.</small></div>{light("Add", "plus", 'id="w-sample"')}</div>
+          <div class="optrow"><span class="ftile">{ic("list")}</span><div class="optx"><b>Measurements you already have</b><small id="w-measname">From a site visit or another tool. Prism uses them exactly as given.</small></div>{light("Add", "plus", 'id="d-meas"')}</div>
+          <div class="group" id="d-ext" hidden><div class="label">Your measurements</div><pre class="extview" id="d-extview"></pre><div class="okmsg" id="d-extmsg"></div></div>
+        </div>
+        <details class="more experts"><summary>{ic("right")}More settings — most people skip this</summary>
           <p class="muted small">Prism picks good defaults. Change these only if you know you need to.</p>
           <div class="meta"><span class="pair">Write with {select(writers, "Write with", 'id="d-writer"')}</span><span class="pair">Research with {select(["No research", "Perplexity", "ChatGPT", "Claude"], "Research with", 'id="d-research"')}</span>
             <span class="pair">File format {select(["Let the tool decide", "Word document (.docx)", "CSV", "PDF"], "File format", 'id="d-format"')}</span>
@@ -247,15 +247,71 @@ def boq_dialog(mode):
                  f"Make a {what} from your drawing in four easy steps.", body, foot, size="wizw")
 
 
+# ── BOQ front page: one question, three big choices (owner, 2026-11-03: the fuller
+# page with pipelines, template card and file list was "too chaotic … no user would need this").
+# Template and measurements live in step 1; where the file goes is shown on the last step.
+def boq_front():
+    def choice(key, icon, title, text):
+        return f"""<button class="bigchoice" data-start="{key}"><span class="ftile big">{ic(icon)}</span>
+            <span class="bct"><b>{title}</b><small>{text}</small></span>{ic("arrow")}</button>"""
+    return phead("BOQ", "Turn a drawing into a bill of quantities.", '<a class="btn light plain sm" href="boq.html">' + ic("spark") + 'Try the drop-in version</a>') + f"""
+      <div class="pbody bfront">
+        <div class="bask">
+          <h2>What do you have?</h2>
+          {choice("drawing", "file", "A CAD drawing", "DXF from AutoCAD or any CAD program")}
+          {choice("hvac", "chip", "An HVAC tender PDF", "Ducts measured off the PDF")}
+          {choice("fast", "spark", "No drawing", "Just describe the job")}
+        </div>
+        <div class="bask cont" id="bf-cont" hidden>
+          <h3>Continue where you left off</h3>
+          <ul class="contlist" id="bf-list"></ul>
+          <a class="link quiet" href="artifacts.html">{ic("folder")}All your BOQs are in Artifacts</a>
+        </div>
+      </div>"""
+
+
+def hvac_modal():
+    steps = ["Your PDF", "Check the ducts"]
+    stepper = "".join(f'<button class="wsn{" on" if n == 0 else ""}" data-go="{n + 1}" disabled title="Finish the step before first"><span class="num">{n + 1}</span><span>{t}</span></button>' for n, t in enumerate(steps))
+    body = f"""<div class="wiz">
+      <nav class="wsteps two" aria-label="Steps">{stepper}</nav>
+      <section class="wstep" data-step="1" id="h-s1"></section>
+      <section class="wstep" data-step="2" id="h-s2" hidden></section>
+    </div>"""
+    foot = (light("Back", "left", 'id="h-back" hidden') + '<span class="sp"></span>' + light("Close", None, "data-close")
+            + dark("Next", attrs='id="h-next" ' + off("Pick your tender PDF first")))
+    return modal("hvac", "chip", "HVAC tender PDF",
+                 "Prism measures the ducts off your PDF, then makes the BOQ.", body, foot, size="wizw")
+
+
+def boqdrop_front():
+    return phead("BOQ", "Drop in your drawing — Prism makes the bill of quantities.",
+                 '<a class="btn light plain sm" href="boq-steps.html">' + ic("list") + 'Step-by-step version</a>') + f"""
+      <div class="pbody bd" id="bd-land">
+        <div class="bdwrap">
+          <h2>Drop your drawing here</h2>
+          <div class="bigdrop" id="bd-drop" tabindex="0" role="button" aria-label="Drop a drawing, or press to choose one">
+            <span class="dropic big">{ic("file")}</span><b>Drop a drawing</b><p>DXF or PDF. Measured on this computer — never sent to AI unless you say yes.</p>
+            {dark("Choose a file", "pplus", 'id="bd-pick"')}
+          </div>
+          <div class="or"><span>or describe the job</span></div>
+          <div class="askline"><textarea class="ta ask" id="bd-text" rows="2" placeholder="e.g. HVAC ductwork for Sargam Tower B" aria-label="Describe the job"></textarea>{chip("Speak", "mic", 'title="Say it instead of typing"', cls="js-speak")}</div>
+          <div class="bdactions">{dark("Make my BOQ", attrs='id="bd-make" ' + off("Describe the job first — or drop a drawing above"), sm=False)}<button class="link" id="bd-sample">{ic("spark")}No file handy? Try a sample drawing</button></div>
+          <div class="ctxrow center" id="bd-ctx"></div>
+        </div>
+        <div class="bask cont" id="bf-cont" hidden>
+          <h3>Continue where you left off</h3>
+          <ul class="contlist" id="bf-list"></ul>
+          <a class="link quiet" href="artifacts.html">{ic("folder")}All your BOQs are in Artifacts</a>
+        </div>
+      </div>
+      <div class="pbody bd" id="bd-busy" hidden></div>
+      <div class="pbody bd" id="bd-work" hidden></div>"""
+
+
 def build_boq():
-    body = front("BOQ", "Quantities off a CAD drawing, or a written spec. Prism counts and measures — you price it.", "Attach a file",
-                 [("clip", "Attach the drawing", "Upload a CAD drawing (DXF/PDF) or enter a written description."),
-                  ("bars", "Prism measures it", "Counts, lengths, and areas are calculated automatically."),
-                  ("file", "Attach a sample BOQ too", "Upload your past BOQ (Excel/Word) to match your company's format."),
-                  ("grid", "Price &amp; export", "Generates itemized quantities and priced Excel sheets with live formulas.")],
-                 [("BOQ for CCTV, cabling and fibre for this site", "Measures your CAD drawing and matches formatting to your past BOQs."),
-                  ("Materials to build one 36x24 jaw crusher, 100 TPH", "Generates an itemized Bill of Quantities directly from your prompt.")])
-    page("boq.html", "BOQ", "boq.html", "boq", body, boq_dialog("boq"))
+    page("boq.html", "BOQ", "boq.html", "boqdrop", boqdrop_front(), hvac_modal())
+    page("boq-steps.html", "BOQ (step by step)", "boq.html", "boq", boq_front(), boq_dialog("boq") + hvac_modal())
 
 
 def build_bom():

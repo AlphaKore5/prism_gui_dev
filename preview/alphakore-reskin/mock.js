@@ -195,3 +195,30 @@ MOCK.examples = {
   boq: ["HVAC ductwork for Sargam Tower B", "CCTV, cabling and fibre for this site", "Materials for one 36x24 jaw crusher, 100 TPH"],
   bom: ["Parts list for this magnetic separator", "BOM for one 36x24 jaw crusher, 100 TPH"]
 };
+
+/* HVAC tender PDF pipeline (hvac_takeoff/hvac_takeoff.py + addons/boq/takeoff.py).
+   Layer keys follow the tool's own "colour@weight:kind"; roles are its ROLES list. */
+MOCK.hvac = {
+  pdf: "Sargam-Tower-B-HVAC-tender.pdf",
+  roles: [["ignore", "Ignore — not ductwork"], ["supply", "Supply duct"], ["return", "Return duct"], ["fresh_air", "Fresh air duct"], ["exhaust", "Exhaust duct"],
+          ["toilet_exhaust", "Toilet exhaust"], ["kitchen_exhaust", "Kitchen exhaust"], ["smoke_extract", "Smoke extract"], ["diffuser", "Diffuser (count)"],
+          ["flex_connector", "Flex connector (count)"], ["volume_damper", "Volume damper (count)"]],
+  // [key, colour, kind, segments, length ft, remembered role ("" = new)]
+  layers: [["#000000@1.56:line", "#000000", "line", 1240, 1912, "supply"], ["#000000@1.56:poly", "#000000", "poly", 386, 604, "supply"],
+           ["#ff0000@1.08:line", "#ff0000", "line", 512, 822, ""], ["#ff0000@1.08:poly", "#ff0000", "poly", 140, 231, ""],
+           ["#0000ff@0.72:rect", "#0000ff", "rect", 760, 0, "diffuser"], ["#00a651@0.72:rect", "#00a651", "rect", 96, 0, ""],
+           ["#808080@0.00:poly", "#808080", "poly", 289, 2440, "ignore"], ["#000000@0.25:rect", "#000000", "rect", 2220, 0, "ignore"],
+           ["#ff7f00@0.50:line", "#ff7f00", "line", 66, 118, ""]],
+  summary: [["Supply", "600 × 300", 412], ["Supply", "450 × 250", 318], ["Supply", "300 × 200", 226], ["Return", "500 × 300", 241], ["Return", "350 × 250", 152], ["Fresh air", "250 × 200", 64]],
+  match: 78,
+  unread: [["“6OO×25O”", "page 1, near grid C4", 0.41], ["“CFM 1?00”", "page 1, near grid F2", 0.38]],
+  outputs: [["_takeoff.json", "Everything measured, for writing the BOQ"], ["_takeoff_summary.csv", "Length by system and size"], ["_takeoff_runs.csv", "Every run, with its position"], ["_takeoff_overlay_p1.png", "The picture to check"]],
+  limits: ["Pipes drawn as a single line are not measured yet — only ducts drawn with two walls.", "Only straight ducts are measured. Bends and fittings go into the allowance.", "Vector PDFs only — a scanned drawing has no lines to measure. If you have the DWG/DXF, use that instead: it is exact."]
+};
+MOCK.pastBoq = [["BOQ — HVAC ductwork, Sargam Tower B.xlsx", "Today 10:42", "boq"], ["BOQ — CCTV and fibre, Vraj site.xlsx", "Mon", "boq"], ["BOQ — 36x24 jaw crusher.xlsx", "Last week", "boq"]];
+/* BOQ jobs for "Continue where you left off" (a stopped one and two finished ones) */
+MOCK.boqJobs = [
+  { title: "CCTV, cabling and fibre — Vraj site", file: ["Site-CCTV-layout.dxf", "Drawing · 860 KB"], status: "draft", step: 2, when: "Yesterday 17:40" },
+  { title: "HVAC ductwork for Sargam Tower B", file: ["Sargam-Tower-B-HVAC.dxf", "Drawing · 2.4 MB"], status: "ready", priced: true, rev: 2, when: "Today 10:42" },
+  { title: "Materials for one 36x24 jaw crusher, 100 TPH", file: null, status: "ready", priced: false, rev: 1, when: "Mon" }
+];

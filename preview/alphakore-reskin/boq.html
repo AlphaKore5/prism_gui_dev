@@ -6,7 +6,7 @@
 <title>BOQ · Prism by AlphaKore</title>
 <link rel="stylesheet" href="style.css">
 </head>
-<body data-page="boq">
+<body data-page="boqdrop">
 <div class="canvas"></div>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
   <symbol id="ak" viewBox="0 0 789 480"><path fill="currentColor" d="M0,479 L295,480 L366,374 L330,312 L260,418 L106,417 L282,126 L387,302 L486,480 L789,480 L653,240 L787,18 L499,18 L420,134 L463,185 L531,75 L680,76 L577,245 L682,419 L521,417 L374,153 L283,0Z"/></symbol>
@@ -83,73 +83,44 @@
   <main class="main">
     <section class="screen on">
       <header class="phead">
-        <div><h1>BOQ</h1><p>Quantities off a CAD drawing, or a written spec. Prism counts and measures — you price it.</p></div>
-        <div class="acts"><button class="btn light plain sm" data-open="make"><svg class="i"><use href="#i-clip"/></svg>Attach a file</button></div>
+        <div><h1>BOQ</h1><p>Drop in your drawing — Prism makes the bill of quantities.</p></div>
+        <div class="acts"><a class="btn light plain sm" href="boq-steps.html"><svg class="i"><use href="#i-list"/></svg>Step-by-step version</a></div>
       </header>
-      <div class="pbody">
-        <div class="ftitle"><h2>How it works</h2><p>Fast, automated workflow from drawing to finished document.</p></div>
-        <div class="card steps"><div><div class="top"><span class="ftile"><svg class="i"><use href="#i-clip"/></svg></span><span class="n">01</span></div>
-          <h3>Attach the drawing</h3><p>Upload a CAD drawing (DXF/PDF) or enter a written description.</p></div><div><div class="top"><span class="ftile"><svg class="i"><use href="#i-bars"/></svg></span><span class="n">02</span></div>
-          <h3>Prism measures it</h3><p>Counts, lengths, and areas are calculated automatically.</p></div><div><div class="top"><span class="ftile"><svg class="i"><use href="#i-file"/></svg></span><span class="n">03</span></div>
-          <h3>Attach a sample BOQ too</h3><p>Upload your past BOQ (Excel/Word) to match your company's format.</p></div><div><div class="top"><span class="ftile"><svg class="i"><use href="#i-grid"/></svg></span><span class="n">04</span></div>
-          <h3>Price &amp; export</h3><p>Generates itemized quantities and priced Excel sheets with live formulas.</p></div></div>
-        <div class="ftitle"><h2>What you can ask for</h2><p>Click an example or type your own prompt in the dialog.</p></div>
-        <div class="card asks"><div class="r"><span class="ftile"><svg class="i"><use href="#i-mic"/></svg></span><div><b>“BOQ for CCTV, cabling and fibre for this site”</b><span class="d">Measures your CAD drawing and matches formatting to your past BOQs.</span></div>
-          <button class="btn light plain sm js-try" data-open="make" data-fill="BOQ for CCTV, cabling and fibre for this site">Try this</button></div><div class="r"><span class="ftile"><svg class="i"><use href="#i-mic"/></svg></span><div><b>“Materials to build one 36x24 jaw crusher, 100 TPH”</b><span class="d">Generates an itemized Bill of Quantities directly from your prompt.</span></div>
-          <button class="btn light plain sm js-try" data-open="make" data-fill="Materials to build one 36x24 jaw crusher, 100 TPH">Try this</button></div></div>
+      <div class="pbody bd" id="bd-land">
+        <div class="bdwrap">
+          <h2>Drop your drawing here</h2>
+          <div class="bigdrop" id="bd-drop" tabindex="0" role="button" aria-label="Drop a drawing, or press to choose one">
+            <span class="dropic big"><svg class="i"><use href="#i-file"/></svg></span><b>Drop a drawing</b><p>DXF or PDF. Measured on this computer — never sent to AI unless you say yes.</p>
+            <button class="btn dark sm" id="bd-pick"><span class="ic"><svg><use href="#pplus"/></svg></span>Choose a file</button>
+          </div>
+          <div class="or"><span>or describe the job</span></div>
+          <div class="askline"><textarea class="ta ask" id="bd-text" rows="2" placeholder="e.g. HVAC ductwork for Sargam Tower B" aria-label="Describe the job"></textarea><button class="chip js-speak" title="Say it instead of typing"><svg class="i"><use href="#i-mic"/></svg>Speak</button></div>
+          <div class="bdactions"><button class="btn dark" id="bd-make" disabled title="Describe the job first — or drop a drawing above" aria-label="Describe the job first — or drop a drawing above"><span class="ic"><svg><use href="#parrow"/></svg></span>Make my BOQ</button><button class="link" id="bd-sample"><svg class="i"><use href="#i-spark"/></svg>No file handy? Try a sample drawing</button></div>
+          <div class="ctxrow center" id="bd-ctx"></div>
+        </div>
+        <div class="bask cont" id="bf-cont" hidden>
+          <h3>Continue where you left off</h3>
+          <ul class="contlist" id="bf-list"></ul>
+          <a class="link quiet" href="artifacts.html"><svg class="i"><use href="#i-folder"/></svg>All your BOQs are in Artifacts</a>
+        </div>
       </div>
+      <div class="pbody bd" id="bd-busy" hidden></div>
+      <div class="pbody bd" id="bd-work" hidden></div>
     </section>
   </main>
 </div>
-<div class="modal" id="make" data-hash role="dialog" aria-modal="true" aria-labelledby="make-t">
+<div class="modal" id="hvac" data-hash role="dialog" aria-modal="true" aria-labelledby="hvac-t">
   <div class="scrim" data-close></div>
   <div class="dlg wizw">
-    <div class="dh"><span class="tile"><svg class="i"><use href="#i-sheet"/></svg></span><div><h2 id="make-t">Bill of Quantities</h2><p>Make a bill of quantities from your drawing in four easy steps.</p></div></div>
+    <div class="dh"><span class="tile"><svg class="i"><use href="#i-chip"/></svg></span><div><h2 id="hvac-t">HVAC tender PDF</h2><p>Prism measures the ducts off your PDF, then makes the BOQ.</p></div></div>
     <div class="db">
 <div class="wiz">
-      <nav class="wsteps" aria-label="Steps"><button class="wsn on" data-go="1" disabled title="Finish the step before first"><span class="num">1</span><span>What you have</span></button><button class="wsn" data-go="2" disabled title="Finish the step before first"><span class="num">2</span><span>Check the count</span></button><button class="wsn" data-go="3" disabled title="Finish the step before first"><span class="num">3</span><span>Make the BOQ</span></button><button class="wsn" data-go="4" disabled title="Finish the step before first"><span class="num">4</span><span>Add prices</span></button></nav>
-      <section class="wstep" data-step="1">
-        <h3 class="wq">What is this BOQ for?</h3>
-        <p class="wsub">Say it in your own words — one line is enough.</p>
-        <div class="askline"><textarea class="ta ask" id="w-ask" rows="2" placeholder="e.g. HVAC ductwork for Sargam Tower B" aria-label="What is this BOQ for?"></textarea>
-          <button class="chip js-speak" title="Say it instead of typing"><svg class="i"><use href="#i-mic"/></svg>Speak</button></div>
-        <div class="examples" id="w-ex"><span class="muted small">Or pick one:</span></div>
-        <div class="drop" id="w-drop">
-          <span class="dropic"><svg class="i"><use href="#i-file"/></svg></span>
-          <div class="droptx"><b>Add your drawing</b><p>DXF or PDF. Prism measures it on this computer — the drawing itself is never sent to AI unless you say yes.</p></div>
-          <button class="btn dark sm" id="w-choose"><span class="ic"><svg><use href="#pplus"/></svg></span>Choose drawing</button>
-        </div>
-        <div class="att js-att" id="w-files"></div>
-        <div class="group" id="d-ext" hidden><div class="label">Your measurements</div><pre class="extview" id="d-extview"></pre><div class="okmsg" id="d-extmsg"></div></div>
-        <ul class="wlinks">
-          <li class="muted"><svg class="i"><use href="#i-help"/></svg>No drawing? That's fine — describe the job above and Prism lists the items.</li>
-          <li class="hvacon" id="w-hvac" hidden><svg class="i"><use href="#i-check"/></svg>HVAC drawing rules are on — because your request says HVAC.</li>
-          <li><button id="w-sample"><svg class="i"><use href="#i-sheet"/></svg>Make it look like my company's BOQ</button><span class="muted small" id="w-samplename"></span></li>
-          <li><button id="d-meas"><svg class="i"><use href="#i-clip"/></svg>I already have some measurements</button></li>
-          <li id="w-takeoff-li" hidden><button id="w-takeoff"><svg class="i"><use href="#i-file"/></svg>My HVAC drawing is a PDF tender — measure it</button></li>
-          <li><button id="d-hist"><svg class="i"><use href="#i-clock"/></svg>Open a past BOQ</button></li>
-          <li><button id="w-dwg"><svg class="i"><use href="#i-help"/></svg>My drawing is a .dwg file</button></li>
-        </ul>
-        <details class="more experts"><summary><svg class="i"><use href="#i-right"/></svg>Settings for experts (optional)</summary>
-          <p class="muted small">Prism picks good defaults. Change these only if you know you need to.</p>
-          <div class="meta"><span class="pair">Write with <select class="sel" aria-label="Write with" id="d-writer"><option>Prism Agent Claude</option><option>Prism Agent Deep</option><option>Claude</option><option>Grok</option><option>Kimi 2.6</option><option>DeepSeek</option><option>Gemini</option><option>ChatGPT</option></select></span><span class="pair">Research with <select class="sel" aria-label="Research with" id="d-research"><option>No research</option><option>Perplexity</option><option>ChatGPT</option><option>Claude</option></select></span>
-            <span class="pair">File format <select class="sel" aria-label="File format" id="d-format"><option>Let the tool decide</option><option>Word document (.docx)</option><option>CSV</option><option>PDF</option></select></span>
-            <span class="pair">Industry <select class="sel" aria-label="Industry" id="d-industry"><option>General</option><option>HVAC</option></select></span></div>
-          <div class="meta" style="flex-direction:column;align-items:stretch">
-            <input class="field2" placeholder="Drawing unit, if you know it — e.g. meters" aria-label="Drawing unit">
-            <input class="field2" placeholder="Only include layers containing… (comma separated)" aria-label="Only include layers">
-            <input class="field2" placeholder="What the drawing's symbols mean, if the sheet doesn't say — e.g. circles = light points" aria-label="Legend">
-            <label class="opt"><input type="checkbox" class="ck" checked> Estimate items the drawing doesn't contain (marked as an estimate)</label>
-          </div>
-          <button class="chip" id="d-takeoff" hidden><svg class="i"><use href="#i-clip"/></svg>HVAC PDF takeoff…</button>
-        </details>
-      </section>
-      <section class="wstep" data-step="2" id="w-s2" hidden></section>
-      <section class="wstep" data-step="3" id="w-s3" hidden><div class="out js-out" hidden></div></section>
-      <section class="wstep" data-step="4" id="w-s4" hidden></section>
+      <nav class="wsteps two" aria-label="Steps"><button class="wsn on" data-go="1" disabled title="Finish the step before first"><span class="num">1</span><span>Your PDF</span></button><button class="wsn" data-go="2" disabled title="Finish the step before first"><span class="num">2</span><span>Check the ducts</span></button></nav>
+      <section class="wstep" data-step="1" id="h-s1"></section>
+      <section class="wstep" data-step="2" id="h-s2" hidden></section>
     </div>
     </div>
-    <div class="df"><button class="btn light plain sm" id="w-back" hidden><svg class="i"><use href="#i-left"/></svg>Back</button><span class="sp"></span><button class="btn light plain sm" data-close>Close</button><button class="btn light plain sm" id="w-skip" hidden>Skip prices</button><button class="btn dark sm" id="w-next" disabled title="Add a drawing or describe the job first" aria-label="Add a drawing or describe the job first"><span class="ic"><svg><use href="#parrow"/></svg></span>Next: count it</button></div>
+    <div class="df"><button class="btn light plain sm" id="h-back" hidden><svg class="i"><use href="#i-left"/></svg>Back</button><span class="sp"></span><button class="btn light plain sm" data-close>Close</button><button class="btn dark sm" id="h-next" disabled title="Pick your tender PDF first" aria-label="Pick your tender PDF first"><span class="ic"><svg><use href="#parrow"/></svg></span>Next</button></div>
   </div>
 </div>
 <button class="edge" title="Open Lumi, Prism's helper"><svg class="i"><use href="#i-left"/></svg></button>

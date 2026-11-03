@@ -116,21 +116,21 @@
         <div class="examples" id="w-ex"><span class="muted small">Or pick one:</span></div>
         <div class="drop" id="w-drop">
           <span class="dropic"><svg class="i"><use href="#i-file"/></svg></span>
-          <div class="droptx"><b>Add your drawing</b><p>DXF or PDF. Prism measures it on this computer — the drawing itself is never sent to AI unless you say yes.</p></div>
+          <div class="droptx"><b>Add your drawing</b><p>DXF or PDF. Measured on this computer — never sent to AI unless you say yes.</p>
+            <small class="dwgh">Only have a .dwg? <button id="w-dwg">How to save it as DXF</button></small></div>
           <button class="btn dark sm" id="w-choose"><span class="ic"><svg><use href="#pplus"/></svg></span>Choose drawing</button>
         </div>
         <div class="att js-att" id="w-files"></div>
-        <div class="group" id="d-ext" hidden><div class="label">Your measurements</div><pre class="extview" id="d-extview"></pre><div class="okmsg" id="d-extmsg"></div></div>
-        <ul class="wlinks">
-          <li class="muted"><svg class="i"><use href="#i-help"/></svg>No drawing? That's fine — describe the job above and Prism lists the items.</li>
-          <li class="hvacon" id="w-hvac" hidden><svg class="i"><use href="#i-check"/></svg>HVAC drawing rules are on — because your request says HVAC.</li>
-          <li><button id="w-sample"><svg class="i"><use href="#i-sheet"/></svg>Make it look like my company's BOM</button><span class="muted small" id="w-samplename"></span></li>
-          <li><button id="d-meas"><svg class="i"><use href="#i-clip"/></svg>I already have some measurements</button></li>
-          
-          <li><button id="d-hist"><svg class="i"><use href="#i-clock"/></svg>Open a past BOM</button></li>
-          <li><button id="w-dwg"><svg class="i"><use href="#i-help"/></svg>My drawing is a .dwg file</button></li>
-        </ul>
-        <details class="more experts"><summary><svg class="i"><use href="#i-right"/></svg>Settings for experts (optional)</summary>
+        <p class="muted small nodraw"><svg class="i"><use href="#i-help"/></svg>No drawing? That's fine — describe the job above and Prism lists the items.</p>
+        <div class="hvacon" id="w-hvac" hidden><svg class="i"><use href="#i-check"/></svg>HVAC drawing rules are on — because your industry is HVAC.</div>
+        
+        <div class="optbox">
+          <div class="optlbl">Optional — add these if you have them</div>
+          <div class="optrow"><span class="ftile"><svg class="i"><use href="#i-sheet"/></svg></span><div class="optx"><b>Your company's BOM format</b><small id="w-samplename">Add one of your past BOMs (Excel or Word). The new one will look the same.</small></div><button class="btn light plain sm" id="w-sample"><svg class="i"><use href="#i-plus"/></svg>Add</button></div>
+          <div class="optrow"><span class="ftile"><svg class="i"><use href="#i-list"/></svg></span><div class="optx"><b>Measurements you already have</b><small id="w-measname">From a site visit or another tool. Prism uses them exactly as given.</small></div><button class="btn light plain sm" id="d-meas"><svg class="i"><use href="#i-plus"/></svg>Add</button></div>
+          <div class="group" id="d-ext" hidden><div class="label">Your measurements</div><pre class="extview" id="d-extview"></pre><div class="okmsg" id="d-extmsg"></div></div>
+        </div>
+        <details class="more experts"><summary><svg class="i"><use href="#i-right"/></svg>More settings — most people skip this</summary>
           <p class="muted small">Prism picks good defaults. Change these only if you know you need to.</p>
           <div class="meta"><span class="pair">Write with <select class="sel" aria-label="Write with" id="d-writer"><option>Prism Agent Claude</option><option>Prism Agent Deep</option><option>Claude</option><option>Grok</option><option>Kimi 2.6</option><option>DeepSeek</option><option>Gemini</option><option>ChatGPT</option></select></span><span class="pair">Research with <select class="sel" aria-label="Research with" id="d-research"><option>No research</option><option>Perplexity</option><option>ChatGPT</option><option>Claude</option></select></span>
             <span class="pair">File format <select class="sel" aria-label="File format" id="d-format"><option>Let the tool decide</option><option>Word document (.docx)</option><option>CSV</option><option>PDF</option></select></span>
