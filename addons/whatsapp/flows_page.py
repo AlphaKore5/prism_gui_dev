@@ -1048,6 +1048,7 @@ class FlowsSection(QWidget):
         flow = dict(reply.get("flow") or {})
         flow["issues"] = reply.get("issues") or []
         if self.editor is not None:
+            self.editor.hide()
             self.editor.setParent(None)
             self.editor.deleteLater()
         self.editor = FlowEditor(self, flow)

@@ -87,6 +87,7 @@ class _Meta(QFrame):
         while self._ticks.count():
             w = self._ticks.takeAt(0).widget()
             if w is not None:
+                w.hide()
                 w.setParent(None)
                 w.deleteLater()
         for _ in range(count):

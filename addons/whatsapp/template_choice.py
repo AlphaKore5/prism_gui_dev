@@ -86,6 +86,7 @@ class TemplateChoice(QWidget):
         while self.rows_col.count():
             item = self.rows_col.takeAt(0)
             if item.widget() is not None:
+                item.widget().hide()
                 item.widget().setParent(None)
                 item.widget().deleteLater()
         t = self.combo.currentData() or {}

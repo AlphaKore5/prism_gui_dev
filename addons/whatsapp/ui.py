@@ -175,6 +175,7 @@ def centered_row(*widgets, h_space: int = theme.SPACE_1, v_space: int = theme.SP
 
 def discard(widget) -> None:
     if widget is not None:
+        widget.hide()                                    # a queued show of a detached widget would open it as a window of its own
         widget.setParent(None)
         widget.deleteLater()
 

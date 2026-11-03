@@ -854,6 +854,7 @@ class AutosSection(QWidget):
 
     def _show(self, editor: AutoEditor):
         if self.editor is not None:
+            self.editor.hide()
             self.editor.setParent(None)
             self.editor.deleteLater()
         self.editor = editor

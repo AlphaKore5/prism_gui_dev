@@ -173,6 +173,7 @@ def filled(text: str, samples: dict) -> str:
 
 def discard(widget):
     if widget is not None:
+        widget.hide()                                    # a queued show of a detached widget would open it as a window of its own
         widget.setParent(None)
         widget.deleteLater()
 
