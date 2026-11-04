@@ -258,6 +258,9 @@ class MeasuringAScaleOverridesTheDropdownAndCountsAsConfirmation(unittest.TestCa
     def test_accepting_a_measured_scale_overrides_pt_per_ft(self):
         d = _dialog_with_one_layer("supply")
         d.pdf_path = "/x/fake.pdf"
+        # The measured-scale note lives on the Scale step now, not on the one
+        # long page the dialog used to be, so look at it from that step.
+        d._show_step(d.S_SCALE)
         fake = mock.Mock()
         fake.pt_per_ft = 12.5
         with mock.patch.object(T, "_ScaleMeasureDialog", return_value=fake):
@@ -414,6 +417,130 @@ class ExtractingRemembersTheChosenRolesForTheNextDrawing(unittest.TestCase):
                 mock.patch.object(T, "HvacTakeoffWorker", _FakeWorker):
             d._extract()
         self.assertFalse(remember.called)
+
+
+class TheTakeoffIsFourStepsAndEveryGreyedButtonSaysWhy(unittest.TestCase):
+    """The tender-PDF dialog walks a person through: PDF, scale, layers, then
+    the measurements that go to the BOQ. Each gate that used to be a folded
+    section or a tick-box on one long page is now a step, so the order, the
+    gates and the words on a blocked button are what is pinned here."""
+
+    def _fresh(self):
+        return T.IndustryTakeoffDialog("HVAC")
+
+    def _loaded(self):
+        d = self._fresh()
+        d.show()
+        d.pdf_path = "/x/fake.pdf"
+        d._fill_mapping([{"key": "k1", "color": "#ff0000", "linewidth": 1.0,
+                          "kind": "line", "segments": 5, "length_pt": 100.0,
+                          "pages": [0]}])
+        return d
+
+    def test_it_opens_on_the_pdf_step_and_says_what_is_missing(self):
+        d = self._fresh()
+        d.show()
+        self.assertEqual(d.pages.currentIndex(), d.S_PDF)
+        self.assertFalse(d.next_btn.isEnabled())
+        self.assertIn("Add the tender PDF", d._why.text())
+        self.assertFalse(d.back_btn.isVisibleTo(d))
+
+    def test_the_four_steps_are_named_in_the_order_the_owner_gave(self):
+        d = self._fresh()
+        names = [d.tabs._tabs[i].text.text() for i in range(4)]
+        self.assertEqual(names, ["Your PDF", "Scale", "Layers", "Measurements"])
+
+    def test_a_pdf_with_lines_lets_you_go_on_to_the_scale(self):
+        d = self._loaded()
+        d._refresh_nav()
+        self.assertTrue(d.next_btn.isEnabled())
+        d.next_btn.click()
+        self.assertEqual(d.pages.currentIndex(), d.S_SCALE)
+        self.assertTrue(d.back_btn.isVisibleTo(d))
+
+    def test_the_scale_step_is_blocked_until_checked_and_says_how(self):
+        d = self._loaded()
+        d._show_step(d.S_SCALE)
+        self.assertFalse(d.next_btn.isEnabled())
+        self.assertIn("Measure a known length", d._why.text())
+        d.scale_confirm_cb.setChecked(True)
+        self.assertTrue(d.next_btn.isEnabled())
+        self.assertEqual(d._why.text(), "")
+
+    def test_changing_the_scale_blocks_the_step_again(self):
+        d = self._loaded()
+        d._show_step(d.S_SCALE)
+        d.scale_confirm_cb.setChecked(True)
+        d.scale_combo.setCurrentIndex(
+            (d.scale_combo.currentIndex() + 1) % max(1, d.scale_combo.count()))
+        self.assertFalse(d.next_btn.isEnabled())
+
+    def test_next_on_the_layers_step_extracts_and_shows_the_results(self):
+        d = self._loaded()
+        d._role_combos[0][1].setCurrentText("supply")
+        d._show_step(d.S_LAYERS)
+        with mock.patch.object(T, "HvacTakeoffWorker", _FakeWorker):
+            _FakeWorker.last = None
+            d.next_btn.click()
+        self.assertIsNotNone(_FakeWorker.last)
+        self.assertEqual(d.pages.currentIndex(), d.S_RESULT)
+
+    def test_declining_the_all_ignore_question_stays_on_the_layers_step(self):
+        d = self._loaded()
+        d._show_step(d.S_LAYERS)
+        with mock.patch.object(T.QMessageBox, "question",
+                               return_value=QMessageBox.No), \
+                mock.patch.object(T, "HvacTakeoffWorker", _FakeWorker):
+            _FakeWorker.last = None
+            d.next_btn.click()
+        self.assertIsNone(_FakeWorker.last)
+        self.assertEqual(d.pages.currentIndex(), d.S_LAYERS)
+
+    def test_only_the_last_step_offers_to_make_the_boq(self):
+        d = self._loaded()
+        for step in (d.S_PDF, d.S_SCALE, d.S_LAYERS):
+            d._show_step(step)
+            self.assertFalse(d.use_btn.isVisibleTo(d))
+            self.assertTrue(d.next_btn.isVisibleTo(d))
+        d._show_step(d.S_RESULT)
+        self.assertTrue(d.use_btn.isVisibleTo(d))
+        self.assertFalse(d.next_btn.isVisibleTo(d))
+
+    def test_the_final_button_says_why_it_is_off(self):
+        d = self._loaded()
+        d._show_step(d.S_RESULT)
+        self.assertFalse(d.use_btn.isEnabled())
+        self.assertIn("Measure the ducts first", d._why.text())
+        d.result = {"duct_runs": [{"length_ft": 10.0}], "labels": [], "warnings": []}
+        d._update_use_btn()
+        self.assertIn("scale", d._why.text().lower())
+        d.scale_confirm_cb.setChecked(True)
+        self.assertTrue(d.use_btn.isEnabled())
+
+    def test_a_finished_step_can_be_clicked_to_go_back_but_a_future_one_cannot(self):
+        d = self._loaded()
+        d._show_step(d.S_LAYERS)
+        self.assertEqual(d.tabs.states(), ["done", "done", "active", "todo"])
+        from PySide6.QtCore import Qt
+        from PySide6.QtTest import QTest
+        QTest.mouseClick(d.tabs._tabs[3], Qt.LeftButton)     # still to come
+        self.assertEqual(d.pages.currentIndex(), d.S_LAYERS)
+        QTest.mouseClick(d.tabs._tabs[0], Qt.LeftButton)
+        self.assertEqual(d.pages.currentIndex(), d.S_PDF)
+
+    def test_picking_a_new_pdf_forgets_the_old_scale_and_result(self):
+        d = self._loaded()
+        d._measured_pt_per_ft = 9.0
+        d.scale_confirm_cb.setChecked(True)
+        d.result = {"duct_runs": []}
+        with mock.patch.object(T.QFileDialog, "getOpenFileName",
+                               return_value=("/y/other.pdf", "")), \
+                mock.patch.object(T.industries, "scan_layers", return_value=[]):
+            d._pick_pdf()
+        self.assertIsNone(d._measured_pt_per_ft)
+        self.assertFalse(d.scale_confirm_cb.isChecked())
+        self.assertIsNone(d.result)
+        self.assertEqual(d.path_label.text(), "other.pdf")
 
 
 if __name__ == "__main__":

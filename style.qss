@@ -2092,3 +2092,80 @@ QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
 #recentMenuBtn:hover {
     background: #EFEEEA;
 }
+
+/* ── guided-dialog step tabs and the "file added" card (widgets/stepper.py) ── */
+#stepTab {
+    background: transparent;
+    border: none;
+    border-radius: 10px;
+}
+#stepTab[state="active"] {
+    background: #F6F5F2;
+}
+#stepTabNum {
+    border-radius: 13px;
+    font-family: "Geist Mono";
+    font-size: 12px;
+    font-weight: 600;
+    background: #ffffff;
+    border: 1px solid #D8D7D2;
+    color: #6B6A65;
+}
+#stepTabNum[state="active"] {
+    background: #111110;
+    border: 1px solid #111110;
+    color: #ffffff;
+}
+#stepTabNum[state="done"] {
+    background: #E4EFE7;
+    border: 1px solid #E4EFE7;
+    color: #1F6B43;
+}
+#stepTabText {
+    background: transparent;
+    font-size: 14px;
+    color: #6B6A65;
+}
+#stepTabText[state="active"] {
+    color: #111110;
+    font-weight: 600;
+}
+#stepTabText[state="done"] {
+    color: #2A2A28;
+}
+
+#fileCard {
+    background: #ffffff;
+    border: 1px dashed #D8D7D2;
+    border-radius: 12px;
+}
+#fileCard[added="true"] {
+    background: #E4EFE7;
+    border: 1px solid #B9D5C3;
+}
+#fileCardIcon {
+    background: #ffffff;
+    border-radius: 10px;
+}
+#fileCardTitle {
+    background: transparent;
+    font-size: 17px;
+    font-weight: 500;
+    color: #111110;
+}
+#fileCardHint {
+    background: transparent;
+    font-size: 14px;
+    color: #6B6A65;
+}
+
+#stepCard {
+    background: #ffffff;
+    border: 1px solid #E6E5E1;
+    border-radius: 12px;
+}
+#layerRow {
+    background: #ffffff;
+    border: 1px solid #E6E5E1;
+    border-radius: 10px;
+}

@@ -22,14 +22,16 @@ import os
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QImage, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
-    QComboBox, QDialog, QFileDialog, QHBoxLayout, QLabel, QLineEdit, QListWidget,
+    QComboBox, QDialog, QFileDialog, QFrame, QStackedWidget, QHBoxLayout, QLabel, QLineEdit, QListWidget,
     QListWidgetItem, QMessageBox, QScrollArea, QTableWidget, QTableWidgetItem,
     QVBoxLayout, QWidget, QAbstractItemView, QCheckBox, QHeaderView,
 )
 
 import i18n
 import theme
+from dialogs.base import PrismDialog
 from widgets import controls as C
+from widgets.stepper import FileCard, StepTabs
 from addons.boq import industries
 from addons.boq.measured import _TintDelegate
 from addons.boq.workers import HvacTakeoffWorker
@@ -50,38 +52,36 @@ class _ClickableImageLabel(QLabel):
         super().mousePressEvent(event)
 
 
-class _ScaleMeasureDialog(QDialog):
+class _ScaleMeasureDialog(PrismDialog):
     """Item 27 rule 5's own follow-up: the scale-confirmation checkbox
     only ever asked "did you check it?" -- it could not fix a wrong
-    number. This lets a person click two points on the actual rendered
-    drawing, type the real-world distance between them (a labelled room
+    number. This shows the real drawing, lets a person click two points on
+    it, type the real-world distance between them in feet (a labelled room
     width, a door opening, a dimension line), and computes the drawing's
     real points-per-foot scale from that -- instead of trusting whichever
     standard scale label was picked from the dropdown."""
 
     def __init__(self, pdf_path: str, page_index: int = 0, parent=None):
-        super().__init__(parent)
+        super().__init__(
+            i18n.t("Check the drawing, then set the scale"),
+            i18n.t("Click two points on something you already know the real "
+                   "length of — a labelled room width, a door opening, a "
+                   "dimension line. Click again to start over."),
+            icon="eye", parent=parent)
         self.setWindowTitle(i18n.t("Measure a known dimension"))
-        self.resize(760, 640)
+        self.resize(900, 760)
         self.pdf_path = pdf_path
         self.page_index = page_index
         self.dpi = 100.0
         self._points: list[tuple[float, float]] = []
         self.pt_per_ft: float | None = None
 
-        col = QVBoxLayout(self)
-        col.addWidget(C.label(i18n.t(
-            "Click two points on something you already know the real "
-            "length of — a labelled room width, a door opening, a "
-            "dimension line — then type that real length below. Click "
-            "again to restart."), level="SUPPORT", wrap=True))
-
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(False)
         self.image_label = _ClickableImageLabel()
         self.image_label.clicked.connect(self._on_click)
         self.scroll.setWidget(self.image_label)
-        col.addWidget(self.scroll, stretch=1)
+        self.body.addWidget(self.scroll, stretch=1)
 
         self._load_error = None
         self._load_image()
@@ -90,22 +90,21 @@ class _ScaleMeasureDialog(QDialog):
         row.addWidget(QLabel(i18n.t("Real distance between the two points:")))
         self.distance_edit = QLineEdit()
         self.distance_edit.setPlaceholderText(i18n.t("feet, e.g. 6.0"))
+        self.distance_edit.setMaximumWidth(140)
         self.distance_edit.textChanged.connect(self._recompute)
         row.addWidget(self.distance_edit)
         row.addWidget(QLabel(i18n.t("ft")))
         row.addStretch(1)
-        col.addLayout(row)
+        self.body.addLayout(row)
 
         self.result_label = QLabel("")
-        col.addWidget(self.result_label)
+        self.body.addWidget(self.result_label)
 
-        btn_row = QHBoxLayout()
-        btn_row.addStretch(1)
-        btn_row.addWidget(C.button(i18n.t("Cancel"), "secondary", on_click=self.reject))
-        self.use_btn = C.button(i18n.t("Use this scale"), "primary", on_click=self.accept)
+        self.footer.add_secondary(self.button(i18n.t("Cancel"), on_click=self.reject))
+        self.use_btn = self.button(i18n.t("Use this scale"), "primary",
+                                   on_click=self.accept)
         self.use_btn.setEnabled(False)
-        btn_row.addWidget(self.use_btn)
-        col.addLayout(btn_row)
+        self.footer.set_primary(self.use_btn)
 
     def _load_image(self):
         try:
@@ -174,7 +173,7 @@ class _ScaleMeasureDialog(QDialog):
         self.use_btn.setEnabled(True)
 
 
-class _LayerPreviewDialog(QDialog):
+class _LayerPreviewDialog(PrismDialog):
     """One Layer-mapping row's own segments, highlighted on the faded
     drawing -- "what does this colour actually draw", as a picture
     instead of a guess from a colour swatch and a segment count. Pointed
@@ -186,18 +185,17 @@ class _LayerPreviewDialog(QDialog):
     click handling, unlike _ScaleMeasureDialog above."""
 
     def __init__(self, industry: str, pdf_path: str, layer: dict, parent=None):
-        super().__init__(parent)
+        super().__init__(
+            i18n.t("What this colour draws"),
+            f'{layer["color"]}  ·  {layer["kind"]}  ·  {layer["segments"]} segs',
+            icon="eye", parent=parent)
         self.setWindowTitle(i18n.t("Layer preview"))
-        self.resize(820, 680)
-        col = QVBoxLayout(self)
-        col.addWidget(C.label(
-            f'{layer["color"]}  {layer["kind"]}  {layer["segments"]} segs',
-            level="SUPPORT"))
+        self.resize(860, 720)
         scroll = QScrollArea()
         scroll.setWidgetResizable(False)
         image_label = QLabel()
         scroll.setWidget(image_label)
-        col.addWidget(scroll, stretch=1)
+        self.body.addWidget(scroll, stretch=1)
         try:
             png = industries.layer_preview(industry, pdf_path, layer["key"])
             pix = QPixmap()
@@ -207,10 +205,8 @@ class _LayerPreviewDialog(QDialog):
         except Exception as e:                              # noqa: BLE001
             image_label.setText(i18n.t(
                 "Couldn't render this layer: {error}").format(error=e))
-        btn_row = QHBoxLayout()
-        btn_row.addStretch(1)
-        btn_row.addWidget(C.button(i18n.t("Close"), "primary", on_click=self.accept))
-        col.addLayout(btn_row)
+        self.footer.set_primary(self.button(i18n.t("Close"), "primary",
+                                            on_click=self.accept))
 
 
 class _ReviewTable(QWidget):
@@ -362,100 +358,204 @@ class _ReviewTable(QWidget):
         self._filling = False
 
 
-class IndustryTakeoffDialog(QDialog):
-    """Pick a PDF, confirm what each line colour is (Step 1, folded away
-    by default), extract, review and correct the readings, then hand the
-    result back to BoqDialog exactly like InputMeasurementsDialog does --
-    a plain-text summary, treated from there on like any other external
-    measurement."""
+class IndustryTakeoffDialog(PrismDialog):
+    """Pick a PDF, set its scale, tell Prism what each line colour is,
+    extract, review and correct the readings, then hand the result back to
+    BoqDialog exactly like InputMeasurementsDialog does -- a plain-text
+    summary, treated from there on like any other external measurement.
+
+    Four steps, one page each (the AlphaKore preview's flow):
+        1 Your PDF       pick the tender drawing
+        2 Scale          check the drawing, set its scale in feet
+        3 Layers         name each line colour (the eye shows where it is)
+        4 Measurements   extract, read what was found, send it to the BOQ
+    Nothing about WHAT is measured changed -- only how it is walked through:
+    the scale gate, the all-"ignore" question and the zero-runs warning all
+    still stand."""
+
+    STEPS = ("Your PDF", "Scale", "Layers", "Measurements")
+    S_PDF, S_SCALE, S_LAYERS, S_RESULT = range(4)
 
     def __init__(self, industry: str, parent=None):
-        super().__init__(parent)
+        super().__init__(
+            i18n.t("{industry} tender PDF").format(industry=industry),
+            i18n.t("Prism measures the ducts off your PDF, then makes the BOQ."),
+            icon="file", parent=parent)
         self.industry = industry
         self.pdf_path = ""
         self.result: dict | None = None
         self._role_combos: list[tuple[dict, QComboBox]] = []
         self._measured_pt_per_ft: float | None = None
+        self._step = self.S_PDF
 
         self.setWindowTitle(i18n.t("{industry} PDF takeoff").format(industry=industry))
-        self.resize(640, 560)
-        col = QVBoxLayout(self)
+        self.resize(760, 640)
+        self.setMinimumSize(640, 560)
+
+        self.tabs = StepTabs([i18n.t(n) for n in self.STEPS])
+        self.tabs.step_clicked.connect(self._show_step)
+        self.body.addWidget(self.tabs)
+
+        self.pages = QStackedWidget()
+        self.body.addWidget(self.pages, stretch=1)
+        self.pages.addWidget(self._build_pdf_page())
+        self.pages.addWidget(self._build_scale_page())
+        self.pages.addWidget(self._build_layers_page())
+        self.pages.addWidget(self._build_result_page())
+
+        self.back_btn = self.button(i18n.t("Back"), icon_name="chevron-left",
+                                    on_click=self._back)
+        self.footer.add_utility(self.back_btn)
+        self.footer.add_secondary(self.button(i18n.t("Close"), on_click=self.reject))
+        # Two buttons that are never on screen together: "Next" on steps 1-3,
+        # and the one that hands the measurements to the BOQ on step 4.
+        self.next_btn = self.button("", "primary", on_click=self._next)
+        self.footer.set_primary(self.next_btn)
+        self.use_btn = self.button(i18n.t("Looks right — make the BOQ"), "primary",
+                                   on_click=self._confirm)
+        self.use_btn.setEnabled(False)
+        self.footer.add_secondary(self.use_btn)
+        self._why = QLabel("")
+        self._why.setObjectName("note")
+        self._why.setWordWrap(True)
+        self._why.setVisible(False)
+        self.footer.add_note(self._why)
+        self._show_step(self.S_PDF)
+
+    # ── the four pages ───────────────────────────────────────────────────
+
+    @staticmethod
+    def _page(title: str, hint: str):
+        page = QWidget()
+        col = QVBoxLayout(page)
+        col.setContentsMargins(0, theme.SPACE_3, 0, 0)
+        col.setSpacing(theme.SPACE_3)
+        head = QLabel(title)
+        head.setObjectName("h4")
+        col.addWidget(head)
+        sub = C.label(hint, level="SUPPORT", wrap=True)
+        col.addWidget(sub)
+        return page, col
+
+    def _build_pdf_page(self):
+        page, col = self._page(
+            i18n.t("Add your tender PDF"),
+            i18n.t("Prism measures the ducts off it, on this computer — the "
+                   "drawing itself is never sent anywhere."))
+        self.file_card = FileCard(
+            i18n.t("Add your tender PDF"), i18n.t("A PDF of the HVAC drawing."),
+            i18n.t("PDF added"), i18n.t("Add PDF"), i18n.t("Change PDF"),
+            on_click=self._pick_pdf)
+        self.pick_btn = self.file_card.button
+        self.path_label = self.file_card.hint
+        col.addWidget(self.file_card)
         col.addWidget(C.label(i18n.t(
-            "Reads a tender PDF locally -- the drawing itself is never "
-            "sent anywhere. Pick the file, confirm what each line colour "
-            "is, then extract."), level="SUPPORT", wrap=True))
+            "Have the DWG or DXF of this drawing? Close this and attach it "
+            "to the BOQ instead — it is more exact."),
+            level="SUPPORT", wrap=True))
+        col.addStretch(1)
+        return page
 
-        pick_row = QHBoxLayout()
-        self.pick_btn = C.button(i18n.t("Pick a PDF…"), "secondary",
-                                 icon_name="paperclip", small=True,
-                                 on_click=self._pick_pdf)
-        pick_row.addWidget(self.pick_btn)
-        self.path_label = QLabel("")
-        self.path_label.setWordWrap(True)
-        pick_row.addWidget(self.path_label, stretch=1)
-        col.addLayout(pick_row)
+    def _build_scale_page(self):
+        page, col = self._page(
+            i18n.t("Check the drawing and set its scale"),
+            i18n.t("A wrong scale is wrong for every length and area, so set "
+                   "it before anything is measured. Pick the scale written "
+                   "on the drawing — or open the drawing and click a length "
+                   "you already know, and give it in feet."))
+        card = QFrame()
+        card.setObjectName("stepCard")
+        card.setAttribute(Qt.WA_StyledBackground, True)
+        inner = QVBoxLayout(card)
+        inner.setContentsMargins(theme.SPACE_5, theme.SPACE_4,
+                                 theme.SPACE_5, theme.SPACE_4)
+        inner.setSpacing(theme.SPACE_3)
 
-        settings_row = QHBoxLayout()
-        settings_row.addWidget(QLabel(i18n.t("Drawing scale:")))
+        row = QHBoxLayout()
+        left = QVBoxLayout()
+        left.setSpacing(2)
+        left.addWidget(C.label(i18n.t("Drawing scale"), level="CARD_TITLE"))
+        left.addWidget(C.label(i18n.t("Written in the title block of the drawing."),
+                               level="SUPPORT"))
+        row.addLayout(left, stretch=1)
         self.scale_combo = QComboBox()
         for label in industries.scales(self.industry):
             self.scale_combo.addItem(label, label)
         self.scale_combo.currentIndexChanged.connect(self._on_scale_changed)
-        settings_row.addWidget(self.scale_combo)
-        self.measure_btn = C.button(i18n.t("Measure…"), "secondary", small=True,
-                                    on_click=self._open_measure_dialog)
-        settings_row.addWidget(self.measure_btn)
-        self.ocr_cb = QCheckBox(i18n.t("Read text labels (OCR)"))
-        self.ocr_cb.setChecked(True)
-        settings_row.addWidget(self.ocr_cb)
-        settings_row.addStretch(1)
-        col.addLayout(settings_row)
+        row.addWidget(self.scale_combo)
+        inner.addLayout(row)
+
+        row2 = QHBoxLayout()
+        left2 = QVBoxLayout()
+        left2.setSpacing(2)
+        left2.addWidget(C.label(i18n.t("Not sure of the scale?"), level="CARD_TITLE"))
+        left2.addWidget(C.label(i18n.t(
+            "Open the drawing and measure a length you know, in feet."),
+            level="SUPPORT"))
+        row2.addLayout(left2, stretch=1)
+        self.measure_btn = C.button(i18n.t("Measure on the drawing…"), "primary",
+                                    icon_name="eye", on_click=self._open_measure_dialog)
+        row2.addWidget(self.measure_btn)
+        inner.addLayout(row2)
 
         self.measured_scale_label = QLabel("")
+        self.measured_scale_label.setObjectName("note")
+        self.measured_scale_label.setWordWrap(True)
         self.measured_scale_label.setVisible(False)
-        col.addWidget(self.measured_scale_label)
+        inner.addWidget(self.measured_scale_label)
+        col.addWidget(card)
 
         # item 27 rule 5: the extractor already warns "scale may be wrong"
         # (hvac_takeoff's own T.01) when few runs matched a label, but
         # nothing stopped a BOQ being made anyway -- found live on the real
         # file, a return-duct category came out more than 2x the client's
         # real figure with that warning sitting unread in a collapsed list.
-        # This is the gate itself, not just another line of advice: "Use
-        # these measurements" below stays disabled until it is checked, and
-        # changing the scale after confirming it un-checks it again.
+        # This is the gate itself, not just another line of advice: the
+        # button that sends measurements to the BOQ stays disabled until it
+        # is checked, and changing the scale after confirming it un-checks
+        # it again.
         self.scale_confirm_cb = QCheckBox(i18n.t(
             "I've checked one real, known dimension on the drawing against "
             "this scale."))
         col.addWidget(self.scale_confirm_cb)
         self.scale_confirm_cb.toggled.connect(self._update_use_btn)
-        col.addWidget(C.label(i18n.t(
-            "Measure one dimension you already know (a labelled room width, "
-            "a door opening) against this scale before extracting -- a wrong "
-            "scale is wrong for every length and area this reads, not just "
-            "one row. \"Measure…\" above lets you compute the real scale from "
-            "a dimension you click on the drawing itself, instead of just "
-            "trusting the dropdown."), level="SUPPORT", wrap=True))
+        col.addStretch(1)
+        return page
 
-        # Step 1 -- folded away by default; opening the main add-on must
-        # not grow a second, cluttered PDF-reading screen for the common
-        # case of someone who never needs to touch this.
-        self.mapping_btn = C.button("", "tertiary", small=True,
-                                    on_click=self._toggle_mapping)
-        self.mapping_btn.setVisible(False)
-        col.addWidget(self.mapping_btn, alignment=Qt.AlignLeft)
+    def _build_layers_page(self):
+        page, col = self._page(
+            i18n.t("Name the layers"),
+            i18n.t("Each line colour on the drawing is a layer. Tell Prism "
+                   "what each one is — the eye shows where it sits on the "
+                   "drawing. If you are not sure, leave it out."))
         self.mapping_area = QScrollArea()
         self.mapping_area.setWidgetResizable(True)
-        self.mapping_area.setMaximumHeight(220)
-        self.mapping_area.setVisible(False)
+        self.mapping_area.setFrameShape(QScrollArea.NoFrame)
         self.mapping_inner = QWidget()
         self.mapping_layout = QVBoxLayout(self.mapping_inner)
+        self.mapping_layout.setContentsMargins(0, 0, 0, 0)
+        self.mapping_layout.setSpacing(theme.SPACE_2)
+        self.mapping_layout.addStretch(1)
         self.mapping_area.setWidget(self.mapping_inner)
-        col.addWidget(self.mapping_area)
+        col.addWidget(self.mapping_area, stretch=1)
+        return page
 
-        self.extract_btn = C.button(i18n.t("Extract"), "primary", icon_name="check",
-                                    small=True, on_click=self._extract)
+    def _build_result_page(self):
+        page, col = self._page(
+            i18n.t("Check the measurements"),
+            i18n.t("This is what Prism read off the drawing. Fix anything "
+                   "that is wrong, then send it to the BOQ."))
+        bar = QHBoxLayout()
+        self.extract_btn = C.button(i18n.t("Measure the ducts"), "secondary",
+                                    icon_name="check", small=True,
+                                    on_click=self._extract)
         self.extract_btn.setEnabled(False)
-        col.addWidget(self.extract_btn, alignment=Qt.AlignLeft)
+        bar.addWidget(self.extract_btn)
+        self.ocr_cb = QCheckBox(i18n.t("Read text labels (OCR)"))
+        self.ocr_cb.setChecked(True)
+        bar.addWidget(self.ocr_cb)
+        bar.addStretch(1)
+        col.addLayout(bar)
 
         self.status = QLabel("")
         self.status.setWordWrap(True)
@@ -465,11 +565,10 @@ class IndustryTakeoffDialog(QDialog):
         # the layer mapping") -- found the hard way on a real drawing, 26
         # Oct 2026: these already existed in summary_text()'s own text,
         # but buried in the final hand-off is too late to notice before
-        # pressing "Use these measurements" and feeding the BOQ a quiet
-        # zero. Same collapsed-list pattern as measured.py's own
-        # warn_btn/warn_list, open by default here (unlike there) since
-        # there is no result yet to clutter the screen with until
-        # extraction has actually run once.
+        # sending them on and feeding the BOQ a quiet zero. Same
+        # collapsed-list pattern as measured.py's own warn_btn/warn_list,
+        # open by default here since there is no result yet to clutter the
+        # screen with until extraction has actually run once.
         self.warn_btn = C.button("", "tertiary", small=True,
                                  on_click=self._toggle_warnings)
         self.warn_btn.setVisible(False)
@@ -482,17 +581,56 @@ class IndustryTakeoffDialog(QDialog):
         self.review = _ReviewTable()
         self.review.setVisible(False)
         col.addWidget(self.review, stretch=1)
+        return page
 
-        btn_row = QHBoxLayout()
-        btn_row.addStretch(1)
-        btn_row.addWidget(C.button(i18n.t("Cancel"), "secondary", on_click=self.reject))
-        self.use_btn = C.button(i18n.t("Use these measurements"), "primary",
-                                on_click=self._confirm)
-        self.use_btn.setEnabled(False)
-        btn_row.addWidget(self.use_btn)
-        col.addLayout(btn_row)
+    # ── moving between steps ─────────────────────────────────────────────
 
-    # ── Step 1 ───────────────────────────────────────────────────────────
+    def _show_step(self, index: int):
+        index = max(0, min(index, self.S_RESULT))
+        self._step = index
+        self.pages.setCurrentIndex(index)
+        self.tabs.set_current(index)
+        self.back_btn.setVisible(index > self.S_PDF)
+        last = index == self.S_RESULT
+        self.use_btn.setVisible(last)
+        self.next_btn.setVisible(not last)
+        self.next_btn.setText({
+            self.S_PDF: i18n.t("Next: set the scale"),
+            self.S_SCALE: i18n.t("Next: name the layers"),
+            self.S_LAYERS: i18n.t("Next: measure the ducts"),
+        }.get(index, ""))
+        self._refresh_nav()
+
+    def _back(self):
+        self._show_step(self._step - 1)
+
+    def _next(self):
+        if self._step == self.S_LAYERS:
+            self._extract()          # moves on to the results only if it starts
+        else:
+            self._show_step(self._step + 1)
+
+    def _can_advance(self) -> tuple[bool, str]:
+        """Whether Next works on this step, and if not, why in plain words --
+        a greyed button that does not say why is a dead end."""
+        if self._step == self.S_PDF:
+            if not self.pdf_path:
+                return False, i18n.t("Add the tender PDF to go on.")
+            if not self._role_combos:
+                return False, i18n.t("Prism found no lines in that PDF to measure.")
+        elif self._step == self.S_SCALE:
+            if not self.scale_confirm_cb.isChecked():
+                return False, i18n.t(
+                    "Measure a known length, or tick the box, to go on.")
+        return True, ""
+
+    def _refresh_nav(self):
+        ok, why = self._can_advance()
+        self.next_btn.setEnabled(ok)
+        self._set_why("" if ok or self._step == self.S_RESULT else why)
+        self._update_use_btn()
+
+    # ── step 1: the PDF ──────────────────────────────────────────────────
 
     def _pick_pdf(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -500,11 +638,13 @@ class IndustryTakeoffDialog(QDialog):
         if not path:
             return
         self.pdf_path = path
-        self.path_label.setText(os.path.basename(path))
+        self.file_card.set_file(os.path.basename(path))
         # A measured scale from the PREVIOUS pdf must never silently carry
         # over to a new one -- each drawing has its own scale.
         self._measured_pt_per_ft = None
         self.measured_scale_label.setVisible(False)
+        self.scale_confirm_cb.setChecked(False)
+        self.result = None
         try:
             layers = industries.scan_layers(self.industry, path)
         except Exception as e:                            # noqa: BLE001
@@ -513,6 +653,8 @@ class IndustryTakeoffDialog(QDialog):
             return
         self._fill_mapping(layers)
         self.extract_btn.setEnabled(bool(layers))
+
+    # ── step 3: name the layers ──────────────────────────────────────────
 
     def _fill_mapping(self, layers: list[dict]):
         while self.mapping_layout.count():
@@ -524,14 +666,24 @@ class IndustryTakeoffDialog(QDialog):
         saved_roles = industries.saved_layer_roles(self.industry)
         for layer in layers:
             row = QHBoxLayout()
+            row.setContentsMargins(theme.SPACE_3, theme.SPACE_2,
+                                   theme.SPACE_3, theme.SPACE_2)
+            row.setSpacing(theme.SPACE_3)
             swatch = QLabel()
-            swatch.setFixedSize(16, 16)
+            swatch.setFixedSize(26, 26)
             swatch.setStyleSheet(
-                f"background: {layer['color']}; border-radius: 3px;")
+                f"background: {layer['color']}; border-radius: 6px;")
             row.addWidget(swatch)
+            names = QVBoxLayout()
+            names.setSpacing(0)
+            kind = i18n.t("Small boxes") if layer["kind"] == "rect" else i18n.t("Lines")
+            names.addWidget(C.label(
+                i18n.t("{kind} in this colour").format(kind=kind), level="CARD_TITLE"))
             ft = layer["length_pt"] / 72  # a plain visual cue, not a measurement
-            row.addWidget(QLabel(
-                f'{layer["color"]}  {layer["kind"]}  {layer["segments"]} segs  ~{ft:.0f} pt'))
+            names.addWidget(C.label(
+                f'{layer["color"]}  ·  {layer["segments"]} pieces  ·  ~{ft:.0f} pt',
+                level="META"))
+            row.addLayout(names, stretch=1)
             row.addWidget(C.icon_button(
                 "eye", i18n.t("Preview this layer on the drawing"),
                 on_click=lambda _=False, l=layer: self._preview_layer(l)))
@@ -544,30 +696,24 @@ class IndustryTakeoffDialog(QDialog):
             if saved and saved in role_opts:
                 combo.setCurrentText(saved)
             row.addWidget(combo)
-            row.addStretch(1)
-            wrap = QWidget()
+            wrap = QFrame()
+            wrap.setObjectName("layerRow")
+            wrap.setAttribute(Qt.WA_StyledBackground, True)
             wrap.setLayout(row)
             self.mapping_layout.addWidget(wrap)
             self._role_combos.append((layer, combo))
-        self.mapping_btn.setText(i18n.t("▾ Layer mapping ({n} found)").format(n=len(layers)))
-        self.mapping_btn.setVisible(bool(layers))
-        self.mapping_area.setVisible(False)
+        self.mapping_layout.addStretch(1)
+        self._refresh_nav()
 
     def _preview_layer(self, layer: dict):
         if not self.pdf_path:
             return
         _LayerPreviewDialog(self.industry, self.pdf_path, layer, parent=self).exec()
 
-    def _toggle_mapping(self):
-        show = not self.mapping_area.isVisible()
-        self.mapping_area.setVisible(show)
-        n = len(self._role_combos)
-        arrow = "▴" if show else "▾"
-        self.mapping_btn.setText(i18n.t("{arrow} Layer mapping ({n} found)").format(
-            arrow=arrow, n=n))
-
     def _layer_map(self) -> dict:
         return {layer["key"]: combo.currentText() for layer, combo in self._role_combos}
+
+    # ── step 2: the scale ────────────────────────────────────────────────
 
     def _pt_per_ft(self) -> float:
         # A measured scale (from "Measure…", item 27 rule 5's own
@@ -603,54 +749,79 @@ class IndustryTakeoffDialog(QDialog):
 
     def _update_use_btn(self):
         self.use_btn.setEnabled(self.result is not None and self.scale_confirm_cb.isChecked())
+        if self._step == self.S_RESULT:
+            if self.result is None:
+                self._set_why(i18n.t("Measure the ducts first."))
+            elif not self.scale_confirm_cb.isChecked():
+                self._set_why(i18n.t(
+                    "Go back and set the scale — it has to be checked first."))
+            else:
+                self._set_why("")
+        elif self._step == self.S_SCALE:
+            self._refresh_nav_only()
 
-    # ── Step 2 ───────────────────────────────────────────────────────────
+    def _set_why(self, text: str):
+        # The note box has a border; an empty one is a stray empty box in the
+        # footer, so it only exists while there is something to say.
+        self._why.setText(text)
+        self._why.setVisible(bool(text))
 
-    def _extract(self):
+    def _refresh_nav_only(self):
+        ok, why = self._can_advance()
+        self.next_btn.setEnabled(ok)
+        self._set_why("" if ok else why)
+
+    # ── step 4: extract and review ───────────────────────────────────────
+
+    def _extract(self) -> bool:
+        """Start reading the drawing. Returns whether it started; on success
+        the results page is shown, on a declined question the layers page is."""
         if not self.pdf_path:
-            return
+            return False
         # Found on a real drawing, 26 Oct 2026: every layer defaults to
         # "ignore" (the safe default, never a guessed colour), so leaving
-        # Step 1 untouched -- easy to do, since it stays folded away on
-        # purpose -- runs the whole OCR pass and then reports zero duct
-        # runs, with no earlier sign anything was about to go unmeasured.
-        # Asking first costs one click and catches it before the wait,
-        # not after; "No" still runs it, for a sheet that genuinely has
-        # only equipment notes/labels and no duct geometry to pair.
+        # the layers untouched runs the whole OCR pass and then reports
+        # zero duct runs, with no earlier sign anything was about to go
+        # unmeasured. Asking first costs one click and catches it before
+        # the wait, not after; "No" still runs it, for a sheet that
+        # genuinely has only equipment notes/labels and no duct geometry
+        # to pair.
         layer_map = self._layer_map()
         if layer_map and not any(role != "ignore" for role in layer_map.values()):
             answer = QMessageBox.question(
                 self, "BOQ", i18n.t(
                     "Every line colour is still set to \"ignore\" in Layer "
-                    "mapping above -- extraction will not find any duct "
+                    "mapping -- extraction will not find any duct "
                     "runs until at least one is set to supply/return (or "
                     "another role). Extract anyway?"),
                 QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
             if answer != QMessageBox.Yes:
-                self.mapping_area.setVisible(True)
-                self.mapping_btn.setText(i18n.t("▴ Layer mapping ({n} found)").format(
-                    n=len(self._role_combos)))
-                return
+                self._show_step(self.S_LAYERS)
+                return False
         # Remember these role choices for the NEXT drawing, win or lose --
         # saved before the worker even starts, same as the standalone
         # tool, so a crash or a bad scale never costs the mapping work.
         industries.remember_layer_roles(self.industry, layer_map)
         self.extract_btn.setEnabled(False)
         self.use_btn.setEnabled(False)
+        self.status.setStyleSheet("")
         self.status.setText(i18n.t("Reading the drawing — a large PDF can take a minute…"))
+        self._show_step(self.S_RESULT)
         self._worker = HvacTakeoffWorker(
             self.industry, self.pdf_path, layer_map, self._pt_per_ft(),
             use_ocr=self.ocr_cb.isChecked())
         self._worker.done.connect(self._on_extracted)
         self._worker.failed.connect(self._on_extract_failed)
         self._worker.start()
+        return True
 
     def _on_extracted(self, result: dict):
         self.result = result
         self.review.set_result(self.industry, result)
         self.review.setVisible(True)
         self.extract_btn.setEnabled(True)
-        self._update_use_btn()
+        self.extract_btn.setText(i18n.t("Measure again"))
+        self._show_step(self.S_RESULT)
         n = len(result.get("duct_runs") or [])
         if n:
             self.status.setStyleSheet("")
@@ -663,7 +834,7 @@ class IndustryTakeoffDialog(QDialog):
             # unexplained in the final BOQ prompt.
             self.status.setStyleSheet(f"color: {theme.WARN_INK};")
             self.status.setText(i18n.t(
-                "0 duct runs measured — check Layer mapping above: at "
+                "0 duct runs measured — check Layer mapping: at "
                 "least one line colour needs to be set to supply/return "
                 "for this drawing's ductwork to be measured."))
         self._set_warnings(result.get("warnings") or [])
