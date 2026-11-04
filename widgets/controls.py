@@ -1208,7 +1208,7 @@ class PageHeader(QFrame):
     and one or two secondary ones. Exactly one primary per surface.
     """
 
-    _INSET = theme.PAGE_PAD   # card edge lines up with the content cards below
+    _INSET = 14          # the preview's phead sits wider than the cards under it
     _INSET_TOP = 12
     _INSET_BOTTOM = 4
 
@@ -1629,14 +1629,25 @@ class FilterChips(QWidget):
 
     def __init__(self, options: list, current: str = "", parent=None):
         super().__init__(parent)
+        # One white pill holding the chips, the selected one dark inside it
+        # (the preview's segmented filter), not a row of separate outlines.
+        self.setObjectName("filterChips")
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Preferred)
         # A FlowLayout, not a QHBoxLayout: AI tools feeds this eleven
         # categories, and a one-line row reports their whole width (742 px) as
         # its minimum, which forced the page's scroll content wider than the
         # viewport and clipped the right-hand column of cards at the app's
         # default width (seen in the real window, 1 Oct 2026). Chips now step
         # down a line instead.
-        row = FlowLayout(self, margin=0, h_space=theme.SPACE_2 - 2,
-                         v_space=theme.SPACE_2 - 2)
+        if len(options) <= 6:
+            # A short row is one segmented pill that hugs its chips.
+            row = QHBoxLayout(self)
+            row.setContentsMargins(3, 3, 3, 3)
+            row.setSpacing(2)
+        else:
+            self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
+            row = FlowLayout(self, margin=3, h_space=2, v_space=2)
         self._group = QButtonGroup(self)
         self._group.setExclusive(True)
         self._buttons: dict[str, QPushButton] = {}

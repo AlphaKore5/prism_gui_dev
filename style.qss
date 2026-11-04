@@ -2243,3 +2243,20 @@ QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
     border-top: 1px solid #E6E5E1;
     background: transparent;
 }
+
+#filterChips {
+    background: #ffffff;
+    border: 1px solid #E6E5E1;
+    border-radius: 20px;
+}
+#filterChips #chipBtn {
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 15px;
+}
+#filterChips #chipBtn:hover { background: #F6F5F2; }
+#filterChips #chipBtn:checked {
+    background: #111110;
+    border-color: #111110;
+    color: #ffffff;
+}

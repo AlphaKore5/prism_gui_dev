@@ -268,7 +268,7 @@ class AddonRow(QPushButton):
     it: an add-on is a product, and it gets to look like one.
     """
 
-    CHIP = 24
+    CHIP = 26
 
     def __init__(self, label: str, icon_name: str, hue: str, parent=None):
         # No _amp() here, deliberately, even though this IS a QPushButton:
@@ -370,11 +370,14 @@ class AddonRow(QPushButton):
             self._chip.setPixmap(icons.pixmap(self._icon_name, 18, glyph))
             self._chip.setStyleSheet("background: transparent;")
             return
-        chip_bg = (theme.tint(self._hue, "2e") if live
-                   else theme.tint("#ffffff", "16"))
-        self._chip.setPixmap(icons.pixmap(self._icon_name, 14, hue))
+        # The preview's tile: a soft stone square with a dark glyph for a live
+        # add-on, the same square with a muted glyph for a locked one. The
+        # add-on's own hue is no longer painted on the rail.
+        chip_bg = "#EFEEEA"
+        glyph = theme.INK if live else theme.NEUTRAL[400]
+        self._chip.setPixmap(icons.pixmap(self._icon_name, 14, glyph))
         self._chip.setStyleSheet(
-            f"background: {chip_bg}; border-radius: {theme.R_CHIP + 1}px;")
+            f"background: {chip_bg}; border-radius: 8px;")
         ink = theme.over(INK_CURRENT if self._current
                          else INK_PRIMARY if live else INK_ITEM)
         self._label.setStyleSheet(
