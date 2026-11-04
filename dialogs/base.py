@@ -84,6 +84,11 @@ class DialogHeader(QFrame):
         self.pad = leading
         if self.pad is None and icon:
             self.pad = C.IconPad(icon, theme.ACCENT, 38, theme.R_CONTROL, 19)
+            # The preview's header tile: solid ink with a white glyph, not a
+            # soft tint.
+            self.pad.setPixmap(C.icons.pixmap(icon, 19, "#ffffff"))
+            self.pad.setStyleSheet(
+                f"background: {theme.INK}; border-radius: 12px;")
         if self.pad is not None:
             glyph_col = QVBoxLayout()
             glyph_col.setContentsMargins(0, 0, 0, 0)

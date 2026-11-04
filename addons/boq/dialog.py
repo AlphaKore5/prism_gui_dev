@@ -30,7 +30,7 @@ from dialogs.base import PrismDialog
 from workers import AutomationWorker, MeasureWorker, RecordWorker
 from widgets import controls as C
 from widgets.loader import Loader
-from widgets.stepper import StepTabs
+from widgets.stepper import FileCard, StepTabs
 from widgets.ask_panel import AskPanel, MoreOptions
 from addons.boq import agents as boq_agents
 from addons.boq import industries
@@ -305,6 +305,40 @@ class BoqDialog(PrismDialog):
         self.ask.speak_clicked.connect(self._toggle_record)
         self.ask.files_added.connect(self._on_files_added)
         root.addWidget(self.ask)
+
+        # "Or pick one": the two example jobs the add-on's front door already
+        # offers, one click to fill the box. Not shown once something is typed.
+        examples = ([i18n.t("Parts list to fabricate this over-band magnetic separator"),
+                     i18n.t("BOM for one 36x24 jaw crusher, 100 TPH")]
+                    if self.mode == "bom" else
+                    [i18n.t("BOQ for CCTV, cabling and fibre for this site"),
+                     i18n.t("Materials to build one 36x24 jaw crusher, 100 TPH")])
+        self.example_row = QWidget()
+        erow = QHBoxLayout(self.example_row)
+        erow.setContentsMargins(0, 0, 0, 0)
+        erow.setSpacing(theme.SPACE_2)
+        elab = QLabel(i18n.t("Or pick one:"))
+        elab.setObjectName("meta")
+        erow.addWidget(elab)
+        for text in examples:
+            chip = QPushButton(text)
+            chip.setObjectName("tryChip")
+            chip.setCursor(Qt.PointingHandCursor)
+            chip.clicked.connect(lambda _=False, t=text: self.ask.set_text(t))
+            erow.addWidget(chip)
+        erow.addStretch(1)
+        root.addWidget(self.example_row)
+
+        # The drawing, as a card: empty until one is attached, then "Drawing
+        # added" with its name and a way to swap it. The Add file button above
+        # is the same door; this just says what Prism has so far.
+        self.drawing_card = FileCard(
+            i18n.t("Add a drawing (optional)"),
+            i18n.t("A DXF, DWG or PDF. No drawing? Describe the job above and "
+                   "Prism lists the items."),
+            i18n.t("Drawing added"), i18n.t("Add a drawing"),
+            i18n.t("Change drawing"), on_click=self.ask._pick_file)
+        root.addWidget(self.drawing_card)
 
         # Say which format works BEFORE a drawing is attached, not in an error
         # afterwards.
@@ -617,6 +651,8 @@ class BoqDialog(PrismDialog):
             lay.addStretch(0)
         self._step = 0
         self.ask.edit.textChanged.connect(self._refresh_primary)
+        self.ask.edit.textChanged.connect(
+            lambda: self.example_row.setVisible(not self.ask.text()))
         self.ask.files_added.connect(self._refresh_primary)
         self.ask.file_removed.connect(self._refresh_primary)
         self._show_step(0)
@@ -731,6 +767,7 @@ class BoqDialog(PrismDialog):
             self._update_template_hint()
         if cad:
             self.cad_path = cad[0]["path"]
+            self.drawing_card.set_file(os.path.basename(self.cad_path))
             self._measure()
 
     def _update_template_hint(self):

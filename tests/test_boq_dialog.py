@@ -323,6 +323,92 @@ class TheBoqIsFourStepsAndTheOnePrimaryFollowsTheStep(unittest.TestCase):
         self.assertTrue(d.industry_combo.isVisibleTo(d))    # industry never hidden
 
 
+class TheCountIsShownAsCardsOverTheSameTable(unittest.TestCase):
+    """Check-the-count step: what needs a person comes first as cards, the rest
+    as one tick-list, and "Yes, it's right" / "Change the number" act on the
+    very same rows the table holds. The table is still there, behind "Show every
+    line in a table"."""
+
+    Q = {"unit": "mm", "unit_code": 4, "unit_confirmed": True,
+         "notes": ["M-DUCT-SUPP: read 3 pair(s) of lines as one run's two edges"],
+         "lengths_by_layer": {"M-DUCT-SUPP": 4000.0, "A-WALL": 2000.0,
+                              "A-DOOR": 500.0},
+         "block_counts": {"PUMP": 3}, "block_layers": {"PUMP": ["M-EQPM"]},
+         "layers": ["M-DUCT-SUPP", "A-WALL", "A-DOOR", "M-EQPM"],
+         "entity_count": 10,
+         "site": {"lookalikes": [{"layers": ["A-WALL", "A-Wall-2"],
+                                  "verdict": "check which is current"}]}}
+
+    def _t(self):
+        from addons.boq.measured import MeasuredTable
+        t = MeasuredTable()
+        t.set_quantities(self.Q)
+        t.show()
+        return t
+
+    def _cards(self, t):
+        from PySide6.QtWidgets import QFrame
+        return [w for w in t.findChildren(QFrame) if w.objectName() == "countCard"]
+
+    def test_flagged_rows_become_cards_and_the_rest_one_good_box(self):
+        t = self._t()
+        sevs = sorted(c.property("sev") for c in self._cards(t))
+        self.assertEqual(sevs, ["bad", "warn"])
+        self.assertIn("1 you must check", t.verdict.text())
+        self.assertIn("1 worth a look", t.verdict.text())
+        self.assertEqual(t.summary.text(), "Prism found 4 items")
+
+    def test_the_table_is_still_there_behind_a_button(self):
+        t = self._t()
+        self.assertFalse(t.detail.isVisibleTo(t))
+        t.table_btn.click()
+        self.assertTrue(t.detail.isVisibleTo(t))
+        self.assertEqual(len(t.rows()), 4)
+
+    def test_yes_its_right_turns_that_row_trusted_in_both_views(self):
+        from addons.boq.measured import COL_ITEM, COL_TRUST
+        t = self._t()
+        t._confirm("A-WALL", "A-WALL")
+        self.assertEqual([c.property("sev") for c in self._cards(t)], ["warn"])
+        row = next(r for r in range(t.table.rowCount())
+                   if t.table.item(r, COL_ITEM).text() == "A-WALL")
+        self.assertIn("checked", t.table.item(row, COL_TRUST).toolTip())
+
+    def test_changing_the_number_edits_the_table_and_confirms_the_row(self):
+        from addons.boq.measured import COL_ITEM, COL_VALUE
+        t = self._t()
+        card = next(c for c in self._cards(t) if c.property("sev") == "bad")
+        r = next(i for i in range(t.table.rowCount())
+                 if t.table.item(i, COL_ITEM).text() == "A-WALL")
+        t._apply_number(r, _Line("2,500"))
+        self.assertEqual(t.table.item(r, COL_VALUE).text(), "2,500.00")
+        self.assertEqual([c.property("sev") for c in self._cards(t)], ["warn"])
+
+    def test_a_bad_number_is_left_alone(self):
+        from addons.boq.measured import COL_ITEM, COL_VALUE
+        t = self._t()
+        r = next(i for i in range(t.table.rowCount())
+                 if t.table.item(i, COL_ITEM).text() == "A-WALL")
+        before = t.table.item(r, COL_VALUE).text()
+        t._apply_number(r, _Line("abc"))
+        self.assertEqual(t.table.item(r, COL_VALUE).text(), before)
+        self.assertEqual(len(self._cards(t)), 2)
+
+    def test_a_card_says_why_in_the_warnings_own_words(self):
+        t = self._t()
+        from PySide6.QtWidgets import QLabel
+        texts = " ".join(l.text() for c in self._cards(t) for l in c.findChildren(QLabel))
+        self.assertIn("check which is current", texts)
+
+
+class _Line:
+    def __init__(self, text):
+        self._t = text
+
+    def text(self):
+        return self._t
+
+
 if __name__ == "__main__":
     unittest.main()
 
@@ -1600,6 +1686,7 @@ class RowsAreTintedByConfidenceAndValueIsEditable(unittest.TestCase):
             t.set_quantities(self.Q)
             t.resize(760, 300)
             t.show()
+            t._toggle_table()       # the table sits behind "Show every line" now
             app.processEvents()
             by_item = {t.table.item(r, COL_ITEM).text(): r for r in range(t.table.rowCount())}
             r = by_item["A-WALL"]                       # red (lookalike)

@@ -407,13 +407,13 @@ _FONT_DIR = paths.resource("assets", "fonts")
 # that already construct QFont(family, points).
 TYPE = {
     # level          family         px  weight  colour
-    "PAGE_TITLE": (FONT_HEADING,    26,   600,  "#111110"),
-    "SECTION":    (FONT_HEADING,    20,   600,  "#111110"),
-    "CARD_TITLE": (FONT_HEADING,    16,   600,  "#111110"),
+    "PAGE_TITLE": (FONT_HEADING,    30,   400,  "#111110"),
+    "SECTION":    (FONT_HEADING,    22,   400,  "#111110"),
+    "CARD_TITLE": (FONT_HEADING,    16,   500,  "#111110"),
     "BODY":       (FONT_BODY,       15,   400,  "#18181b"),
     "SUPPORT":    (FONT_BODY,       14,   400,  "#18181b"),
     "META":       (FONT_BODY,       13,   500,  "#3f3f46"),
-    "LABEL":      (FONT_HEADING,    12,   600,  "#27272a"),
+    "LABEL":      (FONT_MONO,       11,   400,  "#6B6A65"),
     "MONO":       (FONT_MONO,       13,   500,  "#18181b"),
 }
 

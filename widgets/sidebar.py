@@ -458,6 +458,9 @@ class Sidebar(QFrame):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        # No scrollbar line down the rail (the preview has none); the wheel
+        # and the keyboard still scroll it.
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll.setFrameShape(QScrollArea.NoFrame)
         scroll.setStyleSheet("""
             QScrollArea { background: transparent; border: none; }
@@ -734,7 +737,7 @@ class Sidebar(QFrame):
         # background over anything the QFrame itself would draw.
         self._pip = QFrame(inner)
         self._pip.setObjectName("railPip")
-        self._pip.setStyleSheet("background: #09090b; border-radius: 2px;")
+        self._pip.setStyleSheet(f"background: {theme.BRAND_RED}; border-radius: 0px;")
         self._pip.hide()
         inner.installEventFilter(self)
 
@@ -841,7 +844,17 @@ class Sidebar(QFrame):
             stack.addWidget(member)
             expanded_row.addLayout(stack, stretch=1)
         else:
-            expanded_row.addWidget(track(name, 0.14), stretch=1)
+            # Wordmark over a small mono "BY ALPHAKORE" -- the family line the
+            # preview shows under the name.
+            name.setText("Prism")
+            stack = QVBoxLayout()
+            stack.setContentsMargins(0, 0, 0, 0)
+            stack.setSpacing(0)
+            stack.addWidget(name)
+            byline = QLabel("BY ALPHAKORE")
+            byline.setObjectName("brandBy")
+            stack.addWidget(byline)
+            expanded_row.addLayout(stack, stretch=1)
 
         self._collapse_btn = QPushButton()
         self._collapse_btn.setObjectName("railCollapseBtn")
@@ -1176,11 +1189,11 @@ class Sidebar(QFrame):
         # so go through global coordinates instead (see 4f65dfd).
         origin = self._inner.mapFromGlobal(widget.mapToGlobal(QPoint(0, 0)))
         top = origin.y()
-        height = max(14, min(22, widget.height() - 10))
+        # The preview's marker: a 6px red square, not a bar.
+        size = 6
         c = getattr(self, "_collapsed", False)
         self._pip.setGeometry(2 if c else 0,
-                              top + (widget.height() - height) // 2,
-                              3 if c else 4, height)
+                              top + (widget.height() - size) // 2, size, size)
         self._pip.show()
         self._pip.raise_()
 

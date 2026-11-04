@@ -274,6 +274,8 @@ QToolTip {
 #sidebar[collapsed="true"] #railPrimary {
     text-align: center;
     padding: 4px 0px;
+    font-weight: 500;
+    font-size: 15px;
 }
 
 #sidebar[collapsed="true"] #navItem[cur="true"],
@@ -281,6 +283,7 @@ QToolTip {
     background: #EFEEEA;
     border: 1px solid #D8D7D2;
     border-radius: 8px;
+    font-weight: 500;
 }
 
 #sidebar[collapsed="true"] #railProfile {
@@ -291,7 +294,7 @@ QToolTip {
 #brand {
     font-family: "Geist";
     font-size: 21px;
-    font-weight: 700;
+    font-weight: 500;
     color: #111110;
 }
 
@@ -300,10 +303,10 @@ QToolTip {
     background: transparent;
     border: 1px solid transparent;
     border-radius: 8px;
-    padding: 8px 12px;
+    padding: 6px 12px;
     font-family: "Geist";
-    font-size: 15px;
-    font-weight: 600;
+    font-size: 14px;
+    font-weight: 500;
     color: #2a2a28;
 }
 
@@ -321,10 +324,10 @@ QToolTip {
 }
 
 #navItem[cur="true"] {
-    background: #ffffff;
-    border: 1px solid #D8D7D2;
+    background: #EEEDEA;
+    border: 1px solid rgba(20, 20, 18, 0.06);
     color: #111110;
-    font-weight: 700;
+    font-weight: 500;
 }
 
 #navSub {
@@ -345,10 +348,10 @@ QToolTip {
 }
 
 #navSub[cur="true"] {
-    background: #ffffff;
-    border: 1px solid #D8D7D2;
+    background: #EEEDEA;
+    border: 1px solid rgba(20, 20, 18, 0.06);
     color: #111110;
-    font-weight: 700;
+    font-weight: 500;
 }
 
 #navItem[locked="true"], #navSub[locked="true"] {
@@ -365,10 +368,10 @@ QToolTip {
 }
 
 #navSection {
-    font-family: "Geist";
-    font-size: 13px;
-    font-weight: 700;
-    color: rgba(0, 0, 0, 0.50);
+    font-family: "Geist Mono";
+    font-size: 11px;
+    font-weight: 400;
+    color: #6B6A65;
     padding: 3px 4px;
     background: transparent;
     letter-spacing: 0.6px;
@@ -423,7 +426,7 @@ QToolTip {
 
 #railProfileName {
     font-size: 15px;
-    font-weight: 600;
+    font-weight: 500;
     color: #111110;
     background: transparent;
 }
@@ -451,7 +454,7 @@ QToolTip {
 #kick, #colHead {
     font-family: "Geist Mono";
     font-size: 11px;
-    font-weight: 500;
+    font-weight: 400;
     color: #6b6a65;
 }
 
@@ -463,13 +466,13 @@ QToolTip {
 }
 
 /* PAGE_TITLE — one per screen. */
-#h1, #h2 { font-family: "Geist"; font-size: 26px; font-weight: 600; color: #111110; }
+#h1, #h2 { font-family: "Geist"; font-size: 30px; font-weight: 400; color: #111110; }
 #card #h1, #card #h2 { color: #111110; }
 /* SECTION — the heading above a group of cards. */
-#h3, #h4 { font-family: "Geist"; font-size: 20px; font-weight: 600; color: #111110; }
+#h3, #h4 { font-family: "Geist"; font-size: 22px; font-weight: 400; color: #111110; }
 #card #h3, #card #h4 { color: #111110; }
 /* CARD_TITLE — the name of a thing. */
-#h5, #h6 { font-family: "Geist"; font-size: 16px; font-weight: 600; color: #111110; }
+#h5, #h6 { font-family: "Geist"; font-size: 16px; font-weight: 500; color: #111110; }
 #card #h5, #card #h6 { color: #111110; }
 
 /* The dashboard's big condensed figure — "12", "₹8.4L", "58%". A metric is a
@@ -549,7 +552,7 @@ QToolTip {
 #emptyTitle {
     font-family: "Geist";
     font-size: 18px;
-    font-weight: 600;
+    font-weight: 500;
     color: #111110;
     background: transparent;
 }
@@ -588,7 +591,7 @@ QPushButton, #secondaryBtn {
     min-height: 28px;
     font-family: "Geist";
     font-size: 14px;
-    font-weight: 600;
+    font-weight: 500;
     color: #111110;
 }
 
@@ -628,7 +631,7 @@ QPushButton:disabled, #secondaryBtn:disabled {
     min-height: 34px;
     font-family: "Geist";
     font-size: 14px;
-    font-weight: 600;
+    font-weight: 500;
 }
 
 #primaryBtn:hover, #primary:hover {
@@ -1207,8 +1210,22 @@ QListWidget::item:selected {
     min-height: 20px;
     font-family: "Geist";
     font-size: 14px;
-    font-weight: 600;
+    font-weight: 500;
     color: #111110;
+}
+
+/* The one primary action in a header keeps its solid ink pill and red dot. */
+#pageHeader QPushButton#primaryBtn {
+    background: #111110;
+    border: 1px solid #111110;
+    border-radius: 17px;
+    padding: 6px 20px 6px 8px;
+    color: #ffffff;
+}
+
+#pageHeader QPushButton#primaryBtn:hover {
+    background: #2a2a28;
+    border-color: #2a2a28;
 }
 
 #pageHeader QPushButton:hover {
@@ -1223,8 +1240,8 @@ QListWidget::item:selected {
 
 #sectionTitle {
     font-family: "Geist";
-    font-size: 20px;
-    font-weight: 600;
+    font-size: 22px;
+    font-weight: 400;
     color: #111110;
     background: transparent;
 }
@@ -2043,6 +2060,7 @@ QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
     padding: 4px 12px;
     font-size: 13px;
     color: #2a2a28;
+    font-weight: 500;
 }
 
 #tryChip:hover {
@@ -2168,4 +2186,60 @@ QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
     background: #ffffff;
     border: 1px solid #E6E5E1;
     border-radius: 10px;
+}
+
+#brandBy {
+    font-family: "Geist Mono";
+    font-size: 9px;
+    color: #6B6A65;
+    background: transparent;
+}
+
+#statusBy {
+    font-family: "Geist Mono";
+    font-size: 11px;
+    color: #A8A7A2;
+    background: transparent;
+    padding-right: 10px;
+}
+
+/* ── BOQ "check the count" cards (addons/boq/measured.py) ────────────────── */
+#countCard {
+    border-radius: 12px;
+    border: 1px solid #E6E5E1;
+    background: #ffffff;
+}
+#countCard[sev="bad"] {
+    background: #F7E3E1;
+    border: 1px solid #E9C4C0;
+}
+#countCard[sev="warn"] {
+    background: #FBF3DE;
+    border: 1px solid #EFDDA8;
+}
+#countTag {
+    font-family: "Geist Mono";
+    font-size: 10px;
+    padding: 3px 8px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.7);
+}
+#countTag[sev="bad"] { color: #A3141A; }
+#countTag[sev="warn"] { color: #8A5A0A; }
+#countGood {
+    border: 1px solid #E6E5E1;
+    border-radius: 12px;
+    background: #ffffff;
+}
+#countGoodHead {
+    background: #E4EFE7;
+    color: #1F6B43;
+    font-weight: 500;
+    padding: 8px 16px;
+    border-top-left-radius: 12px;
+    border-top-right-radius: 12px;
+}
+#countLine {
+    border-top: 1px solid #E6E5E1;
+    background: transparent;
 }

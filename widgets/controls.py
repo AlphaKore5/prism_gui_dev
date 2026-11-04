@@ -943,14 +943,17 @@ def button(text: str, variant: str = "secondary", icon_name: str = "",
     # Even the small step clears the minimum target: 28px is the floor for
     # anything you can click, not a suggestion that shrinks with the label.
     btn.setMinimumHeight(MIN_TARGET)
-    if icon_name:
+    if variant == "primary":
+        # Every primary wears the brand's red dot, whatever icon the call site
+        # asked for: the preview has one primary look, not a tick here and a
+        # plus there.
+        btn.setIcon(brand_dot_icon(22))
+        btn.setIconSize(QSize(22, 22))
+    elif icon_name:
         ink = {"primary": theme.CARD, "destructive": theme.ERR_INK}.get(
             variant, theme.ACCENT_RAMP[700] if variant in ("tertiary", "link")
             else theme.NEUTRAL[800])
         icons.button_icon(btn, icon_name, 15, ink)
-    elif variant == "primary":
-        btn.setIcon(brand_dot_icon(22))
-        btn.setIconSize(QSize(22, 22))
     if on_click is not None:
         btn.clicked.connect(on_click)
     return btn
@@ -1081,7 +1084,17 @@ class _StatusDot(QWidget):
             mid = self.SIZE / 2
             painter.drawLine(QRectF(2, mid, 0, 0).topLeft(),
                              QRectF(self.SIZE - 2, mid, 0, 0).topLeft())
-        else:                                   # check / cross
+        elif kind in ("check", "cross"):
+            # The AlphaKore preview marks done and failed with the same small
+            # square as its other labels, not a tick or cross in a disc; the
+            # word beside it says which. (The tick/cross painting below is
+            # kept for any caller that asks for the old look.)
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(ink)
+            side = 6.0
+            painter.drawRect(QRectF((self.SIZE - side) / 2, (self.SIZE - side) / 2,
+                                    side, side))
+        else:                                   # legacy tick / cross in a disc
             painter.setPen(Qt.NoPen)
             painter.setBrush(ink)
             painter.drawEllipse(box)
@@ -1170,8 +1183,8 @@ class StatusBadge(QFrame):
         self._detail.setStyleSheet(theme.type_css("META", theme.c(ink).name())
                                    + " background: transparent;")
         self.setStyleSheet(
-            f"#statusBadge {{ background: {bg}; border: 2px solid {bg};"
-            f" border-radius: {theme.R_PILL}px; }}"
+            f"#statusBadge {{ background: {bg}; border: 2px solid transparent;"
+            f" border-radius: 4px; }}"
             f"#statusBadge:focus {{ border-color: {ink}; }}")
         # What a screen reader says. The visual is a coloured dot; without
         # this, that is all it is.

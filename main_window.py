@@ -317,6 +317,10 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Prism")
         self._fit_to_screen()
+        # The family line at the right of the status bar, as in the preview.
+        _by = QLabel(f"Prism {app_meta.VERSION}  ·  by AlphaKore")
+        _by.setObjectName("statusBy")
+        self.statusBar().addPermanentWidget(_by)
 
         self.cfg = CB.config.load()
         try:
