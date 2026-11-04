@@ -9,36 +9,81 @@ Qt signal; no decision-making lives here").
 """
 from __future__ import annotations
 
+import base64
+
 from PySide6.QtCore import Signal
 
+import core_bridge as CB
 from addons.boq import industries
 from addons.boq import openrouter_writer
 from workers import _Worker
+
+# item 2 (5 Nov 2026): HVAC's own AI VAV-tag re-check -- the model chosen
+# after testing several candidates live against a real drawing's actual
+# tiles (not picked on price or name alone): Qwen's vision line read
+# noticeably more real VAV tags than RapidOCR at the same 2400px tiling,
+# for a small fraction of a rupee per drawing. Named here, once, so a
+# future swap is "change this one string", not a hunt through workers.py.
+HVAC_VISION_MODEL = "qwen/qwen3-vl-30b-a3b-instruct"
+# Capped and reasoning-off for both reasons found live testing this exact
+# model on this exact kind of tile: with no cap, a run produced 18k+
+# characters of repeated lines before stopping itself (one tile took 10
+# minutes instead of ~20 seconds); some vision models on OpenRouter default
+# to a "thinking" mode that can spend the whole token budget on its own
+# reasoning and return a null final answer -- off avoids that outright.
+_HVAC_VISION_PROMPT = (
+    "This is a cropped section of a dense HVAC engineering drawing. "
+    "List EVERY distinct text label/tag you can read in this image, one per "
+    "line, exactly as written, including any VAV tags (format VAV-#-##), "
+    "diffuser sizes, CFM numbers, disc valve labels, duct size labels. Do "
+    "not summarize or skip any. If you see no legible text, say NONE. List "
+    "each distinct tag only ONCE -- do not repeat the same line more than "
+    "once, even if it appears on the drawing multiple times.")
 
 
 class HvacTakeoffWorker(_Worker):
     """Runs one industry's PDF-takeoff extraction (today, only HVAC has
     one) off the GUI thread. `industry` is threaded through rather than
     hardcoded so a second industry's own extractor plugs into this same
-    worker later, not a copy of it."""
+    worker later, not a copy of it.
+
+    `api_key`/`use_ai_tags`: HVAC's own optional AI VAV-tag re-check (item
+    2) -- off unless both an OpenRouter key AND the checkbox are present,
+    same two-gate shape _run_prism_agent() already uses for the BOQ
+    write-up path. This worker is the one place that builds the actual
+    `tag_reader` callback hvac_takeoff.vision_vav_recount() calls -- the
+    engine function itself never imports core_bridge or sees a key (its
+    own docstring explains why)."""
 
     done = Signal(dict)
     failed = Signal(str)
 
     def __init__(self, industry: str, pdf_path: str, layer_map: dict,
-                 pt_per_ft: float, use_ocr: bool = True):
+                 pt_per_ft: float, use_ocr: bool = True, *,
+                 api_key: str = "", use_ai_tags: bool = False):
         super().__init__()
         self.industry = industry
         self.pdf_path = pdf_path
         self.layer_map = layer_map
         self.pt_per_ft = pt_per_ft
         self.use_ocr = use_ocr
+        self.api_key = api_key
+        self.use_ai_tags = use_ai_tags
+
+    def _tag_reader(self, png_bytes: bytes) -> str:
+        b64 = base64.b64encode(png_bytes).decode()
+        return CB.openrouter.openrouter_chat(
+            self.api_key, HVAC_VISION_MODEL, _HVAC_VISION_PROMPT,
+            attachments=[{"kind": "image", "mime": "image/png", "b64": b64}],
+            temperature=0.1, max_tokens=900,
+            extra={"frequency_penalty": 0.4, "reasoning": {"enabled": False}})
 
     def run(self):
         try:
+            reader = self._tag_reader if (self.use_ai_tags and self.api_key) else None
             result = industries.extract(
                 self.industry, self.pdf_path, self.layer_map, self.pt_per_ft,
-                use_ocr=self.use_ocr)
+                use_ocr=self.use_ocr, vision_tag_reader=reader)
             self.done.emit(result)
         except Exception as e:                           # noqa: BLE001
             self.failed.emit(str(e))

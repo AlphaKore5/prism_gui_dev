@@ -34,9 +34,11 @@ composes and feeds it to the same lookup History uses.
 from __future__ import annotations
 
 import os
+import shutil
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -49,6 +51,48 @@ from addons.boq.dialog import BoqDialog                   # noqa: E402
 _app = QApplication.instance() or QApplication([])
 
 CFG = {"api_key": "k"}
+
+# item 42 (3 Nov 2026): tests/conftest.py's own autouse `_config_is_never_
+# the_real_one` fixture sandboxes core.config.CONFIG_PATH/RUNS_DIR -- but
+# only when this file is collected BY PYTEST. Run directly as
+# `python -m unittest tests.test_boq_dialog` (a faster, targeted way to run
+# just this file during development -- not a hypothetical, the actual
+# command used throughout the session that found items 38-41), pytest and
+# its conftest never load at all, and every test here that completes a
+# write-up reaches the REAL core.config.save_run() / save_artifact(),
+# writing real junk into the developer's own ~/.prism/runs/ and
+# ~/Desktop/Prism Artifacts/ on every single run. Found, and cleaned up by
+# hand, twice, across two sessions, before this fix -- the same incident
+# RELEASE_ISSUES.md's own worst-named rule exists for. This module-level
+# setup is pytest-independent (plain unittest.mock, not a pytest fixture),
+# so it sandboxes this file the same way either way it's invoked, and is
+# harmless alongside conftest's own fixture when both are active (whichever
+# patches last simply wins; both point at a temp dir either way).
+import core_bridge as _CB                                 # noqa: E402
+
+_sandbox_dir = tempfile.mkdtemp(prefix="prism_test_boq_dialog_")
+_sandbox_patches = [
+    mock.patch.object(_CB.config, "CONFIG_PATH",
+                      os.path.join(_sandbox_dir, "config.json")),
+    mock.patch.object(_CB.config, "RUNS_DIR",
+                      os.path.join(_sandbox_dir, "runs")),
+    # save_artifact()'s real destination -- the second real write path this
+    # file's own tests reach, confirmed live: the ~60 "About this run.txt"-
+    # only junk folders found and removed, twice, from the developer's real
+    # ~/Desktop/Prism Artifacts/. artifacts_root()'s own cache is keyed by
+    # THIS constant's value, so patching it (before any test calls that
+    # function) is enough on its own -- no cache-dict reach-in needed.
+    mock.patch.object(_CB.config, "ARTIFACTS_DIR",
+                      os.path.join(_sandbox_dir, "Prism Artifacts")),
+]
+for _p in _sandbox_patches:
+    _p.start()
+
+
+def tearDownModule():
+    for _p in _sandbox_patches:
+        _p.stop()
+    shutil.rmtree(_sandbox_dir, ignore_errors=True)
 
 
 def _dialog(mode: str = "boq") -> BoqDialog:
@@ -290,6 +334,7 @@ class TheDrawingGoesToAIOnlyAfterAYes(unittest.TestCase):
         self.d.summary = "WALLS 12.00 m"
         self.d._task_name = "BOQ — sai"
         self.d.result.setPlainText("1  Brick wall  12.00  m")
+        self.d._raw_result = "1  Brick wall  12.00  m"
 
     def _ask(self, answer):
         from unittest import mock
@@ -313,6 +358,7 @@ class TheDrawingGoesToAIOnlyAfterAYes(unittest.TestCase):
     def test_the_button_is_on_even_with_no_answer_yet(self):
         self.d.cad_path = self._drawing
         self.d.result.setPlainText("")
+        self.d._raw_result = ""
         self.d._set_busy(False, "")
         self.assertTrue(self.d.recheck_btn.isEnabled())
 
@@ -341,13 +387,158 @@ class TheDrawingGoesToAIOnlyAfterAYes(unittest.TestCase):
         verify yet, so it should read as making one, not correcting one."""
         from addons.boq import dialog as BD
         self.d.result.setPlainText("")
+        self.d._raw_result = ""
         self._ask(BD.QMessageBox.Yes)
         stage = self._Capture.seen["kwargs"]["custom_stages"][0]
         prompt = stage[2][0]
         self.assertNotIn("PREVIOUS ANSWER", prompt)
-        self.assertIn("reading the attached drawing directly", prompt)
+        self.assertIn("reading the attached file directly", prompt)
         self.assertEqual(_FakeRunDialog.last.title,
                          "Making your BOQ from the drawing")
+
+    def test_the_persons_own_typed_ask_reaches_the_prompt(self):
+        """item 45 (3 Nov 2026), found live: the owner typed "...add raw
+        material in Kg and also do add 100mm to length and breadth for
+        scrape" in the ask box, attached a PDF, pressed "Make with
+        drawing" as the first action -- and neither instruction reached
+        the model at all. _send_followup() built its prompt from the
+        boilerplate note plus measured figures/previous answer only;
+        self.ask's own text was never read anywhere in it. Confirmed
+        fixed: the live ask text now appears in the prompt sent.
+
+        Also proves the fix did not just trade one crash for another: an
+        earlier draft read self.request instead of self.ask.text() --
+        self.request is only ever set inside _run() ("Make my BOQ") or
+        restored from History, neither of which this test (or the real
+        workflow it reproduces -- attach, type, press "Make with
+        drawing" directly) ever calls, so it genuinely does not exist as
+        an attribute here."""
+        self.assertFalse(hasattr(self.d, "request"))
+        from addons.boq import dialog as BD
+        self.d.ask.set_text(
+            "add raw material in Kg and also do add 100mm to length and "
+            "breadth for scrape")
+        self._ask(BD.QMessageBox.Yes)
+        stage = self._Capture.seen["kwargs"]["custom_stages"][0]
+        prompt = stage[2][0]
+        self.assertIn("THE PERSON'S OWN REQUEST FOR THIS JOB", prompt)
+        self.assertIn("100mm to length and breadth for scrape", prompt)
+
+    def test_an_empty_ask_adds_no_empty_request_section(self):
+        """Same reasoning as the existing MEASURED FIGURES/PREVIOUS ANSWER
+        checks -- an empty "THE PERSON'S OWN REQUEST..." header with
+        nothing under it would read as a request that happens to be
+        blank, not as there being none."""
+        from addons.boq import dialog as BD
+        self.d.ask.set_text("")
+        self._ask(BD.QMessageBox.Yes)
+        stage = self._Capture.seen["kwargs"]["custom_stages"][0]
+        prompt = stage[2][0]
+        self.assertNotIn("THE PERSON'S OWN REQUEST", prompt)
+
+    def test_a_template_gets_a_do_not_copy_its_numbers_warning(self):
+        """item 47 (3 Nov 2026): core.boq.formatting_prompt()'s own
+        has_template branch tells the writer not to copy a sample's own
+        rows/quantities -- "Make my BOQ" only. "Make with drawing" (a
+        PDF-only drawing's only path to a BOQ, item 38) never carried that
+        guidance at all -- found asking whether a reference BOQ that
+        happened to already contain this exact product's own prior weight
+        figure could leak into the answer. Now it does, the same way
+        formatting_prompt()'s own instruction does."""
+        from addons.boq import dialog as BD
+        self.d.templates = [{"path": "/x/reference_BOQ.xlsx",
+                             "name": "reference_BOQ.xlsx"}]
+        self._ask(BD.QMessageBox.Yes)
+        stage = self._Capture.seen["kwargs"]["custom_stages"][0]
+        prompt = stage[2][0]
+        self.assertIn("SAMPLE/REFERENCE DOCUMENT", prompt)
+        self.assertIn("Do NOT copy its own rows, quantities", prompt)
+
+    def test_no_template_means_no_sample_warning(self):
+        """Same reasoning as the ask/measured-figures/previous-answer
+        sections -- a warning about a sample that was never attached
+        would be noise, not caution."""
+        from addons.boq import dialog as BD
+        self.assertEqual(self.d.templates, [])
+        self._ask(BD.QMessageBox.Yes)
+        stage = self._Capture.seen["kwargs"]["custom_stages"][0]
+        prompt = stage[2][0]
+        self.assertNotIn("SAMPLE/REFERENCE DOCUMENT", prompt)
+
+    def test_a_scrap_request_gets_told_to_cover_tubes_and_rods_too(self):
+        """item 50 (4 Nov 2026): a real job's own ask box said "add 100mm
+        in length and breadth for scrap" -- words that read as a 2D,
+        sheet-panel instruction, and that is exactly how the model took it:
+        every tube/rod/flat-bar CUT LENGTH kept its bare spec figure, with
+        the model's own notes saying tubes got no allowance at all. An
+        independent run of the identical file and instruction (claude.ai)
+        applied the allowance to every cut piece, tube and rod included.
+        Confirmed fixed: the clarification now reaches the prompt whenever
+        the person's own words raise scrap/wastage at all."""
+        from addons.boq import dialog as BD
+        self.d.ask.set_text("add 100mm in length and breadth for scrap")
+        self._ask(BD.QMessageBox.Yes)
+        stage = self._Capture.seen["kwargs"]["custom_stages"][0]
+        prompt = stage[2][0]
+        self.assertIn("SCRAP/WASTAGE ALLOWANCE", prompt)
+        self.assertIn("not sheet panels alone", prompt)
+        self.assertIn("tube, pipe, flat bar and rod", prompt)
+
+    def test_no_scrap_wording_means_no_scrap_clarification(self):
+        """Same reasoning as the sample/template warning above -- a
+        clarification about an allowance nobody asked for would be noise,
+        not caution."""
+        from addons.boq import dialog as BD
+        self.d.ask.set_text("BOQ for KJ Pharmatech")
+        self._ask(BD.QMessageBox.Yes)
+        stage = self._Capture.seen["kwargs"]["custom_stages"][0]
+        prompt = stage[2][0]
+        self.assertNotIn("SCRAP/WASTAGE ALLOWANCE", prompt)
+
+    def test_make_with_drawing_as_the_first_action_opens_its_own_artifacts_folder(self):
+        """item 48 (3 Nov 2026), found live: a real BOQ .docx landed inside
+        an UNRELATED earlier session's artifacts folder ("Create an
+        Instagram post for Dhanteras"). self._task_name/_artifacts_dir are
+        only ever set inside _run() ("Make my BOQ") -- "Make with drawing"
+        pressed as the first action in a session (no self.request, no
+        self._task_name -- exactly the real workflow this bug was found
+        in, same gap item 45 found for a different attribute) left
+        core.config's own module-level "current run" state exactly as a
+        PREVIOUS, unrelated add-on's session last set it. Confirmed fixed:
+        begin_run() is now called with THIS job's own task name."""
+        from unittest import mock
+        from addons.boq import dialog as BD
+        # setUp (above) sets _task_name for ITS OWN, unrelated reasons --
+        # cleared here to reproduce the real case: a dialog "Make with
+        # drawing" is pressed on as the first action ever takes, where
+        # _run() ("Make my BOQ") genuinely never ran and this attribute
+        # genuinely does not exist yet.
+        del self.d._task_name
+        for attr in ("_artifacts_dir", "request"):
+            if hasattr(self.d, attr):
+                delattr(self.d, attr)
+        self.d.ask.set_text("BOQ for KJ Pharmatech")
+        with mock.patch.object(BD.CB.config, "begin_run",
+                               return_value="/sandbox/fresh_folder") as begin:
+            self._ask(BD.QMessageBox.Yes)
+        begin.assert_called_once()
+        task_arg = begin.call_args[0][0]
+        self.assertIn("BOQ for KJ Pharmatech", task_arg)
+        self.assertEqual(self.d._artifacts_dir, "/sandbox/fresh_folder")
+
+    def test_an_already_established_session_is_not_re_begun(self):
+        """"Make my BOQ" pressed first, THEN "Make with drawing" in the
+        same session -- the existing _task_name/_artifacts_dir (and
+        whatever real work core.config did to set them up) must not be
+        silently discarded and redone."""
+        from unittest import mock
+        from addons.boq import dialog as BD
+        self.d._task_name = "Bill of Quantities — already running"
+        self.d._artifacts_dir = "/sandbox/already_running"
+        with mock.patch.object(BD.CB.config, "begin_run") as begin:
+            self._ask(BD.QMessageBox.Yes)
+        begin.assert_not_called()
+        self.assertEqual(self.d._artifacts_dir, "/sandbox/already_running")
 
     def test_with_a_previous_answer_it_still_verifies_and_remakes(self):
         """The same button, pressed once a BOQ already exists -- unchanged
@@ -679,6 +870,7 @@ class TheFollowUpFlowHasALiveWindowAndAFallbackChain(unittest.TestCase):
         self.d.request = "BOQ for the site"
         self.d._task_name = "BOQ — sai"
         self.d.result.setPlainText("1  Brick wall  12.00  m")
+        self.d._raw_result = "1  Brick wall  12.00  m"
         self._patches = [
             mock.patch("addons.boq.dialog.AutomationWorker", _TrackedWorker),
             mock.patch("addons.boq.run_dialog.BoqRunDialog", _FakeRunDialog),
@@ -881,6 +1073,7 @@ class AFollowUpResumesTheSameChatInsteadOfOpeningAFreshOne(unittest.TestCase):
         self.d.request = "BOQ for the site"
         self.d._task_name = "BOQ — sai"
         self.d.result.setPlainText("1  Brick wall  12.00  m")
+        self.d._raw_result = "1  Brick wall  12.00  m"
         self._patches = [
             mock.patch("addons.boq.dialog.AutomationWorker", _TrackedWorker),
             mock.patch("addons.boq.run_dialog.BoqRunDialog", _FakeRunDialog),
@@ -986,6 +1179,7 @@ class AFollowUpOrVerifyActuallyProducesAndSurfacesAFile(unittest.TestCase):
         with open(self.d.cad_path, "w") as fh:
             fh.write("0\nEOF\n")
         self.d.result.setPlainText("1  Brick wall  12.00  m")
+        self.d._raw_result = "1  Brick wall  12.00  m"
         self._patches = [
             mock.patch("addons.boq.dialog.AutomationWorker", _TrackedWorker),
             mock.patch("addons.boq.run_dialog.BoqRunDialog", _FakeRunDialog),
@@ -1015,6 +1209,16 @@ class AFollowUpOrVerifyActuallyProducesAndSurfacesAFile(unittest.TestCase):
         self._followup()
         prompt = _TrackedWorker.instances[0].kwargs["custom_stages"][0][2][0]
         self.assertIn("Word (.docx)", prompt)
+
+    def test_xlsx_is_a_choice_in_the_format_picker(self):
+        """item 51 (4 Nov 2026): the owner compared a Prism BOQ against the
+        same job's claude.ai .xlsx -- Prism's picker had no spreadsheet
+        option at all. addons/boq/openrouter_writer.py now has a real
+        markdown_to_xlsx writer; this is the picker's own half of it."""
+        self.d.format_combo.setCurrentIndex(self.d.format_combo.findData("xlsx"))
+        self._followup()
+        prompt = _TrackedWorker.instances[0].kwargs["custom_stages"][0][2][0]
+        self.assertIn("Excel (.xlsx)", prompt)
 
     def test_a_stale_picker_choice_does_not_fight_a_typed_format_request(self):
         """Item 24b: a real, reproduced bug -- the format picker left on an
@@ -1124,6 +1328,60 @@ class AFollowUpOrVerifyActuallyProducesAndSurfacesAFile(unittest.TestCase):
                          ["/x/boq_quantities_1.csv"])
 
 
+class TheLiveWorkbookInstructionIsScopedToXlsxAndAPrismAgent(unittest.TestCase):
+    """item 52 (4 Nov 2026): the owner asked for the bigger piece item 51's
+    own xlsx export had deferred -- a real multi-sheet, live-formula
+    workbook, the same shape the owner's own claude.ai-made comparison
+    file for the LN2 rack job already has. openrouter_writer.py's own
+    markdown_to_xlsx() builds that shape WHEN the model's answer has an
+    '## INPUTS' table; this is the other half -- _format_request_line()
+    only asks for one when it would actually be used: xlsx chosen AND a
+    Prism Agent picked (a browser agent like plain "Claude" already has
+    its own native xlsx export -- the owner's own comparison file was
+    made exactly that way, no special prompting needed at all)."""
+
+    def test_xlsx_plus_a_prism_agent_asks_for_the_inputs_table_and_formulas(self):
+        d = _dialog()
+        d.writer_combo.setCurrentText("Prism Agent Claude")
+        d.format_combo.setCurrentIndex(d.format_combo.findData("xlsx"))
+        line = d._format_request_line()
+        self.assertIn("INPUTS", line)
+        self.assertIn("{frame_length_ft}", line)
+
+    def test_xlsx_plus_a_prism_agent_also_asks_for_finished_vs_cut_and_a_procurement_summary(self):
+        """item 60 (4 Nov 2026): the owner compared a Prism BOQ against a
+        real estimator's own BOM for the same job and asked for that same
+        depth -- separate finished/cut size columns, per-piece vs total
+        weight, and a raw-material procurement summary a buyer could
+        actually order against, instead of one flat line-item table."""
+        d = _dialog()
+        d.writer_combo.setCurrentText("Prism Agent Deep")
+        d.format_combo.setCurrentIndex(d.format_combo.findData("xlsx"))
+        line = d._format_request_line()
+        self.assertIn("Finished L/W", line)
+        self.assertIn("Cut L/W", line)
+        self.assertIn("Wt/Pc", line)
+        self.assertIn("Total Wt", line)
+        self.assertIn("RAW MATERIAL REQUIREMENT", line)
+        self.assertIn("Qty/Length/Area/Weight", line)   # the real bad example named, as a warning
+
+    def test_xlsx_with_a_browser_agent_does_not_ask_for_it(self):
+        d = _dialog()
+        d.writer_combo.setCurrentText("Claude")
+        d.format_combo.setCurrentIndex(d.format_combo.findData("xlsx"))
+        line = d._format_request_line()
+        self.assertNotIn("INPUTS", line)
+
+    def test_docx_with_a_prism_agent_does_not_ask_for_it_either(self):
+        """Scoped to xlsx specifically -- a Word/CSV/PDF answer has no
+        sheets or formulas to put it in."""
+        d = _dialog()
+        d.writer_combo.setCurrentText("Prism Agent Deep")
+        d.format_combo.setCurrentIndex(d.format_combo.findData("docx"))
+        line = d._format_request_line()
+        self.assertNotIn("INPUTS", line)
+
+
 class AttachingASampleTemplateIsDiscoverableAndConfirmed(unittest.TestCase):
     """The owner's ask: "option for the user to just give in the sample
     BOQs/template... as reference... without actually giving the drawing
@@ -1137,10 +1395,20 @@ class AttachingASampleTemplateIsDiscoverableAndConfirmed(unittest.TestCase):
     def setUp(self):
         self.d = _dialog()
 
-    def _attach(self, name="firm_format.docx"):
+    def _attach(self, name="firm_format.docx",
+               text="PREAMBLE\n1  Item  2.00 m  Qty 1  Rate TBC\n"):
+        # text: item 38/42 -- a .pdf only classifies as a template when its
+        # text actually reads like a BOQ document (two distinct signal
+        # words from core.boq._BOQ_DOCUMENT_SIGNALS, not merely some text
+        # existing -- item 42 found a real, text-bearing CAD-exported PDF
+        # that isn't one). Every file here represents a genuine sample BOQ,
+        # so the default carries enough real BOQ vocabulary ("preamble",
+        # "qty", "rate") rather than each call site repeating it -- matters
+        # for a .pdf name specifically; .docx/.xlsx/etc. classify by
+        # extension alone and never read this text at all.
         from unittest import mock
         from addons.boq import dialog as BD
-        record = {"path": f"/x/{name}", "name": name}
+        record = {"path": f"/x/{name}", "name": name, "text": text}
         with mock.patch.object(BD.CB.files, "attach", return_value=record):
             self.d._absorb([record["path"]])
 
@@ -1165,6 +1433,84 @@ class AttachingASampleTemplateIsDiscoverableAndConfirmed(unittest.TestCase):
         self.assertIn("You can also attach", self.d.template_hint.text())
 
 
+class AttachingATextlessPdfDrawingEnablesMakeWithDrawing(unittest.TestCase):
+    """2 Nov 2026 (item 38): a hand-sketched SS locker fabrication drawing
+    reached Prism as a scanned .pdf with no extractable text. It was filed
+    as a "sample BOQ" (classify_inputs went purely by extension), the
+    writer correctly refused to invent quantities from an unreadable
+    "template", and "Make with drawing" -- the add-on's own explicit,
+    consent-gated path for exactly this case -- never turned on, because
+    cad_path is only ever set from classify_inputs's "cad" role, which only
+    .dwg/.dxf reached. Fixed in core.boq.classify_inputs (a textless .pdf is
+    now "cad", same role a .dwg/.dxf gets) and here: _absorb() must not then
+    call _measure() on it -- there is no vector geometry in a scan for
+    MeasureWorker to find, and the original bug's own replacement would
+    have been a confusing "not a CAD drawing" error on the file the user
+    correctly attached as the drawing."""
+
+    def setUp(self):
+        self.d = _dialog()
+
+    def _attach_textless_pdf(self, name="drawing1_KJ.pdf"):
+        from unittest import mock
+        from addons.boq import dialog as BD
+        record = {"path": f"/x/{name}", "name": name, "text": None,
+                  "size": 1, "kind": "pdf"}
+        with mock.patch.object(BD.CB.files, "attach", return_value=record), \
+             mock.patch.object(BD.BoqDialog, "_measure") as measure:
+            self.d._absorb([record["path"]])
+        return measure
+
+    def test_cad_path_is_set_and_make_with_drawing_turns_on(self):
+        self._attach_textless_pdf()
+        self.assertEqual(self.d.cad_path, "/x/drawing1_KJ.pdf")
+        self.assertTrue(self.d.recheck_btn.isEnabled())
+
+    def test_measure_is_never_called_for_a_pdf(self):
+        """_measure() -> MeasureWorker -> core.boq.ensure_dxf() raises
+        "need .dwg or .dxf" for anything else -- the exact confusing error
+        this fix exists to avoid showing on the file the user correctly
+        attached as the drawing."""
+        measure = self._attach_textless_pdf()
+        measure.assert_not_called()
+
+    def test_the_hint_explains_why_and_names_the_alternatives(self):
+        self._attach_textless_pdf()
+        text = self.d.pdf_drawing_hint.text()
+        self.assertTrue(self.d.pdf_drawing_hint.isVisibleTo(self.d))
+        self.assertIn("drawing1_KJ.pdf", text)
+        self.assertIn("Make with drawing", text)
+        self.assertIn("Input measurements", text)
+
+    def test_a_real_dwg_still_measures_normally_not_the_new_branch(self):
+        """Regression guard: the fix must not touch the .dwg/.dxf path at
+        all -- it was already correct."""
+        from unittest import mock
+        from addons.boq import dialog as BD
+        record = {"path": "/x/site.dwg", "name": "site.dwg"}
+        with mock.patch.object(BD.CB.files, "attach", return_value=record), \
+             mock.patch.object(BD.BoqDialog, "_measure") as measure:
+            self.d._absorb([record["path"]])
+        measure.assert_called_once()
+        self.assertFalse(self.d.pdf_drawing_hint.isVisibleTo(self.d))
+
+    def test_a_real_sample_boq_pdf_with_text_is_still_a_template_not_cad(self):
+        """The companion case: a PDF that genuinely IS a sample BOQ (real
+        extracted text) must keep going to templates, not get swept into
+        this new branch just for being a .pdf."""
+        from unittest import mock
+        from addons.boq import dialog as BD
+        record = {"path": "/x/sample.pdf", "name": "sample.pdf",
+                  "text": "PREAMBLE\nSection A\n1  Item  2.00 m\nQty 20 nos, rate TBC\n"}
+        with mock.patch.object(BD.CB.files, "attach", return_value=record), \
+             mock.patch.object(BD.BoqDialog, "_measure") as measure:
+            self.d._absorb([record["path"]])
+        measure.assert_not_called()
+        self.assertEqual(self.d.cad_path, "")
+        self.assertFalse(self.d.pdf_drawing_hint.isVisibleTo(self.d))
+        self.assertIn("1 sample template attached", self.d.template_hint.text())
+
+
 class TheLiveWindowIsReusedAcrossFollowUps(unittest.TestCase):
     """The owner's report: "Verify and remake" opened a brand new window
     instead of continuing in the one the BOQ was already shown in, even
@@ -1186,6 +1532,7 @@ class TheLiveWindowIsReusedAcrossFollowUps(unittest.TestCase):
         with open(self.d.cad_path, "w") as fh:
             fh.write("0\nEOF\n")
         self.d.result.setPlainText("1  Brick wall  12.00  m")
+        self.d._raw_result = "1  Brick wall  12.00  m"
         self._patches = [
             mock.patch("addons.boq.dialog.AutomationWorker", _TrackedWorker),
             mock.patch("addons.boq.run_dialog.BoqRunDialog", _FakeRunDialog),
@@ -1241,16 +1588,104 @@ class ASampleBoqDefinesTheDeliverable(unittest.TestCase):
     still never goes (10 Sep 2026)."""
 
     def test_a_docx_xlsx_or_pdf_is_a_template_and_goes_to_the_writer(self):
+        # item 38/42: a .pdf is only a template when its text actually
+        # reads like a BOQ document -- CB.files.attach() always supplies
+        # the text for a genuine one, but item 42 found a real,
+        # text-bearing CAD-exported drawing PDF is not one just for
+        # having text, so this needs real BOQ vocabulary (two distinct
+        # hits from core.boq._BOQ_DOCUMENT_SIGNALS: "preamble" and "qty"
+        # here), not merely length past _PDF_TEXT_MIN_CHARS (40).
+        sample_text = "PREAMBLE\nSection A — Walls\n1  Brick wall  12.00 m  Qty 1\n"
         import core_bridge as CB
         boq = CB.get_boq()
         cad, templates, images, notes = boq.classify_inputs([
             {"path": "/x/site.dwg", "name": "site.dwg"},
             {"path": "/x/last_year_boq.xlsx", "name": "last_year_boq.xlsx"},
-            {"path": "/x/sample.pdf", "name": "sample.pdf"},
+            {"path": "/x/sample.pdf", "name": "sample.pdf", "text": sample_text},
             {"path": "/x/legend.png", "name": "legend.png"}])
         self.assertEqual([t["name"] for t in templates],
                          ["last_year_boq.xlsx", "sample.pdf"])
         self.assertEqual([c["name"] for c in cad], ["site.dwg"])
+
+    def test_a_textless_pdf_is_a_drawing_not_a_template(self):
+        """2 Nov 2026: a hand-sketched SS locker fabrication drawing,
+        delivered as a scanned .pdf with zero extractable text, was filed
+        as a "sample BOQ" -- the writer correctly refused to invent
+        quantities from what it was told was a template it couldn't read,
+        and "Make with drawing" never turned on because cad_path was never
+        set for anything but .dwg/.dxf. A .pdf with no/negligible text is
+        now classified the same role as a .dwg/.dxf."""
+        import core_bridge as CB
+        boq = CB.get_boq()
+        cad, templates, images, notes = boq.classify_inputs([
+            {"path": "/x/drawing1_KJ.pdf", "name": "drawing1_KJ.pdf", "text": None},
+            {"path": "/x/sample.pdf", "name": "sample.pdf",
+             "text": "Preamble\nSr.No  Description  Qty  Rate  Amount\n" + "x" * 60}])
+        self.assertEqual([c["name"] for c in cad], ["drawing1_KJ.pdf"])
+        self.assertEqual([t["name"] for t in templates], ["sample.pdf"])
+
+    def test_a_real_cad_exported_pdf_with_lots_of_text_is_still_a_drawing(self):
+        """item 42 (3 Nov 2026), found live the day after item 38 shipped:
+        a real, proper CAD-exported (not scanned) 10-page PDF of pharma
+        trolleys and storage racks -- 2,842 characters of REAL extracted
+        text, comfortably over _PDF_TEXT_MIN_CHARS -- was STILL filed as a
+        "sample BOQ" by item 38's own fix, for the opposite reason: not
+        too little text, the wrong KIND of text. Its real content is
+        dimension numbers and one-line material/capacity callouts
+        ("Material - SS", "Weight Capacity - 30 Kg", "16 SWG Top"), none
+        of it reading like a BOQ document at all -- "has text" was never
+        the right question. "Make with drawing" stayed off on the
+        owner's own real attempt for exactly this reason, the same
+        symptom as item 38's bug, from an opposite cause."""
+        import core_bridge as CB
+        boq = CB.get_boq()
+        drawing_text = (
+            "900\n1850\n450 50250\n450\n600\n900250\nQuartz Boat Trolley\n"
+            "All dimensions are in mm\nMaterial - SS\nWeight Capacity - 30 Kg "
+            "at each step\n304\n16 SWG Top\n16 SWG Middle\n16 SWG Bottom\n"
+            "40x40 mm\nSq Pipe\nColar on"
+        )
+        self.assertGreaterEqual(len(drawing_text), 40)
+        cad, templates, images, notes = boq.classify_inputs([
+            {"path": "/x/Trolley -Drg 19.9.26.pdf", "name": "Trolley -Drg 19.9.26.pdf",
+             "text": drawing_text},
+            {"path": "/x/reference_BOQ.xlsx", "name": "reference_BOQ.xlsx"}])
+        self.assertEqual([c["name"] for c in cad], ["Trolley -Drg 19.9.26.pdf"])
+        self.assertEqual([t["name"] for t in templates], ["reference_BOQ.xlsx"])
+
+    def test_a_pdf_with_a_written_spec_page_plus_a_drawing_page_is_still_a_drawing(self):
+        """item 43 (3 Nov 2026): a real client PDF -- page 1 a written
+        prose specification ("Specifications for your liquid nitrogen
+        (LN2) container storage rack... Required Quantity: 1...", 2,183
+        characters, real sentences, not a scan), page 2 the actual
+        drawing (near-empty extracted text -- an image). Confirmed this
+        one already works with item 42's fix, not assumed: the spec
+        page's prose only trips ONE signal word ("quantity", inside
+        "Required Quantity: 1"), under the two-hit bar
+        _looks_like_boq_document requires, so the combined text still
+        reads as "not a BOQ document" and the whole file -- both pages --
+        correctly lands in cad, not templates. A real sample/template is
+        expected as .docx/.xlsx/.csv (those classify by extension alone,
+        never by content), never a PDF the way this attempt's reference
+        file already was."""
+        import core_bridge as CB
+        boq = CB.get_boq()
+        spec_and_drawing_text = (
+            "Specifications for your liquid nitrogen (LN2) container storage "
+            "rack:  \nRequired Quantity: 1 \nA 35-liter liquid nitrogen "
+            "container weighs approximately 30 to 35 kg empty and 60 to 65 kg "
+            "\nwhen fully populated. The structure must be built to support a "
+            "total localized load of over 260 \nkg (570+ lbs) across the "
+            "entire unit. \nStructural Dimensions \n• Main Frame Outer "
+            "Profile: \n• Height: 3.0 feet from the floor to the top "
+            "cross-bars."
+        )
+        cad, templates, images, notes = boq.classify_inputs([
+            {"path": "/x/LN2 rack 8 ft.pdf", "name": "LN2 rack 8 ft.pdf",
+             "text": spec_and_drawing_text},
+            {"path": "/x/reference_BOQ.xlsx", "name": "reference_BOQ.xlsx"}])
+        self.assertEqual([c["name"] for c in cad], ["LN2 rack 8 ft.pdf"])
+        self.assertEqual([t["name"] for t in templates], ["reference_BOQ.xlsx"])
 
     def test_the_writer_is_told_the_sample_defines_the_document(self):
         import core_bridge as CB
@@ -1289,10 +1724,22 @@ class ASampleBoqDefinesTheDeliverable(unittest.TestCase):
         fire-hydrant jobs from this exact same function -- so it must only
         ever appear when the request was actually for HVAC, never by
         default, the same standing rule the measurement side
-        (core.boq.measure(hvac=...)) already follows."""
+        (core.boq.measure(hvac=...)) already follows.
+
+        31 Oct 2026: the HVAC text itself moved OUT of this engine
+        function entirely, into addons/boq/industries.py's own
+        writeup_note() -- the owner's own standing rule is that a
+        trade-specific rule must live apart, and a bare `hvac: bool`
+        flag on the shared engine function was already one `if` away
+        from breaking that. The engine side is proven industry-agnostic
+        here by never importing or naming HVAC at all -- the caller
+        supplies the resolved text."""
         import core_bridge as CB
+        from addons.boq import industries
         boq = CB.get_boq()
-        hvac_prompt = boq.formatting_prompt("WALLS 12.00 m", has_template=True, hvac=True)
+        hvac_prompt = boq.formatting_prompt(
+            "WALLS 12.00 m", has_template=True,
+            industry_note=industries.writeup_note(industries.HVAC))
         for phrase in ("NOT AUTOMATICALLY A DUPLICATE",
                        "NEVER drop either",
                        "When you are not sure which case this is, keep both",
@@ -1302,18 +1749,42 @@ class ASampleBoqDefinesTheDeliverable(unittest.TestCase):
 
     def test_the_hvac_write_up_rules_never_appear_for_any_other_trade(self):
         """The other half of the same instruction: an ELV, CCTV, cabling,
-        plumbing or fire-hydrant BOQ -- `hvac` left at its default -- must
-        never see the HVAC-only guidance above. Proven both ways: the
-        phrase is present when hvac=True, absent when it is not."""
+        plumbing or fire-hydrant BOQ -- `industry_note` left at its
+        default (empty) -- must never see the HVAC-only guidance above.
+        Proven both ways: the phrase is present when the caller supplies
+        HVAC's own note, absent when it supplies none or an unbuilt
+        industry's (also empty)."""
         import core_bridge as CB
+        from addons.boq import industries
         boq = CB.get_boq()
         default_prompt = boq.formatting_prompt("WALLS 12.00 m", has_template=True)
-        explicit_off = boq.formatting_prompt("WALLS 12.00 m", has_template=True, hvac=False)
+        explicit_off = boq.formatting_prompt(
+            "WALLS 12.00 m", has_template=True,
+            industry_note=industries.writeup_note("ELV"))
         for prompt in (default_prompt, explicit_off):
             for phrase in ("HVAC-SPECIFIC WRITE-UP RULES",
                            "NOT AUTOMATICALLY A DUPLICATE",
                            "LEGEND/KEY"):
                 self.assertNotIn(phrase, prompt)
+
+    def test_a_scrap_request_in_the_project_context_covers_tubes_and_rods_too(self):
+        """item 50 (4 Nov 2026): see dialog.py's own copy of this comment
+        for the real-job comparison -- "add 100mm in length and breadth
+        for scrap" was read as a sheet-panel-only instruction; tube/rod/
+        flat-bar cut lengths kept their bare spec figure. "Make my BOQ"
+        reaches formatting_prompt() through `project_context`, not
+        `_send_followup`'s own prompt string, so this is covered here
+        directly rather than only through dialog.py's follow-up path."""
+        import core_bridge as CB
+        boq = CB.get_boq()
+        with_scrap = boq.formatting_prompt(
+            "WALLS 12.00 m",
+            project_context="add 100mm in length and breadth for scrap")
+        self.assertIn("SCRAP/WASTAGE ALLOWANCE", with_scrap)
+        self.assertIn("not sheet panels alone", with_scrap)
+        without_scrap = boq.formatting_prompt(
+            "WALLS 12.00 m", project_context="BOQ for KJ Pharmatech")
+        self.assertNotIn("SCRAP/WASTAGE ALLOWANCE", without_scrap)
 
 
 class TheMeasurementIsATable(unittest.TestCase):
@@ -1728,6 +2199,13 @@ class TheHvacFlagComesOnlyFromTheIndustryDropdown(unittest.TestCase):
         d.summary = "M-DUCT 12.00 m"
         d.request = "BOQ for HVAC ductwork" if hvac else "BOQ for the electrical layout"
         d._hvac = hvac
+        # _write() now reads industries.writeup_note(self._industry), not
+        # self._hvac directly (31 Oct 2026) -- both are set together on
+        # every real code path (_measure()/_measure_external()), so a
+        # test driving _write() straight must set both too, the same
+        # invariant.
+        from addons.boq import industries
+        d._industry = industries.HVAC if hvac else industries.GENERAL
         d.writer_agent = "ChatGPT"
         with mock.patch.object(BD, "AutomationWorker", self._WriteCapture):
             d._write()
@@ -1893,7 +2371,7 @@ class TheIndustryDropdownGatesThePdfTakeoffButton(unittest.TestCase):
         from PySide6.QtWidgets import QDialog
 
         class _FakeTakeoffDialog:
-            def __init__(self, industry, parent=None):
+            def __init__(self, industry, parent=None, cfg=None):
                 self.industry = industry
             def exec(self):
                 return QDialog.Accepted
@@ -1915,7 +2393,7 @@ class TheIndustryDropdownGatesThePdfTakeoffButton(unittest.TestCase):
         from PySide6.QtWidgets import QDialog
 
         class _FakeTakeoffDialog:
-            def __init__(self, industry, parent=None):
+            def __init__(self, industry, parent=None, cfg=None):
                 pass
             def exec(self):
                 return QDialog.Rejected
@@ -1996,6 +2474,45 @@ class APrismAgentNeverTouchesAutomationWorkerOrBoqRunDialog(unittest.TestCase):
             d._start_followup_run("followup", "Prism Agent Deep", "change it", [])
         self.assertFalse(auto.called)
         self.assertTrue(orw.called)
+
+    def test_make_with_drawing_via_a_prism_agent_does_not_crash_on_completion(self):
+        """item 41 (2 Nov 2026), found live: "Make with drawing" through a
+        Prism Agent raised AttributeError: 'BoqDialog' object has no
+        attribute '_followup_stage' the moment the worker's own `done`
+        signal actually fired -- the progress window closed with no
+        output and no visible error, because this crashed back inside a
+        Qt signal slot. The tests above only ever checked that
+        OpenRouterWriteWorker was constructed; none of them drove `done`
+        through to _on_followed_up, which is exactly where this broke --
+        _followup_stage (and _followup_agent) were only ever set in
+        _fu_start_next(), the BROWSER-agent half of _start_followup_run,
+        past the early return a Prism Agent takes. This drives the signal
+        for real, the same way test_a_successful_answer_calls_on_success_
+        with_the_same_shape_a_browser_run_uses does for _run_stage.
+        FollowupDialog is mocked for the same reason every other BOQ test
+        that reaches _on_followed_up's own end (_offer_followup) already
+        does: a real FollowupDialog.exec() would hang here forever
+        (CLAUDE.md: never exec()/a QEventLoop in a test) -- confirmed by
+        actually hitting that hang before adding this mock, not assumed."""
+        from unittest import mock
+        from addons.boq import dialog as BD
+        d = self._dialog_with_key()
+        d.cad_path = os.path.join(tempfile.mkdtemp(), "sai.dxf")
+        with open(d.cad_path, "w") as fh:
+            fh.write("0\nEOF\n")
+        fake_worker = mock.Mock()
+        with mock.patch.object(BD, "OpenRouterWriteWorker", return_value=fake_worker), \
+                mock.patch.object(BD.openrouter_writer, "write_file"), \
+                mock.patch.object(BD.CB.config, "save_run", return_value="/x/run.json"), \
+                mock.patch("dialogs.followup_dialog.FollowupDialog") as fake_dlg:
+            fake_dlg.return_value.submitted.return_value = False
+            d._start_followup_run("recheck", "Prism Agent Deep",
+                                  "make it from the drawing", [])
+            done_cb = fake_worker.done.connect.call_args[0][0]
+            done_cb("the BOQ, read off the drawing")  # must not raise
+        self.assertEqual(d._followup_stage, "recheck")
+        self.assertEqual(d._followup_agent, "Prism Agent Deep")
+        self.assertIn("the BOQ, read off the drawing", d.result.toMarkdown())
 
     def test_a_browser_agent_still_goes_through_automationworker_unchanged(self):
         """The bypass is agent-specific -- every browser agent's own path
@@ -2105,11 +2622,20 @@ class PrismAgentRecheckShowsTheRealDrawingNotJustTextItem32(unittest.TestCase):
         self.assertEqual([f["name"] for f in files], ["notes.txt"])
 
     def test_an_agent_with_no_vision_warns_and_keeps_everything_as_text(self):
+        # item 38 (2 Nov 2026): "Prism Agent Deep" used to be the real
+        # no-vision example here (deepseek-v3.2/v4-flash, text-only at
+        # any tier) -- now deepseek-v4.1-flash, vision-capable at both
+        # tiers (see agents.py's own comment for the live-verified
+        # evidence). PRISM_AGENT_HAS_VISION is patched so this test keeps
+        # exercising _prepare_drawing_attachment's own warn-and-fall-back
+        # logic, independent of which real agent currently has no vision.
         from unittest import mock
         from addons.boq import dialog as BD
         d = self._dialog_with_key()
         d.cad_path = "/x/drawing.pdf"
-        with mock.patch.object(BD.cad_render, "prepare_for_ai") as prep, \
+        with mock.patch.dict(BD.boq_agents.PRISM_AGENT_HAS_VISION,
+                             {"Prism Agent Deep": False}), \
+                mock.patch.object(BD.cad_render, "prepare_for_ai") as prep, \
                 mock.patch.object(BD.QMessageBox, "warning") as warn:
             files, attachment = d._prepare_drawing_attachment(
                 "recheck", "Prism Agent Deep", self._files(d.cad_path))

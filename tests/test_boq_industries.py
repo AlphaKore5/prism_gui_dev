@@ -33,6 +33,21 @@ class WhichIndustriesHaveAPdfTakeoff(unittest.TestCase):
         self.assertIn(industries.HVAC, industries.NAMES)
 
 
+class WhichIndustriesOfferAnAiTagRecheckAlongsideTheirOcr(unittest.TestCase):
+    """item 2 (5 Nov 2026): gated the same place has_takeoff() already
+    is, so takeoff.py can offer or withhold the AI tag re-check without
+    knowing anything HVAC-specific itself."""
+
+    def test_hvac_has_one(self):
+        self.assertTrue(industries.has_ai_tag_recheck("HVAC"))
+
+    def test_general_does_not(self):
+        self.assertFalse(industries.has_ai_tag_recheck("General"))
+
+    def test_an_unknown_industry_does_not(self):
+        self.assertFalse(industries.has_ai_tag_recheck("ELV"))
+
+
 class AnIndustryWithNoRuleSetRaisesRatherThanGuessing(unittest.TestCase):
     """Never silently fall back to HVAC's own rules for an industry that
     has none -- the whole point of item 26's dropdown is that nothing
@@ -45,6 +60,19 @@ class AnIndustryWithNoRuleSetRaisesRatherThanGuessing(unittest.TestCase):
     def test_extract_raises_for_an_unbuilt_industry(self):
         with self.assertRaises(ValueError):
             industries.extract("ELV", "/x/does/not/matter.pdf", {}, 9.0)
+
+    def test_extract_threads_vision_tag_reader_through_to_hvac(self):
+        """item 2: this dispatcher's own job for the new parameter is
+        exactly what it already does for use_ocr/log -- pass it straight
+        through, never read or interpret it itself."""
+        fake_hvac = mock.Mock()
+        fake_hvac.extract.return_value = {"labels": []}
+        reader = mock.Mock()
+        with mock.patch.object(industries, "_hvac", return_value=fake_hvac):
+            industries.extract("HVAC", "/x/does/not/matter.pdf", {}, 9.0,
+                               vision_tag_reader=reader)
+        fake_hvac.extract.assert_called_once()
+        self.assertIs(fake_hvac.extract.call_args.kwargs["vision_tag_reader"], reader)
 
     def test_summary_text_raises_for_an_unbuilt_industry(self):
         with self.assertRaises(ValueError):
@@ -66,6 +94,40 @@ class AnIndustryWithNoRuleSetRaisesRatherThanGuessing(unittest.TestCase):
 
     def test_symbol_counts_and_areas_is_just_empty_not_an_error(self):
         self.assertEqual(industries.symbol_counts_and_areas("ELV", {}), [])
+
+    def test_writeup_note_and_derivation_example_are_just_empty_not_an_error(self):
+        self.assertEqual(industries.writeup_note("ELV"), "")
+        self.assertEqual(industries.derivation_example("ELV"), "")
+
+
+class WriteupGuidanceIsHvacsOwnAndLivesHereNotInTheEngine(unittest.TestCase):
+    """Found 31 Oct 2026: core/boq.py's own formatting_prompt() used to
+    carry this exact HVAC text inline, gated on a bare `hvac: bool` --
+    one `if` away from leaking into every other trade's own BOQ, and the
+    opposite of the owner's own standing rule that a trade-specific rule
+    must live apart. Moved here, the same app-side home every other
+    per-industry BOQ rule already lives in; the engine function itself
+    now only ever sees whatever string the caller resolved and handed it
+    (addons/boq/dialog.py, via these two functions)."""
+
+    def test_hvac_gets_its_own_real_write_up_text(self):
+        note = industries.writeup_note("HVAC")
+        self.assertIn("HVAC-SPECIFIC WRITE-UP RULES", note)
+        self.assertIn("NOT AUTOMATICALLY A DUPLICATE", note)
+        self.assertIn("LEGEND/KEY", note)
+
+    def test_hvac_gets_a_rule_against_borrowing_a_type_from_elsewhere(self):
+        """31 Oct 2026: the write-up agent once called every bare TR tag
+        "Hi-Wall" because that was the only equipment type word anywhere
+        else in the document -- this is the standing rule meant to catch
+        that whole class of mistake, not just that one instance of it."""
+        note = industries.writeup_note("HVAC")
+        self.assertIn("A BARE NUMBER IS NOT A TYPE", note)
+
+    def test_hvac_gets_its_own_worked_derivation_example(self):
+        example = industries.derivation_example("HVAC")
+        self.assertIn("duct", example.lower())
+        self.assertNotIn("camera", example.lower())
 
 
 class SavedLayerRolesIsStep1sOwnCrossTenderMemory(unittest.TestCase):

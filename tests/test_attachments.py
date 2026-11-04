@@ -94,6 +94,59 @@ class ASmallSheetStillGoesInWhole(unittest.TestCase):
         self.assertEqual(block.count("EMP0"), 40)
 
 
+def _small_xlsx(rows: int) -> str:
+    """A small reference-BOQ-shaped .xlsx -- synthetic, not a real client
+    file, same shape as the one that found this bug (a handful of named
+    columns, well under PROFILE_ABOVE_ROWS)."""
+    import openpyxl
+    d = tempfile.mkdtemp(prefix="prism-xlsx-")
+    path = os.path.join(d, "reference_BOQ.xlsx")
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(["Item", "Net Wt (kg)", "Gross Wt (kg)"])
+    for i in range(1, rows + 1):
+        ws.append([f"Rack {i}", 100 + i, 110 + i])
+    wb.save(path)
+    return path
+
+
+class ASmallXlsxStillShowsItsProfile(unittest.TestCase):
+    """item 46 (3 Nov 2026), found live: a real 14-row reference BOQ
+    (.xlsx) attached alongside a drawing was described to the model as
+    "binary file -- uploaded directly to the tool; contents not inlined",
+    and the model reported it could not read the file -- correctly, given
+    what it was told. core.files.attach() DID compute a correct profile
+    for it; context_block() just never showed a small spreadsheet's
+    profile, only a big one's (> PROFILE_ABOVE_ROWS, 40 rows) -- and
+    .xlsx, unlike .csv/.txt, never gets a `text` field at any size
+    (_extract_text() has no .xlsx branch), so a small one fell through
+    every branch to the same message a genuinely unreadable binary gets."""
+
+    def test_a_small_xlsx_profile_is_shown_not_hidden(self):
+        att = F.attach(_small_xlsx(14))
+        self.assertTrue(att["profile"])
+        self.assertFalse(att.get("text"))
+        block = F.context_block([att], uploaded=False)
+        self.assertIn("[spreadsheet]", block)
+        self.assertIn("14 rows x 3 columns", block)
+        self.assertIn("Net Wt (kg)", block)
+        self.assertNotIn("not inlined", block)
+
+    def test_a_small_csv_is_still_pasted_whole_not_as_a_profile(self):
+        """Regression guard: this fix must not make a small .csv (which
+        DOES get a real `text` field) start showing a profile instead --
+        that was always correct, unchanged behaviour, covered already by
+        ASmallSheetStillGoesInWhole above; this is the same check from
+        inside the new branch's own test class, so a future edit to
+        context_block() that merges the two paths trips here too."""
+        att = F.attach(_attendance_csv(rows=40))
+        self.assertTrue(att.get("text"))
+        block = F.context_block([att], uploaded=False)
+        self.assertNotIn("[spreadsheet:", block)
+        self.assertNotIn("[spreadsheet]", block)
+        self.assertEqual(block.count("EMP0"), 40)
+
+
 class AnUploadedFileIsNotPastedTwice(unittest.TestCase):
 
     def setUp(self):

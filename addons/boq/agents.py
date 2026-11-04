@@ -97,7 +97,16 @@ PRISM_AGENTS = ["Prism Agent Claude", "Prism Agent Deep"]
 
 PRISM_AGENT_MODELS = {
     "Prism Agent Claude": "anthropic/claude-sonnet-5.5",
-    "Prism Agent Deep": "deepseek/deepseek-v3.2",
+    # item 38 (2 Nov 2026): was deepseek-v3.2, text-only -- no DeepSeek
+    # model at either tier could ever see a drawing, so "Make with
+    # drawing"/"Verify and remake" on this agent silently fell back to
+    # text, no matter what the user attached. deepseek-v4.1-flash is
+    # vision-capable (architecture.input_modalities: ['text','image'],
+    # confirmed against OpenRouter's own /api/v1/models), AND cheaper on
+    # prompt tokens than v3.2 was ($0.045/M vs $0.26/M) with a much larger
+    # context window (1,048,576 vs 163,840) -- not a quality-for-price
+    # trade, a straight improvement on both.
+    "Prism Agent Deep": "deepseek/deepseek-v4.1-flash",
 }
 
 # Same provider family as the generation model above, picked for being the
@@ -105,18 +114,40 @@ PRISM_AGENT_MODELS = {
 # follow-up prompt yet (BOQ-CHANGES-TODO.md item 30e's own open point).
 PRISM_AGENT_FOLLOWUP_MODELS = {
     "Prism Agent Claude": "anthropic/claude-haiku-5.5",
-    "Prism Agent Deep": "deepseek/deepseek-v4-flash",
+    # item 38: was deepseek-v4-flash, text-only. "Make with drawing" and
+    # "Verify and remake" ALWAYS run as a follow-up (dialog.py's
+    # _ask_recheck -> _send_followup -> _start_followup_run(..., followup=
+    # True)), so this is the tier that actually needed vision for the
+    # drawing-reading feature to work on this agent at all -- fixing only
+    # PRISM_AGENT_MODELS above would have left "Make with drawing" vision-
+    # blind for DeepSeek regardless. Reusing v4.1-flash here too rather
+    # than hunting a second, cheaper vision model: it's already the
+    # flash/cheap tier, and correctness on the one path that needs vision
+    # matters more than a second price cut that would reopen this gap.
+    "Prism Agent Deep": "deepseek/deepseek-v4.1-flash",
 }
 
-# item 32: whether an agent can actually LOOK at a rendered drawing (an
-# image, or a real PDF document) at all. Checked directly against
-# OpenRouter's own /api/v1/models `architecture.input_modalities`, 30
-# Oct 2026, not assumed from either provider's general reputation:
-# claude-sonnet-5.5/claude-haiku-5.5 -> ['text','image','file'];
-# deepseek-v3.2/deepseek-v4-flash -> ['text'] only, no vision at any tier.
+# item 32 (updated item 38, 2 Nov 2026): whether an agent can actually
+# LOOK at a rendered drawing (an image, or a real PDF document) at all.
+# Checked directly against OpenRouter's own /api/v1/models
+# `architecture.input_modalities`, and then verified for real -- not just
+# by the metadata -- with a live OpenRouter chat-completions call sending
+# an actual client PDF drawing (a hand-sketched SS locker fabrication
+# drawing) to deepseek-v4.1-flash as a "file" content block, the exact
+# shape core/openrouter.py already builds: it answered "The overall
+# height is 2000 mm, and the quantity is 40" -- both figures correct,
+# read off the drawing, not invented. (OpenRouter's own response
+# "annotations" show it OCRs the PDF's text AND renders the page to an
+# image server-side before handing it to the model, which is why a model
+# whose own input_modalities list only says 'image', not 'file', still
+# reads a PDF sent this way -- the model never needs native PDF support,
+# only 'image'.) claude-sonnet-5.5/claude-haiku-5.5 -> ['text','image',
+# 'file']; deepseek-v4.1-flash -> ['text','image']; the OLD deepseek-v3.2/
+# deepseek-v4-flash -> ['text'] only, no vision at any tier -- true before
+# this fix, not true of the models now mapped above.
 PRISM_AGENT_HAS_VISION = {
     "Prism Agent Claude": True,
-    "Prism Agent Deep": False,
+    "Prism Agent Deep": True,
 }
 
 WRITER = PRISM_AGENTS + ["Claude", "Grok", "Kimi 2.6", "DeepSeek", "Gemini", "ChatGPT"]

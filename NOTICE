@@ -23,3 +23,22 @@ shared with the original.
 A copy of the Apache License, Version 2.0 may be obtained at:
     http://www.apache.org/licenses/LICENSE-2.0
 ────────────────────────────────────────────────────────────────────────────
+GNU LibreDWG (dwg2dxf)
+https://github.com/LibreDWG/libredwg
+Copyright (c) the LibreDWG authors
+Licensed under the GNU General Public License, Version 3 or later
+
+Prism bundles the `dwg2dxf` command-line tool and its `libredwg` shared
+library, unmodified apart from relinking their internal library reference to
+a path relative to the executable (via `install_name_tool`, macOS build only)
+so the pair runs without a system-wide LibreDWG install. It converts a
+customer's own .dwg file to .dxf on their own machine, as a fallback when the
+ODA File Converter is not installed — see
+prism_terminal/core/vendor/dwg2dxf/README.md for build provenance and where
+to get the matching source.
+
+A copy of the GNU General Public License, Version 3 may be obtained at:
+    https://www.gnu.org/licenses/gpl-3.0.html
+Corresponding source for the exact version bundled is available, free of
+charge, on request — see prism_terminal/core/vendor/dwg2dxf/README.md.
+────────────────────────────────────────────────────────────────────────────

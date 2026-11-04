@@ -26,9 +26,10 @@ class PrismAgentsAreFirstInTheWriterList(unittest.TestCase):
             self.assertIn(name, boq_agents.WRITER)
 
     def test_prism_agent_deep_and_the_browser_deepseek_are_different_entries(self):
-        """"Prism Agent Deep" (OpenRouter's deepseek-v3.2) must never be
-        confused with "DeepSeek" (the existing browser agent, item 20-era)
-        -- two different code paths, two different names."""
+        """"Prism Agent Deep" (OpenRouter's deepseek-v4.1-flash, item 38)
+        must never be confused with "DeepSeek" (the existing browser
+        agent, item 20-era) -- two different code paths, two different
+        names."""
         self.assertIn("DeepSeek", boq_agents.WRITER)
         self.assertIn("Prism Agent Deep", boq_agents.WRITER)
         self.assertNotEqual("DeepSeek", "Prism Agent Deep")
@@ -51,8 +52,22 @@ class EveryPrismAgentHasAGenerationAndAFollowupModel(unittest.TestCase):
 
     def test_the_followup_tier_is_never_the_same_model_as_generation(self):
         """item 30e's whole point -- a follow-up uses a cheaper, different
-        model, not the same one twice."""
+        model, not the same one twice. item 38's own exception: "Prism
+        Agent Deep" maps both tiers to deepseek/deepseek-v4.1-flash on
+        purpose -- it is already the cheapest vision-capable DeepSeek
+        model OpenRouter currently lists (checked directly against
+        /api/v1/models pricing, 2 Nov 2026: every other vision-capable
+        DeepSeek entry costs more per token, and the one that is cheaper,
+        deepseek-flash-latest, is an unpinned rolling alias, not a
+        version this codebase can trust to stay the same model
+        underneath it -- every other model id here is pinned). The
+        follow-up/recheck tier is specifically the one "Make with
+        drawing"/"Verify and remake" run on, so using a text-only sibling
+        there to satisfy a lower price would silently reopen the exact
+        vision gap item 38 fixed."""
         for name in boq_agents.PRISM_AGENTS:
+            if name == "Prism Agent Deep":
+                continue
             self.assertNotEqual(boq_agents.PRISM_AGENT_MODELS[name],
                                 boq_agents.PRISM_AGENT_FOLLOWUP_MODELS[name])
 

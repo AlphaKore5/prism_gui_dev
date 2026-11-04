@@ -48,6 +48,15 @@ def has_takeoff(industry: str) -> bool:
     return industry == HVAC
 
 
+def has_ai_tag_recheck(industry: str) -> bool:
+    """Whether `industry`'s own OCR pass has an AI tag re-check to fold
+    in alongside it (item 2, 5 Nov 2026) -- gated here, the same place
+    has_takeoff() already is, so IndustryTakeoffDialog (addons/boq/
+    takeoff.py) can offer or withhold it without knowing HVAC-specific
+    anything itself; today, only HVAC's VAV tags have one."""
+    return industry == HVAC
+
+
 def _hvac():
     """Imported lazily: hvac_takeoff/ carries its own heavy OCR/PDF
     dependencies (pdfplumber, pypdfium2, rapidocr) that nobody who never
@@ -72,6 +81,82 @@ def scales(industry: str) -> dict:
     if industry == HVAC:
         return dict(_hvac().SCALES)
     return {}
+
+
+def writeup_note(industry: str) -> str:
+    """`industry`'s own write-up rules, handed straight to
+    core.boq.formatting_prompt()'s `industry_note` parameter -- the write-up
+    side of the same split scan_layers()/extract()/summary_text() already
+    make on the measurement side. Lives here, in the add-on, not in the
+    engine (prism_terminal/core/boq.py): found live, 31 Oct 2026, that the
+    engine used to carry this exact HVAC text inline, gated on a bare
+    `hvac: bool` -- one `if` away from leaking into every other trade's own
+    BOQ, the opposite of the owner's own standing rule that a trade-specific
+    rule must live apart and fire only when that trade is named. An industry
+    with nothing written yet gets "", same as `roles()`/`scales()` above --
+    a lookup, not an operation this industry is being asked to perform."""
+    if industry == HVAC:
+        return (
+            "\n\nHVAC-SPECIFIC WRITE-UP RULES (this BOQ was asked for as HVAC):\n"
+            "  (e) TWO SIMILARLY-NAMED LAYERS ARE NOT AUTOMATICALLY A DUPLICATE "
+            "— caught on a real file: a layer pair named like an old/new naming "
+            "convention (e.g. a legacy prefix vs a current one) was assumed to "
+            "be the same system measured twice, and the 'legacy' half was "
+            "dropped from the BOQ entirely — it was a real, separate half of "
+            "the building with its own equipment and different sizes, not a "
+            "duplicate at all. So: compare the actual figures, not just the "
+            "names. Two layers whose lengths or counts are IDENTICAL or within "
+            "a percent or two of each other are very likely the same geometry "
+            "traced twice — pick the one to keep, state which and why, and say "
+            "so under that line. Two layers whose figures DIFFER by more than "
+            "a small margin are more likely two real, separate things (two "
+            "zones, two halves, two systems) — in that case NEVER drop either "
+            "one. Price both, under their own line items, and flag it for the "
+            "designer to confirm which naming convention is current or whether "
+            "they are genuinely separate. When you are not sure which case "
+            "this is, keep both — the failure mode that actually happened was "
+            "dropping real, paid-for ductwork because it looked like a "
+            "duplicate; there is no equivalent failure mode from keeping an "
+            "actual duplicate priced twice, because you still say so on the "
+            "line and the reader can net it out. Silence that drops a measured "
+            "quantity is the one mistake not to make.\n"
+            "  (f) Block counts can include a drawing's own LEGEND/KEY — a "
+            "single reference instance of a symbol, drawn once for reference, "
+            "not an installed item. Prism's measurement cannot tell a legend "
+            "instance apart from a real one, so if the count for any terminal, "
+            "damper, valve or fitting type looks like it could include one, say "
+            "so plainly next to that figure and tell the reader to cross-check "
+            "it against a terminal/equipment schedule if the drawing has one — "
+            "never silently subtract or silently trust the raw count either.\n"
+            "  (g) A BARE NUMBER IS NOT A TYPE — found live comparing a second "
+            "real tool run against a real file: every bare TR tag in the "
+            "measured data got called \"Hi-Wall\" in the finished BOQ, because "
+            "\"Hi-Wall\" was the only equipment TYPE word anywhere else in this "
+            "document, and nothing told the write-up stage not to fill that "
+            "gap with it. The rule, stated plainly rather than left to be "
+            "inferred: when the measured data gives you a number (a capacity, "
+            "a count, a size) WITHOUT a type/category attached to it, say the "
+            "type is not identified, on that line, every time — never borrow a "
+            "type name from a DIFFERENT reading elsewhere in this same "
+            "document just because it is the only one available. A reading "
+            "that already states its own \"type not read\"/\"not identified\" "
+            "wording is doing this for you — use it, don't override it with "
+            "something more specific-sounding."
+        )
+    return ""
+
+
+def derivation_example(industry: str) -> str:
+    """The one worked arithmetic example inside formatting_prompt()'s own
+    "how to handle an item the drawing's own measured geometry does not
+    cover" rule -- kept per-industry so an HVAC job is shown an HVAC
+    example (duct supports), never ELV's own default (camera spacing),
+    which has nothing to do with ductwork. Empty falls back to that ELV
+    default inside formatting_prompt() itself -- unchanged for any
+    industry, HVAC included until this was written, that has none yet."""
+    if industry == HVAC:
+        return "'duct run 300 m ÷ 2.4 m support spacing = 125 nos'"
+    return ""
 
 
 def scan_layers(industry: str, pdf_path: str) -> list[dict]:
@@ -121,14 +206,21 @@ def layer_preview(industry: str, pdf_path: str, key: str, page_index: int = 0) -
 
 
 def extract(industry: str, pdf_path: str, layer_map: dict, pt_per_ft: float,
-           use_ocr: bool = True, log=None) -> dict:
+           use_ocr: bool = True, log=None, vision_tag_reader=None) -> dict:
     """Step 2: run `industry`'s own extraction with the layer roles chosen
     at Step 1. Returns the tool's own result dict, untouched -- so a future
     industry's own shape only has to be understood by whatever review step
-    reads it, never reshaped here to match HVAC's."""
+    reads it, never reshaped here to match HVAC's.
+
+    `vision_tag_reader`: HVAC's own AI VAV-tag re-check (hvac_takeoff.py's
+    vision_vav_recount()) -- threaded through only because this is the one
+    dispatch point every industry's extraction already passes through, the
+    same reason `use_ocr` does; no other industry reads this parameter,
+    and this function still raises for one below before it would matter."""
     if industry == HVAC:
         return _hvac().extract(pdf_path, layer_map, pt_per_ft, use_ocr=use_ocr,
-                               log=log or (lambda *a: None))
+                               log=log or (lambda *a: None),
+                               vision_tag_reader=vision_tag_reader)
     raise ValueError(f"No PDF-takeoff rule-set for {industry!r}")
 
 

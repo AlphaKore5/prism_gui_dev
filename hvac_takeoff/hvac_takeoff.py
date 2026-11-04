@@ -293,9 +293,26 @@ def split_by_labels(run, sizes, pt_per_ft, match_ft):
     return pieces
 
 # ---------------------------------------------------------------- step 3: labels
-SIZE_RE = re.compile(r'(\d{1,3})"?\s*x\s*(\d{1,3})"?')
+# Found on client_2nd_sample, 30 Oct 2026, root-causing the 0% label-match
+# that survived every earlier fix on this file: `\d{1,3}` matches at most
+# 3 digits, which silently fails and backtracks on a 4-digit mm size the
+# same way the old TR_RE did on a 2-decimal-digit TR value ("1000x88"
+# matched as "000"x"88" -- a duct reported as 0in wide). `\d{1,4}` covers
+# any realistic duct size in either inches or millimetres.
+SIZE_RE = re.compile(r'(\d{1,4})"?\s*x\s*(\d{1,4})"?')
 CFM_RE = re.compile(r'(\d{2,5})\s*(?:c\s*f\s*i?\s*m|ctm|crm|cfrn)\b', re.I)
-TR_RE = re.compile(r'(\d{1,3}(?:\.\d)?)\s*TR\b')
+# Found on a real client drawing (client_2nd_sample), 30 Oct 2026: a
+# SECOND real tool run against the same file compared against this one
+# found every "2.07 TR" on it reported here as 7.0, and one "0.8 TR" (its
+# own PDF text object split by a stray space, "0. 8 TR") reported as
+# 8.0. `(?:\.\d)?` allows only ONE digit after the decimal point, so for
+# "2.07" the engine fails to match starting at "2" (the two decimal
+# digits don't fit) and backtracks to match just the trailing "07" on
+# its own, as if it were a bare whole-number "07 TR" -- 7.0, silently
+# wrong, no error, no warning. `\.\s?\d+` fixes both at once: any number
+# of decimal digits, and the stray mid-number space PDF text extraction
+# sometimes inserts.
+TR_RE = re.compile(r'(\d{1,3}(?:\.\s?\d+)?)\s*TR\b')
 SQFT_RE = re.compile(r'(\d{2,5})\s*Sq\.?\s*Ft', re.I)
 # Found reverse-engineering a real tender drawing (ASPENTECH), 24 Oct 2026:
 # small wall-mounted split units are noted on the drawing itself, not drawn
@@ -306,8 +323,67 @@ SQFT_RE = re.compile(r'(\d{2,5})\s*Sq\.?\s*Ft', re.I)
 # the main rooftop unit's own "17 TR" -- HIWALL_RE claims that span first
 # (parse_label skips the generic TR_RE match on the same text once this
 # fires) so it becomes its own equipment entry instead.
-HIWALL_RE = re.compile(r'(\d{1,2}(?:\.\d)?)\s*TR\s*HI[\s-]*WALL', re.I)
+HIWALL_RE = re.compile(r'(\d{1,2}(?:\.\s?\d+)?)\s*TR\s*HI[\s-]*WALL', re.I)
 NOS_RE = re.compile(r'(\d{1,2})\s*NOS\.?', re.I)
+# Found on client_2nd_sample (a tiled OCR re-read, 30 Oct 2026, after the
+# single-pass read of the whole page turned out to be too low-resolution
+# for the engine to read this at all): this drawing's own split-unit
+# notation is "N#(X.XXTR/Y.YHP)" -- qty, TR and HP together in one note,
+# never the word "HI-WALL" anywhere near it. HIWALL_RE's own qty join
+# (NOS_RE, by proximity) doesn't apply here; the qty is already IN the
+# note. Type (Hi-Wall, cassette, ducted...) is still not read -- nothing
+# in this text says which, so the entry says so rather than guessing one
+# from HIWALL_RE's own vocabulary the way the write-up agent did (see
+# summary_text()'s own TR-tags disclaimer, same finding).
+SPLIT_AC_RE = re.compile(r'(\d{1,2})\s*#\s*\(\s*(\d{1,2}(?:\.\s?\d+)?)\s*TR\s*/\s*(\d{1,2}(?:\.\s?\d+)?)\s*HP\s*\)', re.I)
+# Found on client_2nd_sample's own tiled OCR text (30 Oct 2026), once the
+# tiling fix (see ocr_page()) made it legible at all: each VAV box carries
+# its own unique "VAV-<zone>-<sequence>" tag (VAV-1-11, VAV-2-12, VAV-3-19
+# ...), one per physical box -- the right thing to count. The SAME drawing
+# also prints "VAV-150", "VAV-250", "VAV-300"... far more often: a SIZE/
+# model code shared by many different boxes, not a per-box identity, and
+# counting THOSE would wildly over- or under-count. Requiring exactly one
+# digit for the zone and excluding a bare 3-digit tail keeps the two apart
+# without a second pass: "VAV-150" has no second hyphen to match at all.
+VAV_RE = re.compile(r'VAV-(\d)-(\d{1,2})\b')
+# "2000CFM AHU-01", tag and airflow in the same note -- confirmed on the
+# real file: only AHU-01 has its CFM directly beside the tag like this,
+# AHU-02/AHU-03 do not (checked within 500pt of each tag, nothing matched).
+# Never derive AHU-02/03's airflow from this pattern finding nothing --
+# absence here means "not read," not "zero," same reasoning as everywhere
+# else nothing was found.
+AHU_CFM_RE = re.compile(r'(\d{2,6})\s*CFM\s*(AHU-\d{1,2})', re.I)
+# Flex-duct dropper schedule notes -- two spellings seen on the real file,
+# "N#Dropper@NNNcfm" and "NDrop.@NNNcfm" (both real, not a typo of each
+# other -- different schedule boxes on the same drawing use each one).
+# Each match is ONE dropper type's own qty + CFM, never summed into a
+# single total here -- a real schedule lists several distinct types.
+DROPPER_RE = re.compile(r'(\d{1,2})\s*#?\s*Drop(?:per|\.)?\s*@\s*(\d{2,5})\s*c\s*f\s*m', re.I)
+# "10# FA DISC VALVE o150" / "17# FA DISC VALVE o150" -- toilet-exhaust
+# branch disc valves, found as their own qty-prefixed note the same way
+# the dropper and split-AC notes are. Size (the o150) is not captured
+# here; if a size badly needs separating by type later, read it off
+# `text` on the raw label, not re-derived from this count.
+DISC_VALVE_RE = re.compile(r'(\d{1,2})\s*#\s*FA\s*DISC\s*VALVE', re.I)
+# Diffuser schedule notes -- the REAL format on client_2nd_sample's own
+# tiled OCR text turned out to be THREE separate fragments per entry
+# ("4# OVERALL 640o SAD", "NECK DIA-400o", "450 CFM EACH" -- three
+# different OCR boxes, not one combined note the way every pattern above
+# is), with real spelling noise on top (the diameter symbol alone reads
+# as o/0/phi/Phi/%/missing across different instances; "OVERALL" is
+# sometimes followed by a hyphen, sometimes a space, sometimes neither).
+# Joining three fragments by proximity risks mismatching two DIFFERENT
+# schedule entries sitting close together on a crowded legend -- the
+# same risk the original Hi-Wall+NOS join (now superseded by
+# SPLIT_AC_RE, see its own comment) already showed in practice. Rather
+# than guess at a join that might silently pair the wrong CFM with the
+# wrong size, only the qty + overall size is read here, as its own
+# honest, count-only entry -- CFM and neck size for these are NOT
+# attempted, and the figures this DOES produce say so (see
+# summary_text()). A square-diffuser note ("4# SA SQ Diffuser") uses no
+# "OVERALL" at all -- its own pattern, same reasoning.
+DIFFUSER_RE = re.compile(r'(\d{1,2})\s*#?\s*OVERALL[\s-]*(\d{2,4})', re.I)
+SQ_DIFFUSER_RE = re.compile(r'(\d{1,2})\s*#?\s*SA\s*Sq\s*Diffuser', re.I)
 
 def norm(t):
     t = re.sub(r'[°’‘“”\'`]', '"', t)
@@ -319,20 +395,80 @@ def parse_label(text, x, y, source, conf=1.0):
     for m in SIZE_RE.finditer(t):
         w, d = int(m.group(1)), int(m.group(2))
         if 2 <= w <= 120 and 2 <= d <= 120:
-            found.append({"kind": "size", "w_in": w, "d_in": d, "text": text, "x_pt": x, "y_pt": y, "source": source, "conf": conf})
-    for m in CFM_RE.finditer(t):
-        found.append({"kind": "cfm", "cfm": int(m.group(1)), "text": text, "x_pt": x, "y_pt": y, "source": source, "conf": conf})
+            # Inches (US convention) -- unchanged from before this item,
+            # every drawing already measured this way keeps reading
+            # exactly as it did.
+            found.append({"kind": "size", "w_in": w, "d_in": d, "unit_read": "in",
+                          "text": text, "x_pt": x, "y_pt": y, "source": source, "conf": conf})
+        elif 50 <= max(w, d) <= 3000 and 50 <= min(w, d) <= 3000:
+            # Millimetres (metric convention) -- found on client_2nd_sample,
+            # 30 Oct 2026: a GENERAL gap, not specific to this one file.
+            # Every duct size on a metric drawing (550x300, 1000x88...)
+            # was silently rejected by the inches-only check above --
+            # 550 is never a plausible duct WIDTH in inches (45+ feet),
+            # but is an entirely ordinary one in millimetres. This is
+            # root cause of a real client file reading 0% label-match
+            # even after OCR and the equipment fixes in this same item
+            # found everything else on the sheet correctly -- not a
+            # wrong scale, a wrong assumed unit. Converted to inches so
+            # every downstream figure (gauge banding by IS 655, the
+            # billed running length) keeps working in the one unit the
+            # rest of this file already assumes, for either convention,
+            # on any drawing this is run against -- never just this one.
+            found.append({"kind": "size", "w_in": round(w / 25.4, 1), "d_in": round(d / 25.4, 1),
+                          "unit_read": "mm", "w_mm": w, "d_mm": d,
+                          "text": text, "x_pt": x, "y_pt": y, "source": source, "conf": conf})
     hiwall_spans = []
     for m in HIWALL_RE.finditer(t):
         hiwall_spans.append(m.span())
-        found.append({"kind": "equipment", "type": "Hi-Wall Split AC", "capacity_tr": float(m.group(1)),
+        found.append({"kind": "equipment", "type": "Hi-Wall Split AC",
+                      "capacity_tr": float(m.group(1).replace(" ", "")),
+                      "text": text, "x_pt": x, "y_pt": y, "source": source, "conf": conf})
+    for m in SPLIT_AC_RE.finditer(t):
+        hiwall_spans.append(m.span())
+        found.append({"kind": "equipment", "type": "Split AC unit (type not read -- confirm on drawing)",
+                      "capacity_tr": float(m.group(2).replace(" ", "")),
+                      "capacity_hp": float(m.group(3).replace(" ", "")),
+                      "qty": int(m.group(1)),
                       "text": text, "x_pt": x, "y_pt": y, "source": source, "conf": conf})
     for m in TR_RE.finditer(text):
         if any(s <= m.start() < e for s, e in hiwall_spans):
-            continue   # already captured as a Hi-Wall unit's own capacity, not a second generic TR tag
-        found.append({"kind": "tr", "tr": float(m.group(1)), "text": text, "x_pt": x, "y_pt": y, "source": source, "conf": conf})
+            continue   # already captured as a Hi-Wall/split-AC unit's own capacity, not a second generic TR tag
+        found.append({"kind": "tr", "tr": float(m.group(1).replace(" ", "")), "text": text,
+                      "x_pt": x, "y_pt": y, "source": source, "conf": conf})
     for m in NOS_RE.finditer(t):
         found.append({"kind": "nos", "nos": int(m.group(1)), "text": text, "x_pt": x, "y_pt": y, "source": source, "conf": conf})
+    for m in VAV_RE.finditer(t):
+        zone, seq = int(m.group(1)), int(m.group(2))
+        found.append({"kind": "vav", "zone": zone, "seq": seq, "tag": f"VAV-{zone}-{seq}",
+                      "text": text, "x_pt": x, "y_pt": y, "source": source, "conf": conf})
+    # cfm_spans: a number this label already claimed as part of a
+    # structured note (an AHU's own airflow, a dropper schedule's CFM)
+    # must not ALSO land as a second, generic "cfm" count -- the same
+    # double-booking HIWALL_RE/SPLIT_AC_RE already guard tr_labels
+    # against, just for CFM_RE here.
+    cfm_spans = []
+    for m in AHU_CFM_RE.finditer(t):
+        cfm_spans.append(m.span(1))
+        found.append({"kind": "ahu", "cfm": int(m.group(1)), "tag": m.group(2).upper(),
+                      "text": text, "x_pt": x, "y_pt": y, "source": source, "conf": conf})
+    for m in DROPPER_RE.finditer(t):
+        cfm_spans.append(m.span(2))
+        found.append({"kind": "dropper", "qty": int(m.group(1)), "cfm": int(m.group(2)),
+                      "text": text, "x_pt": x, "y_pt": y, "source": source, "conf": conf})
+    for m in DISC_VALVE_RE.finditer(t):
+        found.append({"kind": "disc_valve", "qty": int(m.group(1)),
+                      "text": text, "x_pt": x, "y_pt": y, "source": source, "conf": conf})
+    for m in DIFFUSER_RE.finditer(t):
+        found.append({"kind": "diffuser_schedule", "qty": int(m.group(1)), "overall": int(m.group(2)),
+                      "shape": "round", "text": text, "x_pt": x, "y_pt": y, "source": source, "conf": conf})
+    for m in SQ_DIFFUSER_RE.finditer(t):
+        found.append({"kind": "diffuser_schedule", "qty": int(m.group(1)), "overall": None,
+                      "shape": "square", "text": text, "x_pt": x, "y_pt": y, "source": source, "conf": conf})
+    for m in CFM_RE.finditer(t):
+        if any(s <= m.start(1) < e for s, e in cfm_spans):
+            continue   # already captured as an AHU's or a dropper's own CFM, not a second generic reading
+        found.append({"kind": "cfm", "cfm": int(m.group(1)), "text": text, "x_pt": x, "y_pt": y, "source": source, "conf": conf})
     return found
 
 
@@ -341,8 +477,15 @@ def _equipment_from_labels(labels: list, pt_per_ft: float, match_ft: float = 3.0
     two separate text boxes on the drawing (the count a line below the
     capacity) -- joined here by proximity, not assumed to be the same
     string. No "NOS." found nearby means a single unit's own note, not a
-    missing count, so qty defaults to 1 rather than being left blank."""
-    hiwalls = [l for l in labels if l["kind"] == "equipment"]
+    missing count, so qty defaults to 1 rather than being left blank.
+
+    A SPLIT_AC_RE entry already carries its own real qty (the "N#" in the
+    same note) -- never run the NOS-proximity join on it, which would
+    throw that real number away for a guessed one the instant no "NOS."
+    text happens to sit nearby (it mostly doesn't, this drawing's own
+    qty is already in the TR/HP note itself)."""
+    hiwalls = [l for l in labels if l["kind"] == "equipment" and "qty" not in l]
+    tagged = [l for l in labels if l["kind"] == "equipment" and "qty" in l]
     nos = [l for l in labels if l["kind"] == "nos"]
     r = match_ft * pt_per_ft
     out = []
@@ -356,10 +499,56 @@ def _equipment_from_labels(labels: list, pt_per_ft: float, match_ft: float = 3.0
                 best = (n, d)
         qty = best[0]["nos"] if best else 1
         conf = h["conf"] if best is None else round((h["conf"] + best[0]["conf"]) / 2, 3)
-        out.append({"tag": "", "type": h["type"], "capacity": f'{h["capacity_tr"]:g}TR', "qty": qty,
+        out.append({"tag": "", "type": h["type"], "capacity": f'{h["capacity_tr"]:g}TR',
+                    "capacity_tr": h["capacity_tr"], "qty": qty,
                     "room": "", "page": h["page"], "x_pt": h["x_pt"], "y_pt": h["y_pt"],
                     "source": h["source"], "conf": conf})
+    for h in tagged:
+        out.append({"tag": "", "type": h["type"],
+                    "capacity": f'{h["capacity_tr"]:g}TR/{h["capacity_hp"]:g}HP',
+                    "capacity_tr": h["capacity_tr"], "qty": h["qty"],
+                    "room": "", "page": h["page"], "x_pt": h["x_pt"], "y_pt": h["y_pt"],
+                    "source": h["source"], "conf": h["conf"]})
     return out
+
+
+def _fix_ahu_dropped_leading_digit(ahus: list, labels: list, pt_per_ft: float, match_ft: float = 6.0) -> None:
+    """An AHU's own tag-note CFM can be short a leading digit -- found live
+    on client_2nd_sample, confirmed by rendering and looking: the note
+    sitting right against the "AHU-01" tag read as "2000CFM AHU-01", but
+    the SAME real value is printed a second time elsewhere near the same
+    equipment, as a plain "12000 CFM" note with no tag attached -- a thin
+    leading "1" merging into the bold tag text right next to it is a real,
+    recurring OCR failure, confirmed by this drawing printing the correct
+    figure a second time nearby. Never the other direction: OCR does not
+    hallucinate an extra leading digit that was never drawn. So: if a
+    plain CFM reading sits within `match_ft` of an AHU's own tag and its
+    digits are the AHU's own reading with exactly one extra leading
+    digit, that longer reading is almost certainly the real one -- used
+    here instead, with the correction said out loud (never silent), not
+    guessed at from this one file and quietly applied to every AHU note
+    everywhere without saying so.
+
+    Mutates each dict in `ahus` in place; does not touch `labels`."""
+    cfms = [l for l in labels if l["kind"] == "cfm"]
+    r = match_ft * pt_per_ft
+    for a in ahus:
+        own = str(a["cfm"])
+        best = None
+        for c in cfms:
+            if c["page"] != a["page"]:
+                continue
+            cand = str(c["cfm"])
+            if not (len(cand) == len(own) + 1 and cand.endswith(own)):
+                continue
+            d = math.hypot(c["x_pt"] - a["x_pt"], c["y_pt"] - a["y_pt"])
+            if d < r and (best is None or d < best[1]):
+                best = (c, d)
+        if best is not None:
+            a["cfm_as_tagged"] = a["cfm"]
+            a["cfm"] = best[0]["cfm"]
+            a["cfm_corrected"] = True
+
 
 def _lines_from_words(words, vertical):
     """Group words into text lines; split where the gap is large (CAD often puts unrelated text on one row)."""
@@ -432,6 +621,22 @@ def _rapidocr_engine():
     return _RAPIDOCR_ENGINE
 
 
+def _tile_bounds(w: int, h: int, max_dim: int = 2400, overlap: float = 0.08):
+    """(x0, y0, x1, y1) crop boxes covering a w x h image, each side capped
+    at `max_dim` px, overlapping neighbours by `overlap` of that cap so a
+    label sitting on a seam still lands whole inside at least one tile.
+    One tile, the whole image, when it already fits -- same as no tiling
+    at all for a page small enough that this was never the problem."""
+    step = int(max_dim * (1 - overlap))
+    xs = list(range(0, max(w - max_dim, 0) + 1, step)) or [0]
+    if xs[-1] + max_dim < w:
+        xs.append(w - max_dim)
+    ys = list(range(0, max(h - max_dim, 0) + 1, step)) or [0]
+    if ys[-1] + max_dim < h:
+        ys.append(h - max_dim)
+    return [(x, y, min(x + max_dim, w), min(y + max_dim, h)) for y in ys for x in xs]
+
+
 def ocr_page(pdf_path, pi, dpi=250, log=print):
     """OCR for labels drawn as SHX strokes (invisible to text extraction).
 
@@ -443,7 +648,21 @@ def ocr_page(pdf_path, pi, dpi=250, log=print):
     vertical dimension/CFM labels are exactly that. A single pass missed
     130 real labels (sizes, CFM, even a "2TR HI-WALL" note) the 90-degree
     pass alone caught. What IS gone: no longer a separate OS-level program
-    to install -- RapidOCR's models ship inside the pip wheel."""
+    to install -- RapidOCR's models ship inside the pip wheel.
+
+    Tiled, not run once on the whole page render: found comparing a second
+    real tool run against client_2nd_sample, 30 Oct 2026 -- that drawing
+    renders to 11702x8278px at this dpi, and the engine's own
+    `Det.limit_side_len=2880` (set above specifically to stop a big render
+    being crushed before detection) downscales anything bigger than 2880px
+    on its long side regardless, which a single-page call this size always
+    is. The text was there -- cropping one quadrant and upscaling it 3x
+    turned total noise ("TC M.79 HGA2") into clean, 1.00-confidence reads
+    ("2#(1.65TR/2.0HP)", "VAV-1-1", "AHU ROOM-03") -- the page was simply
+    too big for the model to look at all of at once, the same reason a
+    person reads a sheet this size one area at a time, not shrunk to fit a
+    screen. Tiling to stay under that limit, not a bigger model or a
+    higher dpi, is what actually fixes it."""
     try:
         import numpy as np
         import pypdfium2 as pdfium
@@ -457,23 +676,27 @@ def ocr_page(pdf_path, pi, dpi=250, log=print):
     k = 72 / dpi
     out = []
     for angle in (0, 90):
-        log(f"  OCR pass {angle} deg ...")
         im = img if angle == 0 else img.rotate(-90, expand=True)
-        result = engine(np.array(im))
-        if result.boxes is None:
-            continue
-        scores = result.scores or [1.0] * len(result.boxes)
-        for box, txt, conf in zip(result.boxes, result.txts, scores):
-            # RapidOCR's box coordinates are numpy float32 -- not JSON
-            # serializable, so cast to plain Python float right away.
-            cx = float(sum(p[0] for p in box) / len(box))
-            cy = float(sum(p[1] for p in box) / len(box))
-            if angle == 90:
-                cx, cy = cy, H - 1 - cx   # map back to page pixels
-            # real per-box confidence from the model itself, not a
-            # placeholder -- the "quality fields" the parameter schema
-            # asks for on every entry.
-            out += parse_label(txt, cx * k, cy * k, f"ocr{angle}", conf=float(conf))
+        iw, ih = im.size
+        tiles = _tile_bounds(iw, ih)
+        log(f"  OCR pass {angle} deg ({len(tiles)} tile(s)) ...")
+        for tx0, ty0, tx1, ty1 in tiles:
+            tile = im.crop((tx0, ty0, tx1, ty1))
+            result = engine(np.array(tile))
+            if result.boxes is None:
+                continue
+            scores = result.scores or [1.0] * len(result.boxes)
+            for box, txt, conf in zip(result.boxes, result.txts, scores):
+                # RapidOCR's box coordinates are numpy float32 -- not JSON
+                # serializable, so cast to plain Python float right away.
+                cx = float(sum(p[0] for p in box) / len(box)) + tx0
+                cy = float(sum(p[1] for p in box) / len(box)) + ty0
+                if angle == 90:
+                    cx, cy = cy, H - 1 - cx   # map back to page pixels
+                # real per-box confidence from the model itself, not a
+                # placeholder -- the "quality fields" the parameter schema
+                # asks for on every entry.
+                out += parse_label(txt, cx * k, cy * k, f"ocr{angle}", conf=float(conf))
     # de-duplicate the same label seen twice -- keep the higher-confidence
     # read when both passes caught it, not just whichever ran first.
     uniq = []
@@ -487,6 +710,71 @@ def ocr_page(pdf_path, pi, dpi=250, log=print):
     return uniq
 
 
+def vision_vav_recount(pdf_path, pi, tag_reader, dpi=250, max_dim=2400,
+                       overlap=0.08, log=print):
+    """A second, independent VAV tag read, alongside RapidOCR (never
+    instead of it -- `extract()` still runs ocr_page() exactly as before;
+    this only ADDS to the same `labels` list).
+
+    Found 4-5 Nov 2026 (item 1's own real client-side finding: 15 of 48
+    real VAV boxes read, 31%): RapidOCR's own detector crushes a tag this
+    small on a drawing this dense even tiled at 2400px, the one fix
+    `ocr_page()` already has. Tested live against this exact drawing
+    (OpenRouter, qwen/qwen3-vl-30b-a3b-instruct, same 2400px tiling,
+    reasoning off, output capped): 23 of 48 distinct tags from a handful
+    of tiles, where RapidOCR-at-2400px reads this file's tags at roughly
+    half that rate -- a real, measured improvement, not a guess, but
+    still NOT a guaranteed full count (see summary_text()'s own "lower
+    bound" wording, unchanged by this).
+
+    `tag_reader(png_bytes) -> str`: whatever raw text a vision-AI call
+    read off ONE tile, owned entirely by the caller (addons/boq/workers.py)
+    -- this function never makes a network call, never sees an API key,
+    and never decides whether a drawing tile may be sent anywhere; same
+    reasoning as ocr_page() never deciding whether OCR runs at all. Kept
+    this way so hvac_takeoff.py stays what its own README already
+    promises -- a standalone tool with no network dependency -- and so
+    only core_bridge.py's own import of the real engine, never this file,
+    is what reaches OpenRouter.
+
+    Returns the SAME shape parse_label() already produces (a list of
+    label dicts), filtered to kind=="vav" only -- a tile's text has no
+    real pixel position for anything else kind="size"/"cfm" is a real
+    note AT a real spot on the drawing, something a vision model's own
+    plain-text answer does not carry); every OTHER label kind freshly
+    read this way would end up on the tile's centre point, right where
+    duct-run pairing (split_by_labels) and equipment matching
+    (_equipment_from_labels) use NEARBY position to decide which run or
+    tag a label belongs to -- a wrong, fabricated position there risks
+    silently pairing a reading to the wrong duct run. VAV tags carry no
+    such risk: `extract()`'s own vav_tags field is already built as a
+    plain distinct-tag SET from `labels`, with no position step at all
+    (see its own comment) -- so a tag found here with no real x/y lands
+    exactly as correctly as one OCR did."""
+    import io as _io
+    import pypdfium2 as pdfium
+    pdf = pdfium.PdfDocument(pdf_path)
+    img = pdf[pi].render(scale=dpi / 72).to_pil().convert("RGB")
+    w, h = img.size
+    tiles = _tile_bounds(w, h, max_dim=max_dim, overlap=overlap)
+    log(f"  AI tag re-check ({len(tiles)} tile(s)) ...")
+    found: dict[str, dict] = {}
+    for i, (x0, y0, x1, y1) in enumerate(tiles):
+        crop = img.crop((x0, y0, x1, y1))
+        buf = _io.BytesIO()
+        crop.save(buf, format="PNG")
+        try:
+            text = tag_reader(buf.getvalue())
+        except Exception as e:                           # noqa: BLE001
+            log(f"    tile {i + 1}/{len(tiles)}: AI tag read failed ({e})")
+            continue
+        for l in parse_label(text or "", 0.0, 0.0, "vision", conf=0.7):
+            if l["kind"] == "vav":
+                found[l["tag"]] = l
+        log(f"    tile {i + 1}/{len(tiles)}: {len(found)} distinct VAV tag(s) so far")
+    return list(found.values())
+
+
 def _label_value_key(l: dict):
     """What makes two labels "the same reading" regardless of kind."""
     if l["kind"] == "size": return (l["w_in"], l["d_in"])
@@ -494,6 +782,16 @@ def _label_value_key(l: dict):
     if l["kind"] == "tr": return (l["tr"],)
     if l["kind"] == "nos": return (l["nos"],)
     if l["kind"] == "equipment": return (l["type"], l["capacity_tr"])
+    # The cleaned tag, not raw OCR text -- the same physical VAV box reads
+    # as "VAV-3-1" from one tile/angle and "[VAV-3-1]" (bracket included)
+    # or "5VAV-2-12" (a stray leading digit) from another; matching on
+    # `tag` collapses those as the one real reading they are, where the
+    # generic raw-text catch-all below would wrongly keep them separate.
+    if l["kind"] == "vav": return (l["tag"],)
+    if l["kind"] == "ahu": return (l["tag"], l["cfm"])
+    if l["kind"] == "dropper": return (l["qty"], l["cfm"])
+    if l["kind"] == "disc_valve": return (l["qty"],)
+    if l["kind"] == "diffuser_schedule": return (l["qty"], l["overall"], l["shape"])
     return (l.get("text"),)
 
 
@@ -621,10 +919,12 @@ def _isolated_runs(duct_runs: list, tol_ft: float = 2.0) -> list:
     return out
 
 
-def extract(pdf_path, layer_map, pt_per_ft, use_ocr=True, dpi=250, match_ft=8, log=print):
+def extract(pdf_path, layer_map, pt_per_ft, use_ocr=True, dpi=250, match_ft=8, log=print,
+           vision_tag_reader=None):
     result = {"tool": "hvac_takeoff v2", "generated": datetime.now().isoformat(timespec="seconds"),
               "source": {"file": os.path.basename(pdf_path)}, "settings": {"pt_per_ft": pt_per_ft,
-              "layer_map": layer_map, "ocr": use_ocr, "label_match_radius_ft": match_ft},
+              "layer_map": layer_map, "ocr": use_ocr, "label_match_radius_ft": match_ft,
+              "ai_tag_recheck": bool(vision_tag_reader)},
               "duct_runs": [], "duct_summary": [], "labels": [], "rooms": [], "notes": [], "warnings": [],
               # Present in every output, honestly empty rather than
               # absent, for whichever of these this tool still does not
@@ -718,6 +1018,8 @@ def extract(pdf_path, layer_map, pt_per_ft, use_ocr=True, dpi=250, match_ft=8, l
             log("  text layer ...")
             labels, rooms, notes = text_layer(page, pi)
             if use_ocr: labels += ocr_page(pdf_path, pi, dpi, log)
+            if use_ocr and vision_tag_reader:
+                labels += vision_vav_recount(pdf_path, pi, vision_tag_reader, dpi, log=log)
             _classify_duct_label_colors(pdf_path, pi, labels)
             for l in labels:
                 l["page"] = pi
@@ -750,12 +1052,25 @@ def extract(pdf_path, layer_map, pt_per_ft, use_ocr=True, dpi=250, match_ft=8, l
     # "tr" label when it sits this close to an equipment entry of the same
     # capacity -- it is that same note read twice, not a second tag.
     for e in result["equipment"]:
-        cap = float(e["capacity"].rstrip("TR"))
+        # capacity_tr, not a re-parse of the formatted "capacity" string --
+        # found live, 30 Oct 2026: a Split AC entry's own "1.65TR/2HP"
+        # format isn't ".rstrip('TR')"-shaped the way a Hi-Wall entry's
+        # plain "2TR" is, and crashed here the moment one existed.
+        cap = e["capacity_tr"]
         result["labels"] = [
             l for l in result["labels"]
             if not (l["kind"] == "tr" and l["page"] == e["page"]
                    and abs(l["tr"] - cap) < 0.05
                    and math.hypot(l["x_pt"] - e["x_pt"], l["y_pt"] - e["y_pt"]) < 3.0 * pt_per_ft)]
+    # An AHU tag-note's own CFM, corrected in place when a nearby plain
+    # CFM reading shows it was short a leading digit -- see this
+    # function's own comment. Runs before the ft conversion below (needs
+    # the labels' real x_pt/y_pt and pt_per_ft), after the equipment
+    # join above (not before: no ordering dependency between the two,
+    # but keeping every "fix one reading using a second one nearby" step
+    # together here, not scattered).
+    _fix_ahu_dropped_leading_digit([l for l in result["labels"] if l["kind"] == "ahu"],
+                                   result["labels"], pt_per_ft)
     # convert coordinates to feet from sheet top-left, round
     f = lambda v: round(v / pt_per_ft, 2)
     for r in result["duct_runs"]:
@@ -786,6 +1101,29 @@ def extract(pdf_path, layer_map, pt_per_ft, use_ocr=True, dpi=250, match_ft=8, l
         if l["kind"] == "cfm" and not l.get("is_secondary_duct_color"): cfm[l["cfm"]] += 1
     result["cfm_label_counts"] = dict(sorted(cfm.items()))
     result["tr_labels"] = [l["tr"] for l in result["labels"] if l["kind"] == "tr"]
+    # Each VAV box's own unique zone-sequence tag (VAV_RE) -- a count of
+    # distinct physical boxes, not of how many times a tag was read (the
+    # dedup pass above already collapsed repeat reads of the same tag).
+    result["vav_tags"] = sorted({l["tag"] for l in result["labels"] if l["kind"] == "vav"})
+    # AHUs with their own airflow printed right beside the tag -- see
+    # AHU_CFM_RE's own comment: an AHU tag with no match here was found on
+    # the drawing (as a plain note, in `notes`) but did not have its CFM
+    # readable this way; never assumed to be zero airflow.
+    result["ahu"] = [{"tag": l["tag"], "cfm": l["cfm"],
+                      **({"cfm_as_tagged": l["cfm_as_tagged"]} if l.get("cfm_corrected") else {})}
+                     for l in result["labels"] if l["kind"] == "ahu"]
+    # One entry per distinct dropper TYPE (its own qty + CFM), never
+    # summed into one figure -- a real schedule lists several types side
+    # by side and the write-up needs to say so, not flatten them.
+    result["dropper_schedule"] = [{"qty": l["qty"], "cfm": l["cfm"]}
+                                  for l in result["labels"] if l["kind"] == "dropper"]
+    result["disc_valve_count"] = sum(l["qty"] for l in result["labels"] if l["kind"] == "disc_valve")
+    # Count-only, deliberately: CFM and neck size are each a SEPARATE
+    # fragment on the real drawing (see DIFFUSER_RE's own comment) and
+    # are not joined here -- never silently paired with the wrong
+    # neighbour. One entry per distinct (qty, overall size, shape).
+    result["diffuser_schedule"] = [{"qty": l["qty"], "overall": l["overall"], "shape": l["shape"]}
+                                   for l in result["labels"] if l["kind"] == "diffuser_schedule"]
     # The parameter schema's ★ quality list: anything read with real doubt,
     # named and located, not silently kept or silently dropped. 0.6 is a
     # plain middle threshold, not tuned against a labelled test set yet.
@@ -950,11 +1288,76 @@ def summary_text(res):
     tot = defaultdict(float)
     for d in res["duct_summary"]: tot[d["system"]] += d["length_ft"]
     s.append("  TOTAL: " + ", ".join(f"{k} {v:.1f} ft" for k, v in tot.items()))
-    s += ["", f'TR tags: {res["tr_labels"]}', f'CFM labels (value: count): {res["cfm_label_counts"]}',
+    # Found comparing a second real tool run against client_2nd_sample, 30
+    # Oct 2026: the write-up agent called every one of these "Hi-Wall" in
+    # the finished BOQ -- the only equipment TYPE word anywhere else in
+    # this summary is "Hi-Wall Split AC" (the EQUIPMENT section below), so
+    # with nothing here saying otherwise, it defaulted to that. A bare TR
+    # number is not a Hi-Wall unit; it is a number near the word "TR" with
+    # no type read at all -- said here explicitly so the write-up agent
+    # has no ambiguous gap to fill with the one type name it has seen.
+    s += ["", f'TR tags (type NOT read -- do NOT call these Hi-Wall or any other '
+              f'type; list each as "equipment type not identified, N.N TR" and '
+              f'flag it for the estimator to confirm on the drawing): {res["tr_labels"]}',
+          f'CFM labels (value: count): {res["cfm_label_counts"]}',
           f'Rooms: {len(res["rooms"])}  ' + "; ".join(f'{r["name"]} {r["sqft"]}' for r in res["rooms"][:40])]
     if res["equipment"]:
         s += ["", "EQUIPMENT (from drawing notes, partial -- see warnings)"]
         s += [f'  {e["type"]} {e["capacity"]} x{e["qty"]} (conf {e["conf"]:.2f})' for e in res["equipment"]]
+    # .get(...) here, not res[...] -- a result dict built before this
+    # field existed (an older saved run, or a test's own minimal fixture)
+    # must still summarise, not KeyError.
+    if res.get("ahu"):
+        s += ["", "AHU (tag + airflow read together from one note)"]
+        for a in res["ahu"]:
+            if "cfm_as_tagged" in a:
+                s.append(f'  {a["tag"]}: {a["cfm"]} CFM (corrected -- the note at the tag itself '
+                         f'read {a["cfm_as_tagged"]} CFM, missing a leading digit; a second, separate '
+                         f'reading of the same value nearby read {a["cfm"]} CFM correctly, and that '
+                         f'one is used here)')
+            else:
+                s.append(f'  {a["tag"]}: {a["cfm"]} CFM')
+    if res.get("vav_tags"):
+        # item 1 (4 Nov 2026): the real client-side comparison on this exact
+        # drawing found 15 tags read against 48 real VAV boxes (31%) -- not
+        # a bug in VAV_RE, which was already verified correct FOR THIS FILE
+        # (see its own comment): a box whose tag OCR never reads cleanly
+        # enough to match the pattern is simply never counted, the same
+        # honest "absence means not read, not zero" rule this whole module
+        # already follows everywhere else. What was missing is saying so on
+        # this ONE count as plainly as every other partial count in this
+        # summary already does -- a reader who has not seen the 15-vs-48
+        # finding has no way to know this number is a floor, not a final
+        # count, without it being said here.
+        ai_checked = res.get("settings", {}).get("ai_tag_recheck")
+        s += ["", f'VAV BOXES: {len(res["vav_tags"])} distinct tags read '
+                  f'(each its own zone-sequence tag, e.g. "VAV-1-11" -- '
+                  f'a repeated size code like "VAV-150" is NOT a box count '
+                  f'and is not what this number is). THIS IS A LOWER BOUND, '
+                  f'NOT A FINAL COUNT: a box whose tag does not OCR cleanly '
+                  f'enough to match is not counted at all, not counted as '
+                  f'uncertain -- on a real job this undercounted by more '
+                  f'than half. Before pricing, count the VAV boxes on the '
+                  f'overlay/drawing by eye and use that number instead if '
+                  f'it differs from this one.' +
+                  (' (An AI tag re-check also ran on this file and its '
+                   'reads are already folded into this count -- tested '
+                   'live to read noticeably more tags than OCR alone on a '
+                   'drawing this dense, but it is a second READ, not a '
+                   'count of the real boxes; the same "lower bound" '
+                   'caveat still applies.)' if ai_checked else '')]
+    if res.get("dropper_schedule"):
+        s += ["", "FLEX DROPPER SCHEDULE (one line per distinct type -- never sum these into one total)"]
+        s += [f'  {d["qty"]} x @{d["cfm"]} CFM' for d in res["dropper_schedule"]]
+    if res.get("disc_valve_count"):
+        s.append(f'FA disc valves (toilet-exhaust branch): {res["disc_valve_count"]} total')
+    if res.get("diffuser_schedule"):
+        s += ["", "DIFFUSER SCHEDULE -- QTY AND OVERALL SIZE ONLY (CFM and neck size are each a "
+                  "separate note on this drawing and are NOT joined here -- never pair them with "
+                  "this schedule from position/proximity alone; cross-check cfm_label_counts and "
+                  "the drawing itself for those)"]
+        s += [f'  {d["qty"]} x round, overall {d["overall"]}' if d["shape"] == "round"
+              else f'  {d["qty"]} x square' for d in res["diffuser_schedule"]]
     if res["terminals"] or res["accessories"]:
         s += ["", "SYMBOLS COUNTED BY SHAPE (partial -- see warnings)"]
         # item 27 rule 3: the per-symbol area (width_in/height_in/area_sqft,

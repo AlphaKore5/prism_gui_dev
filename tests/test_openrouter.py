@@ -57,6 +57,41 @@ class OpenrouterChatReturnsTheAnswer(unittest.TestCase):
             out = OR.openrouter_chat("sk-or-x", "anthropic/claude-sonnet-5.5", "write it", retries=1)
         self.assertEqual(out, "ok")
 
+    def test_max_tokens_and_extra_are_merged_into_the_request_body(self):
+        with mock.patch.object(OR.requests, "post", return_value=_resp(
+                200, {"choices": [{"message": {"content": "ok"}}]})) as post:
+            OR.openrouter_chat("sk-or-x", "qwen/qwen3-vl-30b-a3b-instruct", "read this",
+                               max_tokens=900, extra={"reasoning": {"enabled": False}})
+        sent = post.call_args.kwargs["json"]
+        self.assertEqual(sent["max_tokens"], 900)
+        self.assertEqual(sent["reasoning"], {"enabled": False})
+
+    def test_no_max_tokens_or_extra_leaves_the_body_as_before(self):
+        # Every caller before this one never passed either -- the body
+        # they send must stay byte-for-byte what it always was.
+        with mock.patch.object(OR.requests, "post", return_value=_resp(
+                200, {"choices": [{"message": {"content": "ok"}}]})) as post:
+            OR.openrouter_chat("sk-or-x", "anthropic/claude-sonnet-5.5", "write it")
+        sent = post.call_args.kwargs["json"]
+        self.assertNotIn("max_tokens", sent)
+        self.assertEqual(set(sent), {"model", "messages", "temperature"})
+
+    def test_a_null_content_falls_back_to_the_reasoning_text(self):
+        # A "thinking" model that used its whole token budget on its own
+        # reasoning and never reached a final answer (finish_reason
+        # "length") -- found live testing z-ai/glm-4.6v on a drawing tile.
+        with mock.patch.object(OR.requests, "post", return_value=_resp(
+                200, {"choices": [{"message": {"content": None,
+                                               "reasoning": "VAV-1-2\nVAV-1-3"}}]})):
+            out = OR.openrouter_chat("sk-or-x", "z-ai/glm-4.6v", "read this")
+        self.assertEqual(out, "VAV-1-2\nVAV-1-3")
+
+    def test_a_null_content_with_no_reasoning_returns_empty_string_not_none(self):
+        with mock.patch.object(OR.requests, "post", return_value=_resp(
+                200, {"choices": [{"message": {"content": None}}]})):
+            out = OR.openrouter_chat("sk-or-x", "z-ai/glm-4.6v", "read this")
+        self.assertEqual(out, "")
+
     def test_a_network_error_raises_a_plain_message(self):
         import requests as real_requests
         with mock.patch.object(OR.requests, "post",

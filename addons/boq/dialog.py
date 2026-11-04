@@ -12,12 +12,13 @@ generated, because that is what makes the number checkable.
 """
 from __future__ import annotations
 import os
+import re
 import time
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel, QPushButton,
-    QPlainTextEdit, QLineEdit, QMessageBox, QCheckBox, QFileDialog,
+    QPlainTextEdit, QTextEdit, QLineEdit, QMessageBox, QCheckBox, QFileDialog,
     QComboBox, QWidget,
 )
 
@@ -42,25 +43,65 @@ from addons.boq.workers import OpenRouterWriteWorker
 from widgets.output_panel import short_duration
 
 
+# item 44 (3 Nov 2026): every prompt below used to say "the attached
+# drawing" / "labelled on the drawing" throughout. cad_render.prepare_for_ai
+# already sends a .pdf whole, every page, unchanged (its own docstring: "A
+# PDF is sent AS-IS... Claude reads a real PDF document natively (every
+# page, any real text in it too)") -- the attachment was never the problem.
+# Found live: a real client file had a written specification on page 1
+# (explicit answers to several things the drawing itself left unlabelled --
+# a caster count, a wall thickness) and the actual drawing on page 2. The
+# model's own answer said "Source: Extracted from the attached drawing
+# only" and never touched page 1 at all -- not because it couldn't see it
+# (it was sent whole), but because "the drawing" in the prompt's own
+# wording reads as "the visual/CAD page", and "labelled on the drawing"
+# as "ignore anything that isn't drawn". The owner's own words: "i dont
+# care how many pages... not only drawing, everything." Every prompt here
+# now says "the attached file" and spells out that it covers EVERY page,
+# a written specification exactly as much as a drawn sketch -- never
+# "the drawing" alone again.
 VERIFY_PROMPT = (
     "Verify and remake: recheck every measured quantity against the attached "
-    "drawing. The drawing is the source of truth; the measured figures were "
-    "computed locally from it. For every quantity that does not match the "
-    "drawing, state the drawing value and the measured value. Then remake the "
-    "whole BOQ in the same format as the previous answer with the corrected "
-    "figures, and list what changed.")
+    "file. The file is the source of truth -- read ALL of it, every page, "
+    "whatever's on each one (a drawn sketch, a written specification, both); "
+    "the measured figures were computed locally from it. For every quantity "
+    "that does not match what the file actually says, state the file's own "
+    "value and the measured value. Then remake the whole BOQ in the same "
+    "format as the previous answer with the corrected figures, and list what "
+    "changed.")
 
 # "Make with drawing" pressed before any BOQ exists yet -- there is no
 # previous answer to remake, so this does NOT reuse VERIFY_PROMPT's "remake
 # in the same format... list what changed" framing, which only makes sense
 # once something has already been written. Same job either way (read the
-# drawing itself, not just the measured figures), different starting point.
+# attached file itself, not just the measured figures), different starting
+# point.
 MAKE_WITH_DRAWING_PROMPT = (
-    "Make the whole BOQ by reading the attached drawing directly, not only "
-    "the measured figures below. The measured figures were computed locally "
-    "from the same drawing -- use them as a cross-check, and where your own "
-    "reading of the drawing disagrees with a measured figure, say so and use "
-    "the drawing's own value.")
+    "Make the whole BOQ by reading the attached file directly, not only the "
+    "measured figures below -- every page of it, whatever each one holds (a "
+    "drawn sketch, a written specification, both); do not treat only a drawn "
+    "page as real and a written one as background. The measured figures were "
+    "computed locally from the same file -- use them as a cross-check, and "
+    "where your own reading disagrees with a measured figure, say so and use "
+    "what the file itself says.")
+
+# item 38: a PDF attachment has no vector geometry Prism can measure itself --
+# unlike MAKE_WITH_DRAWING_PROMPT above, there is no "measured figures"
+# section to cross-check against; telling the AI to cross-check against an
+# empty one would be confusing, not reassuring. Every quantity has to come
+# from the AI's own reading of the file, so it is told that plainly, with
+# the same "never guess" rule every other BOQ prompt in this add-on carries.
+MAKE_WITH_DRAWING_NO_MEASUREMENT_PROMPT = (
+    "Make the whole BOQ by reading the attached file directly -- there is no "
+    "separately measured data for this one; everything must come from your "
+    "own reading of it. Read EVERY page -- a written specification page is "
+    "exactly as real a source as a drawn sketch page, never background or "
+    "secondary; if the file has both, use both together, and say so where a "
+    "written spec gives a figure the drawing itself leaves unlabelled (or "
+    "the two disagree). Use only dimensions, quantities, materials and notes "
+    "actually stated somewhere in the file. Where something needed is not "
+    "stated anywhere or is unclear, say so as a question or a TO CONFIRM "
+    "line rather than inventing a figure.")
 
 
 class InputMeasurementsDialog(QDialog):
@@ -186,6 +227,13 @@ class BoqDialog(PrismDialog):
         self.summary = ""
         self.csv_path = ""
         self._hvac = False
+        # The Industry dropdown's own value, snapshotted at measurement
+        # time (see _measure()/_measure_external()'s own comments on
+        # self._hvac for why: the dropdown can change between measuring
+        # and writing, and the write-up prompt's own per-industry rules
+        # must match whatever the measurement actually used, not
+        # whatever the dropdown currently shows).
+        self._industry = industries.GENERAL
         self._worker = None
         self._rec = None
         self._run_pending = False   # "Make my BOQ" pressed while still measuring
@@ -259,21 +307,27 @@ class BoqDialog(PrismDialog):
         # Say which format works BEFORE a drawing is attached, not in an error
         # afterwards.
         #
-        # .dwg is Autodesk's closed format, and reading it needs a separate
-        # converter Prism is not allowed to ship: ODA File Converter is only
-        # distributed through a registration form with an EULA, and its licence
-        # forbids redistribution. So on a machine without one, a customer who
-        # attached the obvious file got told to go and install a program —
-        # after picking the file, naming the job and pressing the button.
+        # .dwg is Autodesk's closed format. ODA File Converter reads it best
+        # but Prism is not allowed to ship it (only distributed through a
+        # registration form with an EULA that forbids redistribution), and on
+        # an Intel Mac, Linux box or 32-bit Windows machine there's nothing
+        # Prism bundles either (core.boq.find_dwg_converter() now installs
+        # Prism's own bundled dwg2dxf -- GPL, redistributable -- on an Apple
+        # Silicon Mac or 64-bit Windows, see
+        # prism_terminal/core/vendor/dwg2dxf/README.md). So on whatever's
+        # left without any converter at all, a customer who attached the
+        # obvious file got told to go and install a program — after picking
+        # the file, naming the job and pressing the button.
         #
         # .dxf needs none of that. Every CAD program exports it in one step,
         # ezdxf reads it directly, and it is the same geometry. Making that the
         # expected input is the difference between a five-minute detour and a
         # dead end — and it costs the customer one menu item they already know.
         #
-        # Shown only when this machine genuinely has no converter: a client who
-        # has installed one can attach .dwg all day and must not be nagged
-        # about a problem they do not have.
+        # Shown only when this machine genuinely has no converter at all
+        # (bundled or installed): a client on a covered platform, or one who
+        # has installed ODA themselves, can attach .dwg all day and must not
+        # be nagged about a problem they do not have.
         if not self.boq.find_dwg_converter():
             dxf_note = QLabel(
                 "Attaching a drawing? Save it as <b>DXF</b> first — in AutoCAD "
@@ -303,6 +357,19 @@ class BoqDialog(PrismDialog):
         self.template_hint.setObjectName("note")
         self.template_hint.setWordWrap(True)
         root.addWidget(self.template_hint)
+
+        # item 38 (2 Nov 2026): a scanned/vector-less PDF drawing has no
+        # geometry Prism can measure itself — classify_inputs() files it as
+        # the drawing (cad_path), same as a .dwg/.dxf, but _absorb() below
+        # skips the automatic measurement step for it (there is nothing for
+        # MeasureWorker to measure) and shows this instead of a silent
+        # "not a CAD drawing" error. Hidden until that actually happens —
+        # most jobs attach a real .dwg/.dxf and never need to see it.
+        self.pdf_drawing_hint = QLabel("")
+        self.pdf_drawing_hint.setObjectName("note")
+        self.pdf_drawing_hint.setWordWrap(True)
+        self.pdf_drawing_hint.setVisible(False)
+        root.addWidget(self.pdf_drawing_hint)
 
         # A second way in, beside measuring a drawing: the owner's own ask,
         # 24 Oct 2026, built for a tool like the PDF takeoff extractor that
@@ -447,6 +514,7 @@ class BoqDialog(PrismDialog):
         self.format_combo = QComboBox()
         self.format_combo.addItem(i18n.t("Let the tool decide"), "")
         self.format_combo.addItem(i18n.t("Word document (.docx)"), "docx")
+        self.format_combo.addItem(i18n.t("Excel spreadsheet (.xlsx)"), "xlsx")
         self.format_combo.addItem(i18n.t("CSV"), "csv")
         self.format_combo.addItem(i18n.t("PDF"), "pdf")
         prow.addWidget(flab)
@@ -496,7 +564,15 @@ class BoqDialog(PrismDialog):
         self.status.setWordWrap(True)
         root.addWidget(self.status)
 
-        self.result = QPlainTextEdit()
+        # QTextEdit, not QPlainTextEdit: the writing AI returns markdown
+        # (**bold**, > notices, tables) -- QPlainTextEdit shows that literally,
+        # asterisks and all, instead of rendering it. Reading it back for a
+        # follow-up/recheck prompt uses toMarkdown(), not toPlainText(): Qt
+        # renders a markdown table into a real QTextTable, and toPlainText()
+        # on that just concatenates the cell text with no row/column
+        # separators -- unreadable to the AI. toMarkdown() round-trips a
+        # table (and round-trips plain text with no markdown in it, too).
+        self.result = QTextEdit()
         self.result.setReadOnly(True)
         self.result.setPlaceholderText(f"Your {self._noun} will appear here.")
         self.result.setMinimumHeight(120)
@@ -558,7 +634,27 @@ class BoqDialog(PrismDialog):
             self._update_template_hint()
         if cad:
             self.cad_path = cad[0]["path"]
-            self._measure()
+            if os.path.splitext(self.cad_path)[1].lower() in (".dwg", ".dxf"):
+                self.pdf_drawing_hint.setVisible(False)
+                self._measure()
+            else:
+                # A PDF classified as the drawing (core.boq.classify_inputs:
+                # little/no extractable text, so not a sample BOQ either) —
+                # no vector geometry exists to measure automatically.
+                # _measure() would just raise "not a .dwg/.dxf" here, which
+                # reads as an error on the very file the user correctly
+                # attached as the drawing. The real path for this is "Make
+                # with drawing" -- enabled directly, the same as _on_measured
+                # does for a real measurement, since there is no measurement
+                # to wait for.
+                self.recheck_btn.setEnabled(True)
+                self.pdf_drawing_hint.setText(i18n.t(
+                    "{name} has no vector geometry to measure automatically "
+                    "— it's a PDF/scan, not a .dwg/.dxf. Press \"Make with "
+                    "drawing\" to let the AI read it directly, or use "
+                    "\"Input measurements\" to type the numbers yourself.")
+                    .replace("{name}", os.path.basename(self.cad_path)))
+                self.pdf_drawing_hint.setVisible(True)
 
     def _update_template_hint(self):
         """Turns the standing invitation above into a confirmation once a
@@ -589,7 +685,7 @@ class BoqDialog(PrismDialog):
         self.takeoff_btn.setVisible(industries.has_takeoff(industry))
 
     def _open_industry_takeoff(self):
-        dlg = IndustryTakeoffDialog(self.industry_combo.currentText(), self)
+        dlg = IndustryTakeoffDialog(self.industry_combo.currentText(), self, cfg=self.cfg)
         if dlg.exec() == QDialog.Accepted:
             self._use_external_measurements(dlg.measurements_text())
 
@@ -615,7 +711,8 @@ class BoqDialog(PrismDialog):
         too, regardless of which path the measurements came in by; this
         path must not quietly skip that check just because no drawing was
         ever measured here."""
-        self._hvac = self.industry_combo.currentText() == industries.HVAC
+        self._industry = self.industry_combo.currentText()
+        self._hvac = self._industry == industries.HVAC
         self.q = {"external": True, "text": text}
         self.summary = text
         self.cad_path = ""
@@ -656,12 +753,14 @@ class BoqDialog(PrismDialog):
         # because the geometry happens to look similar, and (now that BOQ
         # targets several industries) must never be guessed from the
         # request's own typed words either — only this explicit choice.
-        hvac = self.industry_combo.currentText() == industries.HVAC
+        self._industry = self.industry_combo.currentText()
+        hvac = self._industry == industries.HVAC
         # Remembered, not re-read at write time: the write-up prompt's own
-        # HVAC-only guidance (below) must match whatever this measurement
-        # actually used -- telling the writer "use the real duct sizes"
-        # when the measurement never looked for any would be noise, and
-        # the ask box's text could change between measuring and writing.
+        # per-industry guidance (below) must match whatever this
+        # measurement actually used -- telling the writer "use the real
+        # duct sizes" when the measurement never looked for any would be
+        # noise, and the ask box's text could change between measuring
+        # and writing.
         self._hvac = hvac
         self._measure_worker = MeasureWorker(
             self.cad_path, self.unit_edit.text().strip(),
@@ -889,6 +988,7 @@ class BoqDialog(PrismDialog):
     # ── the file-format picker ──────────────────────────────────────────
     _FORMAT_PHRASE = {
         "docx": "a downloadable Word (.docx) file",
+        "xlsx": "a downloadable Excel (.xlsx) file",
         "csv": "a downloadable CSV file",
         "pdf": "a downloadable PDF file",
     }
@@ -919,8 +1019,69 @@ class BoqDialog(PrismDialog):
         fmt = self._wanted_format()
         if not fmt:
             return ""
-        return ("\n\nGive me the result as " + self._FORMAT_PHRASE[fmt]
-                + ", built here rather than only pasted into the chat.")
+        line = ("\n\nGive me the result as " + self._FORMAT_PHRASE[fmt]
+               + ", built here rather than only pasted into the chat.")
+        # item 52 (4 Nov 2026): a Prism Agent (OpenRouter) answer has no
+        # file-export feature of its own -- openrouter_writer.py builds the
+        # actual file from this text, in code (see item 30's own module
+        # docstring). A browser-driven agent (plain "Claude", "ChatGPT"...)
+        # already has its own native xlsx export and needs none of this --
+        # the owner's own claude.ai-made LN2 rack workbook (3 linked
+        # sheets, live formulas) was made exactly that way, outside Prism
+        # entirely, with no special prompting at all. This is scoped to
+        # the ONE path that has no such capability of its own.
+        if fmt == "xlsx" and self.writer_combo.currentText().strip() in boq_agents.PRISM_AGENTS:
+            line += (
+                "\n\nMAKE IT A LIVE WORKBOOK, not just a table of finished "
+                "numbers. First, under its own '## INPUTS' heading, give one "
+                "markdown table of every design parameter you used anywhere "
+                "below (every dimension, density, wastage/scrap allowance, "
+                "unit weight, count) -- columns exactly 'Name | Value | Unit "
+                "| Note', one short lowercase_with_underscores Name per row "
+                "(e.g. frame_length_ft), no two rows sharing a Name. Then, in "
+                "the BOQ table(s) below it, write every Qty/Length/Area/"
+                "Weight cell that is CALCULATED from one or more of those "
+                "inputs as a formula instead of a plain number -- start the "
+                "cell with '=' and refer to an input by its Name in curly "
+                "braces, e.g. '={frame_length_ft}*2+{wastage_mm}/304.8' -- "
+                "ordinary arithmetic (+ - * /), nothing else. Only use a "
+                "Name that is actually a row in the INPUTS table above. A "
+                "quantity that is NOT calculated from an input (a fixed "
+                "catalogue count, e.g. '8 casters') stays a plain number. "
+                "This is what lets a reader change one input and have the "
+                "whole workbook recalculate, instead of a static snapshot.")
+            # item 60 (4 Nov 2026): the owner compared a Prism BOQ against
+            # a REAL estimator's own BOM for the same job and asked for
+            # that same depth -- separate finished-size and cut-size
+            # columns (so a reader can see exactly what the scrap
+            # allowance added, not a single number that already has it
+            # folded in), per-piece AND total weight as two columns, and
+            # a raw-material procurement summary a buyer could actually
+            # place an order from. The one-column-per-measure rule here is
+            # also item 58's own fix, stated at the SOURCE: a real run put
+            # an area-in-m² row directly above a weight-in-kg row in one
+            # column headed "Qty/Length/Area/Weight", and summing it
+            # (555.78) meant nothing. Asking for this up front should mean
+            # fewer answers ever reach that shape at all.
+            line += (
+                "\n\nGIVE EACH FABRICATED BOM LINE THIS MUCH DETAIL, the way "
+                "a real estimator's own bill of material does: separate "
+                "'Finished L/W (mm)' columns (the as-designed, net size) from "
+                "'Cut L/W (mm)' columns (finished size plus the wastage/scrap "
+                "allowance -- what is actually ordered and cut), and separate "
+                "'Wt/Pc (kg)' from 'Total Wt (kg)' (per-piece weight times "
+                "quantity). NEVER give one column a header naming more than "
+                "one kind of quantity (e.g. never 'Qty/Length/Area/Weight') -- "
+                "split every distinct measure into its own column, always, "
+                "even when that makes the table wider. Finish with its own "
+                "'## RAW MATERIAL REQUIREMENT' section: one row per distinct "
+                "raw material (e.g. 'SS304 sheet 1.5 mm', 'SS304 square pipe "
+                "38.1 mm'), each with its net weight (sum of that material's "
+                "own BOM lines, before wastage) and gross weight (with the "
+                "wastage/scrap allowance applied) -- the actual figure a "
+                "buyer would place a purchase order against, grouped by "
+                "material rather than scattered across the line items above.")
+        return line
 
     def _save_deliverable(self, made_files: list, stage: str):
         """A real file the engine harvested off the page for `stage` (or
@@ -970,12 +1131,18 @@ class BoqDialog(PrismDialog):
             standards_text=self._standards,
             allow_derived=self.derive_cb.isChecked() or not self.q,
             has_cad=bool(self.q),
-            # HVAC_DRAWING_RULES.md's write-up guidance (duplicate-layer
-            # judgement, legend caution, real sizes) is trade-specific the
-            # same way the measurement rules are -- only ever on when this
-            # run's own measurement used them, never guessed or applied to
-            # an ELV/CCTV/cabling/plumbing/fire-hydrant BOQ by default.
-            hvac=self._hvac)
+            # Per-industry write-up guidance (duplicate-layer judgement,
+            # legend caution, the "don't borrow a type from elsewhere"
+            # rule, HVAC's own worked derivation example) now comes from
+            # addons/boq/industries.py -- the same app-side home every
+            # other per-industry rule already lives in, not hardcoded
+            # inside the engine's formatting_prompt() itself. Trade-
+            # specific the same way the measurement rules are -- only
+            # ever non-empty when this run's own measurement actually
+            # used that industry, never guessed or applied to an
+            # ELV/CCTV/cabling/plumbing/fire-hydrant BOQ by default.
+            industry_note=industries.writeup_note(self._industry),
+            derivation_example=industries.derivation_example(self._industry))
 
         # Templates and notes only. The drawing itself is never attached to
         # any AI stage -- the same rule Gerber and STEP keep. The writer is
@@ -1023,6 +1190,27 @@ class BoqDialog(PrismDialog):
             return [CB.files.attach(self.csv_path)]
         return []
 
+    def _show_result(self, text: str) -> None:
+        """Render the writing AI's own markdown instead of showing it as
+        literal asterisks and '>' marks (see the comment on self.result).
+        Also keeps the RAW text in `self._raw_result` -- item 54 (4 Nov
+        2026), found live comparing two real follow-up turns of the same
+        job: the second answer's own notes said it had "corrected missing
+        multiplication operators" in formula cells the first answer never
+        actually had wrong. Traced to `self.result.toMarkdown()` itself --
+        confirmed by round-tripping a table cell containing
+        `=(...)*0.3048*2*0.092903*Inputs!$B$21` through a real QTextEdit:
+        Qt's markdown EXPORT escapes an asterisk immediately before a
+        letter as `\\*`, to stop it being read as italic markup on a later
+        import -- harmless for ordinary prose, silently corrupts a live
+        formula's own multiplication operator, which every "PREVIOUS
+        ANSWER" section (_send_followup, a few calls down) used to read
+        straight out of this round-trip. The AI then "fixed" an operator
+        that was never missing in its own first answer, because the copy
+        it was shown already had it mangled by the inbetween render."""
+        self.result.setMarkdown(text)
+        self._raw_result = text
+
     def _on_written(self, responses: dict, links: dict):
         self._set_busy(False, "")
         self._links.update(links)
@@ -1041,7 +1229,7 @@ class BoqDialog(PrismDialog):
             self.status.setText("Nothing came back. The measured numbers above "
                                 "are still saved." + (f"  ({timing})" if timing else ""))
         else:
-            self.result.setPlainText(texts[0])
+            self._show_result(texts[0])
             self.status.setText(
                 (f"Done in {timing}. " if timing else "Done. ")
                 + "Check the numbers against the saved file above.")
@@ -1104,20 +1292,156 @@ class BoqDialog(PrismDialog):
         # session does, not a recheck of something already written, so
         # there is no previous answer to remake. VERIFY_PROMPT's own
         # wording ("remake... in the same format as the previous answer...
-        # list what changed") only makes sense once one exists.
-        note = (VERIFY_PROMPT if self.result.toPlainText().strip()
-               else MAKE_WITH_DRAWING_PROMPT)
+        # list what changed") only makes sense once one exists. Reads
+        # _raw_result, not self.result.toMarkdown() -- item 54's own
+        # round-trip corruption risk applies here too, even though this
+        # call site only checks for emptiness rather than embedding the
+        # text: a one-character difference between "empty" and "not" is
+        # exactly the kind of thing that round-trip could tip either way.
+        if getattr(self, "_raw_result", "").strip():
+            note = VERIFY_PROMPT
+        elif self.summary.strip():
+            note = MAKE_WITH_DRAWING_PROMPT
+        else:
+            # item 38: a PDF drawing with no deterministic measurement at
+            # all (self.summary never got set -- see _absorb()'s non-.dwg/
+            # .dxf branch) -- MAKE_WITH_DRAWING_PROMPT's "cross-check
+            # against the measured figures below" would point at nothing.
+            note = MAKE_WITH_DRAWING_NO_MEASUREMENT_PROMPT
         self._send_followup(note, [CB.files.attach(self.cad_path)], verify=True)
 
     def _send_followup(self, note: str, extra_files: list, verify: bool):
         agent = self.writer_combo.currentText().strip() or "the writing AI"
         stage = "recheck" if verify else "followup"
-        prompt = f"{note}\n\nMEASURED FIGURES:\n{self.summary}"
+        # item 48 (3 Nov 2026), found live: a real BOQ .docx landed inside
+        # an UNRELATED earlier session's artifacts folder ("Create an
+        # Instagram post for Dhanteras"). Root cause, traced through
+        # core/config.py: self._task_name / self._artifacts_dir are only
+        # ever set inside _run() ("Make my BOQ", see its own
+        # CB.config.begin_run() call) -- "Make with drawing" pressed as
+        # the FIRST action in a session (item 38's own real workflow)
+        # never calls it, so _save_deliverable()'s `task` argument falls
+        # back to the bare, generic self._doc ("Bill of Quantities"). That
+        # alone would still be safe -- config.artifact_task_dir() opens a
+        # fresh folder when `task` doesn't match the module-level `_run`
+        # state's own task -- except `_run["continued"]` is a GLOBAL,
+        # process-wide flag, not scoped per add-on or session: once ANY
+        # earlier add-on's own follow-up left it True, artifact_task_dir's
+        # own check (`_run.get("continued") or _run.get("task") == task`)
+        # is satisfied regardless of whether `task` matches, and it keeps
+        # returning whatever folder was last active -- another add-on's,
+        # from however long ago. The same fix as items 45/47: establish
+        # the real per-job context _run() would have, the first time this
+        # function is reached without it, instead of silently falling
+        # through to stale global state.
+        if not getattr(self, "_task_name", ""):
+            self._task_name = f"{self._doc} — {self.ask.text().strip()}"
+            self._artifacts_dir = CB.config.begin_run(
+                self._task_name, title=self._task_name)
+        # Same reasoning as the "PREVIOUS ANSWER" section just below: a
+        # PDF-only drawing (item 38) never has measured figures at all
+        # (self.summary stays ""), and "MEASURED FIGURES:\n" with nothing
+        # under it reads as a blank measurement rather than there being
+        # none to give.
+        prompt = note
+        # item 45 (3 Nov 2026), found live: what the person actually typed
+        # in "What do you need a BOQ for?" (material, extras like "add raw
+        # material in Kg" or "add 100mm to length and breadth for scrap",
+        # anything else that makes this job theirs) was never included
+        # anywhere in this function. "Make with drawing" pressed as the
+        # FIRST thing in a session (no measured figures, no previous answer
+        # -- exactly the PDF-only case item 38 built this path for) sent
+        # nothing but the bare boilerplate note: the person's own
+        # requirements never reached the model at all.
+        #
+        # Read live from self.ask.text(), NOT self.request: self.request is
+        # only ever set inside _run() ("Make my BOQ") or restored from
+        # History -- pressing "Make with drawing" as the very first action
+        # in a session (the real workflow this bug was found in) means it
+        # does not exist as an attribute yet at all, which an earlier draft
+        # of this fix would have turned into a crash on exactly the path it
+        # was meant to repair. self.ask.text() is also simply more correct
+        # even once self.request does exist: it is whatever is CURRENTLY in
+        # the box, not whatever request._run() happened to freeze earlier --
+        # if the person edited their ask after the first write-up and before
+        # pressing "Verify and remake", the edit is what should apply.
+        current_ask = self.ask.text().strip()
+        if current_ask:
+            prompt += f"\n\nTHE PERSON'S OWN REQUEST FOR THIS JOB:\n{current_ask}"
+        # item 50 (4 Nov 2026), found live by comparing a real generated BOQ
+        # against one the same job's PDF produced on claude.ai: the owner's
+        # own request that run said "add 100mm in length and breadth for
+        # scrap" -- words that read as a 2D, sheet-panel instruction ("length
+        # and breadth" of a panel), and that is exactly how the model took
+        # it: every sheet/plate line got +100mm on both edges, but every
+        # tube, flat-bar and rod CUT LENGTH was left at its bare spec figure,
+        # with the model's own notes saying so plainly ("Tubes use cut
+        # lengths from stated dimensions; no tube scrap allowance is
+        # specified"). The claude.ai answer, asked nothing more than the
+        # same PDF plus the same instruction, applied the allowance to every
+        # cut piece, tube and rod included -- a difference in how an
+        # ambiguous instruction was read, not a calculation error on either
+        # side (every other figure checked out, line by line). Said once,
+        # plainly, whenever the person's own words raise it at all, instead
+        # of leaving the scope of "scrap"/"wastage" to the model's own guess.
+        if current_ask and re.search(
+                r"\bscrap\b|\bwastage\b|\bwaste\b", current_ask, re.I):
+            prompt += (
+                "\n\nSCRAP/WASTAGE ALLOWANCE. The person's own request above "
+                "asks for a cutting allowance. Apply it to EVERY raw-material "
+                "cut piece, not sheet panels alone: the cut length of every "
+                "tube, pipe, flat bar and rod section, AND the length and "
+                "width of every sheet/plate panel. Show both figures on each "
+                "line -- the net (as-designed) figure and the gross (with "
+                "the allowance added) figure -- so the two can be told apart, "
+                "and state the allowance you used once, plainly, near the "
+                "top.")
+        # item 47 (3 Nov 2026): core.boq.formatting_prompt()'s own
+        # has_template branch tells the writer, explicitly, to match a
+        # sample's format/conventions but never copy ITS rows or
+        # quantities -- every number must trace back to THIS job's own
+        # data. That instruction lives only in formatting_prompt(), called
+        # only from _write() ("Make my BOQ"). This function never called
+        # it, so "Make with drawing" -- a PDF-only drawing's only path to
+        # a BOQ at all, item 38 -- sent a template with no guidance either
+        # way on its own numbers. Found asking whether a reference BOQ
+        # that happened to already contain this exact product's own prior
+        # weight figure could leak into the answer: nothing in the prompt
+        # said it shouldn't. The model derived its own number anyway that
+        # time -- its own judgement, not something this path enforced.
+        if self.templates:
+            prompt += (
+                "\n\nA SAMPLE/REFERENCE DOCUMENT IS ALSO ATTACHED. Match its "
+                "format and conventions -- sections, column set, numbering, "
+                "wording, units, boilerplate. Where it makes a design "
+                "decision for a comparable item (a spacing, an allowance, a "
+                "material spec), you may use the same one and say the "
+                "sample is the basis. Do NOT copy its own rows, quantities "
+                "or weights, even if an item in it looks like the same "
+                "product -- every number in your answer must come from your "
+                "own reading of the file above, not from the sample.")
+        if self.summary.strip():
+            prompt += f"\n\nMEASURED FIGURES:\n{self.summary}"
         # Only when there IS one -- "Make with drawing" pressed before any
         # BOQ exists has nothing previous to show, and an empty section
         # ("PREVIOUS ANSWER:\n\n") would read as a previous answer that
         # happens to be blank rather than there being none at all.
-        previous = self.result.toPlainText().strip()
+        #
+        # item 54 (4 Nov 2026): this USED to read self.result.toMarkdown()
+        # -- the live, on-screen QTextEdit re-serialised back to markdown.
+        # Confirmed live that round-trip is lossy for a live-workbook
+        # formula cell (item 52): Qt's markdown EXPORT escapes an asterisk
+        # immediately before a letter as "\*", to stop it reading as
+        # italic markup on a later import -- harmless for prose, but it
+        # silently mangled a real multiplication operator inside a formula
+        # cell (e.g. "...*0.092903*Inputs!$B$21" lost its last "*"), which
+        # the model then "corrected" in its next answer, believing an
+        # operator was missing that never actually was in its own first
+        # one -- confirmed by round-tripping the exact cell text through a
+        # real QTextEdit and finding the escape appear. _raw_result (see
+        # _show_result) is the text exactly as the AI returned it, never
+        # pushed through Qt's own markdown renderer at all.
+        previous = getattr(self, "_raw_result", "").strip()
         if previous:
             prompt += f"\n\nPREVIOUS ANSWER:\n{previous}"
         files = list(extra_files) + list(self.templates) + list(self.notes)
@@ -1153,6 +1477,23 @@ class BoqDialog(PrismDialog):
         # follow-up is an edit to something already written, not a fresh
         # generation.
         if agent in boq_agents.PRISM_AGENTS:
+            # item 41 (2 Nov 2026): found live -- "Make with drawing" via a
+            # Prism Agent crashed with AttributeError: no _followup_stage.
+            # _on_followed_up (below) reads self._followup_stage, but that
+            # was only ever set in _fu_start_next(), the BROWSER-agent half
+            # of this same method, past the early return a Prism Agent
+            # takes right here. _on_followed_up is shared by both paths;
+            # this early-return branch owes it the same assignment
+            # _fu_start_next makes for its own path.
+            # Same gap, same reason: _on_followed_up also reads
+            # self._followup_agent (_fu_start_next's own
+            # self._followup_agent = tool), to label history/
+            # _stage_agents_map with which agent actually answered.
+            # Unset here it would be worse than the crash above once
+            # fixed -- a later browser-agent follow-up's STALE value
+            # silently mislabelling this one, not an error.
+            self._followup_stage = stage
+            self._followup_agent = agent
             self._run_prism_agent(stage, agent, prompt, files,
                                   self._on_followed_up, followup=True)
             return
@@ -1333,7 +1674,7 @@ class BoqDialog(PrismDialog):
                 artifacts, task=self._task_name, title=self._task_name)
         from addons.boq.history import when_label
         text = record.get("last_text") or ""
-        self.result.setPlainText(text)
+        self._show_result(text)
         self.status.setText(i18n.t(
             "Opened from History: {when}. Type a follow-up below to carry "
             "it on.").replace("{when}", when_label(record.get("_path", ""))))
@@ -1427,6 +1768,30 @@ class BoqDialog(PrismDialog):
         # `attachment`, goes separately as a real image/file block instead.
         if files:
             prompt = prompt + "\n\n" + CB.files.context_block(files)
+        # item 41 (2 Nov 2026), found in the real file a Prism Agent
+        # produced: without this, both Claude and DeepSeek opened with "I
+        # can't attach a file in this chat" and then spent roughly half
+        # the document dumping a broken, half-formatted python-docx
+        # SCRIPT for the person to run themselves -- reasonable behaviour
+        # for a model that only knows it is in a plain chat with no file
+        # tool, wrong here: openrouter_writer.write_file() (this stage's
+        # own on_success, a few calls up the chain) already turns
+        # whatever text comes back into the real .docx/.csv/.pdf, no
+        # script, no download link, needed from the model at all. Only
+        # for the document-producing stages -- "standards"/"interpret"
+        # never claim or need a file, so telling them about one they were
+        # never asked for would be a non-sequitur.
+        if stage in ("format", "recheck", "followup"):
+            prompt += (
+                "\n\nAbout delivering this: you are not attaching, "
+                "downloading or building a file yourself, and there is no "
+                "need to write a script that would. Just answer with the "
+                "content itself, in the structure already asked for above "
+                "(headings, bold, a markdown table) -- the real document "
+                "file is built automatically from this text, by code, the "
+                "moment you answer. Do not say you can't attach a file, "
+                "and do not include a script, download link or setup "
+                "instructions of any kind.")
         self._save_prompt_record(stage, agent, prompt)
         self.progress.set_stage(2 if stage in ("format", "recheck", "followup") else 1)
         self._set_busy(True, f"{agent} is writing your {self._noun}…")
@@ -1632,7 +1997,7 @@ class BoqDialog(PrismDialog):
         self._lap(stage)
         texts = [t for t in (responses.get(stage) or []) if t.strip()]
         if texts:
-            self.result.setPlainText(texts[0])
+            self._show_result(texts[0])
             self.status.setText(i18n.t("Done. Check the numbers against the drawing and the saved file."))
         else:
             self.status.setText(i18n.t("Nothing came back. The previous answer is still shown."))
@@ -1667,7 +2032,10 @@ class BoqDialog(PrismDialog):
         """The same 'anything to change?' window Prism shows after any run,
         opened here on this screen so it comes straight after the output."""
         from dialogs.followup_dialog import FollowupDialog
-        answer = self.result.toPlainText().strip()
+        # item 54: _raw_result, not self.result.toMarkdown() -- see
+        # _show_result's own comment. Also avoids showing the person a
+        # stray "\*" the round-trip could have introduced in this recap.
+        answer = getattr(self, "_raw_result", "").strip()
         if not answer:
             return
         actions = []

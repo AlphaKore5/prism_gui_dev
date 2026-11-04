@@ -369,9 +369,10 @@ class IndustryTakeoffDialog(QDialog):
     a plain-text summary, treated from there on like any other external
     measurement."""
 
-    def __init__(self, industry: str, parent=None):
+    def __init__(self, industry: str, parent=None, cfg: dict | None = None):
         super().__init__(parent)
         self.industry = industry
+        self.cfg = cfg if cfg is not None else {}
         self.pdf_path = ""
         self.result: dict | None = None
         self._role_combos: list[tuple[dict, QComboBox]] = []
@@ -380,10 +381,17 @@ class IndustryTakeoffDialog(QDialog):
         self.setWindowTitle(i18n.t("{industry} PDF takeoff").format(industry=industry))
         self.resize(640, 560)
         col = QVBoxLayout(self)
+        # item 2 (5 Nov 2026): OCR alone still reads this tool's own
+        # labels locally only -- true regardless of industry, so said
+        # plainly, with no industry-specific carve-out named here (this
+        # dialog stays the same for every industry; see this file's own
+        # module docstring). The AI tag re-check that can ALSO run under
+        # the same checkbox below, when offered, is the one thing that
+        # sends a piece of the drawing out -- covered by its own consent
+        # prompt at the moment it would run, not by this blanket line.
         col.addWidget(C.label(i18n.t(
-            "Reads a tender PDF locally -- the drawing itself is never "
-            "sent anywhere. Pick the file, confirm what each line colour "
-            "is, then extract."), level="SUPPORT", wrap=True))
+            "Reads a tender PDF locally. Pick the file, confirm what each "
+            "line colour is, then extract."), level="SUPPORT", wrap=True))
 
         pick_row = QHBoxLayout()
         self.pick_btn = C.button(i18n.t("Pick a PDF…"), "secondary",
@@ -405,7 +413,21 @@ class IndustryTakeoffDialog(QDialog):
         self.measure_btn = C.button(i18n.t("Measure…"), "secondary", small=True,
                                     on_click=self._open_measure_dialog)
         settings_row.addWidget(self.measure_btn)
+        # item 2 (5 Nov 2026): no second checkbox for the AI tag re-check,
+        # and no mention of it in the label itself either (the owner's own
+        # instruction) -- it rides the SAME tick as OCR, for whichever
+        # industry offers one (has_ai_tag_recheck()), entirely through the
+        # tooltip and the consent prompt at the moment it would run. Off
+        # entirely with no OpenRouter key set, or with this box unticked
+        # -- see _extract()'s own gate.
         self.ocr_cb = QCheckBox(i18n.t("Read text labels (OCR)"))
+        if industries.has_ai_tag_recheck(self.industry):
+            self.ocr_cb.setToolTip(i18n.t(
+                "OCR always runs locally. If an OpenRouter key is set in "
+                "Settings → AI tools, a second, AI-based read also runs to "
+                "catch tags OCR missed -- the whole drawing is never sent; "
+                "only small cropped pieces are, each time, and only after "
+                "you confirm. No key set: this box runs OCR only."))
         self.ocr_cb.setChecked(True)
         settings_row.addWidget(self.ocr_cb)
         settings_row.addStretch(1)
@@ -604,6 +626,24 @@ class IndustryTakeoffDialog(QDialog):
     def _update_use_btn(self):
         self.use_btn.setEnabled(self.result is not None and self.scale_confirm_cb.isChecked())
 
+    def _ai_tag_consent(self) -> bool:
+        """The same explicit, every-time yes addons/boq/dialog.py's own
+        _drawing_consent() already asks before a BOQ drawing attachment
+        leaves this computer -- small cropped PIECES of the drawing here,
+        not the whole file, and the wording says so plainly (the owner's
+        own instruction: lead with what does NOT happen -- the whole
+        drawing never goes -- not with an alarm about what does). Still
+        asked every time, never remembered from ticking the box above:
+        that box only says OCR should run; this is the one place that
+        actually sends anything."""
+        answer = QMessageBox.question(
+            self, i18n.t("Use AI to help read tags?"),
+            i18n.t("Your drawing is NOT sent to AI as a whole -- only a "
+                   "few small cropped pieces, to help OCR catch tags it "
+                   "missed. Continue?"),
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        return answer == QMessageBox.Yes
+
     # ── Step 2 ───────────────────────────────────────────────────────────
 
     def _extract(self):
@@ -637,10 +677,16 @@ class IndustryTakeoffDialog(QDialog):
         industries.remember_layer_roles(self.industry, layer_map)
         self.extract_btn.setEnabled(False)
         self.use_btn.setEnabled(False)
+        api_key = (self.cfg.get("openrouter_api_key") or "").strip()
+        use_ai_tags = False
+        if (self.ocr_cb.isChecked() and api_key
+                and industries.has_ai_tag_recheck(self.industry)
+                and self._ai_tag_consent()):
+            use_ai_tags = True
         self.status.setText(i18n.t("Reading the drawing — a large PDF can take a minute…"))
         self._worker = HvacTakeoffWorker(
             self.industry, self.pdf_path, layer_map, self._pt_per_ft(),
-            use_ocr=self.ocr_cb.isChecked())
+            use_ocr=self.ocr_cb.isChecked(), api_key=api_key, use_ai_tags=use_ai_tags)
         self._worker.done.connect(self._on_extracted)
         self._worker.failed.connect(self._on_extract_failed)
         self._worker.start()

@@ -76,11 +76,39 @@ class RenderDxfToPngProducesARealPictureNotABlankOne(unittest.TestCase):
 
 
 class DwgToDrawingNamesTheRealReasonWhenTheConverterIsMissing(unittest.TestCase):
-    def test_converter_not_installed_raises_a_plain_actionable_message(self):
-        with mock.patch("ezdxf.addons.odafc.is_installed", return_value=False):
+    """ODA is tried first (mocked here so the test is the same on every
+    machine regardless of what's actually installed on it); if it's not
+    there, dwg_to_drawing falls through to the engine's own
+    core.boq.dwg_to_dxf -- the same bundled-dwg2dxf-aware search the real
+    BOQ measurement uses -- rather than failing outright. That fallback
+    itself is covered by tests/test_core_boq_dwg2dxf.py; here it's mocked
+    at the core_bridge boundary, same as addons/boq/dialog.py's own tests
+    mock CB.get_boq()."""
+
+    def test_oda_missing_and_engine_fallback_also_fails_raises_cadrendererror(self):
+        fake_boq = mock.Mock()
+        fake_boq.BoqError = Exception
+        fake_boq.dwg_to_dxf.side_effect = Exception(
+            "No DWG→DXF converter found on this machine.")
+        with mock.patch("ezdxf.addons.odafc.is_installed", return_value=False), \
+                mock.patch("core_bridge.get_boq", return_value=fake_boq):
             with self.assertRaises(R.CadRenderError) as cm:
                 R.dwg_to_drawing("/x/whatever.dwg")
-        self.assertIn("ODA File Converter", str(cm.exception))
+        self.assertIn("No DWG→DXF converter found", str(cm.exception))
+
+    def test_oda_missing_but_the_engine_fallback_succeeds(self):
+        # Covers the bundled-dwg2dxf path: ODA isn't here, but
+        # core.boq.dwg_to_dxf found something (its own system search, or
+        # Prism's bundled copy) and already validated the result.
+        with tempfile.TemporaryDirectory() as d:
+            dxf_path = _synthetic_dxf(os.path.join(d, "converted.dxf"))
+            fake_boq = mock.Mock()
+            fake_boq.BoqError = Exception
+            fake_boq.dwg_to_dxf.return_value = (dxf_path, [])
+            with mock.patch("ezdxf.addons.odafc.is_installed", return_value=False), \
+                    mock.patch("core_bridge.get_boq", return_value=fake_boq):
+                out = R.dwg_to_drawing("/x/whatever.dwg")
+        self.assertTrue(hasattr(out, "modelspace"))
 
     def test_converter_installed_but_the_file_fails_still_raises_cadrendererror(self):
         with mock.patch("ezdxf.addons.odafc.is_installed", return_value=True), \

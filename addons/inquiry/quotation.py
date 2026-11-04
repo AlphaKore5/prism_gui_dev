@@ -42,6 +42,7 @@ from widgets.loader import busy_button
 import theme
 from dialogs.base import PrismDialog
 from addons.inquiry import autoquote, documents
+from addons.inquiry.workers import AIMatchWorker
 from addons.inquiry.setup import (
     InquirySetupDialog, accounts_of, is_ready, settings_of,
 )
@@ -383,7 +384,48 @@ class QuotationDialog(PrismDialog):
         # one prefills the form below; none leaves the fuzzy match to do
         # what it always did.
         self.requests = quoting.find_requests(autoquote.inquiry_text(row), items)
-        self._lines_mode = len(self.requests) >= 2
+        # item 55 (4 Nov 2026), found live: a real 8-item inquiry, written
+        # in words -- "SS Locker (4 Comp) :- 10", one line per product, no
+        # catalogue code anywhere -- went through as ONE quotation line,
+        # qty 1, a generic description. find_requests() above only ever
+        # looks for a code (its own, correct, original design); with none
+        # in the mail it returns nothing, and the single-item fuzzy match
+        # further down has no way to split a list at all -- it takes one
+        # query string and returns one best-guess row.
+        #
+        # item 56 (4 Nov 2026): the owner's own words, asked for in so
+        # many words -- "replace this with the AI as i want this
+        # accurate... its ok if the token usage is more but the answer
+        # should be accurate... no ask AI buttons needed". Fewer than two
+        # code-matched requests now ALWAYS asks DeepSeek (addons/inquiry/
+        # ai_match.py) to read the full inquiry text (the raw email,
+        # never the 15-words-or-fewer "Product asked" summary alone --
+        # see autoquote.inquiry_text()) against the real rate list, no
+        # local pre-filter deciding whether it's "worth" asking -- a
+        # regex guessing which mails look itemised enough to bother would
+        # recreate exactly the blind spot asking an AI is meant to fix. No
+        # key configured, or the call itself fails, falls back to
+        # find_free_text_requests()'s own local matching (item 55) rather
+        # than leaving the screen with nothing -- never a dead end, just a
+        # less accurate one. Started at the very end of __init__, once
+        # every widget this screen's own _on_ai_matched() touches exists.
+        self._unmatched_free_text: list[str] = []
+        self._lines_from_free_text = False
+        self._lines_from_ai = False
+        self._ai_pending = False
+        self._ai_worker = None
+        api_key = (self.cfg.get("openrouter_api_key") or "").strip()
+        if len(self.requests) < 2:
+            if api_key:
+                self._ai_pending = True
+            else:
+                free_requests, unmatched = quoting.find_free_text_requests(
+                    autoquote.inquiry_text(row), items)
+                if len(free_requests) >= 2:
+                    self.requests = free_requests
+                    self._unmatched_free_text = unmatched
+                    self._lines_from_free_text = True
+        self._lines_mode = len(self.requests) >= 2 or self._ai_pending
 
         layout = self.body
         layout.setSpacing(theme.ROW_GAP)
@@ -513,31 +555,35 @@ class QuotationDialog(PrismDialog):
         for column in (0, 2, 3, 4, 5):
             head.setSectionResizeMode(column, QHeaderView.ResizeToContents)
         self._filling_lines = False
-        for r, req in enumerate(self.requests):
-            self.lines_table.insertRow(r)
-            qty = req.quantity if req.confident else Decimal(1)
-            cells = [req.item.code, req.item.description, f"{qty}", req.item.unit,
-                     f"{req.item.rate_for(qty)}", ""]
-            for c, text in enumerate(cells):
-                cell = QTableWidgetItem(text)
-                if c in (0, 1, 5):
-                    cell.setFlags(cell.flags() & ~Qt.ItemIsEditable)
-                if c == 2 and not req.confident:
-                    cell.setBackground(theme.qcolor(theme.WARN_BG))
-                    cell.setToolTip(i18n.t("No quantity was written next to "
-                                           "this code — check it."))
-                self.lines_table.setItem(r, c, cell)
-        row_h = self.lines_table.verticalHeader().defaultSectionSize()
-        self.lines_table.setFixedHeight(
-            head.sizeHint().height() + row_h * max(2, min(8, len(self.requests))) + 4)
-        self.lines_table.itemChanged.connect(self._recalculate)
-        self.lines_table.setVisible(self._lines_mode)
-        self.lines_note = C.label(i18n.t(
-            "Every product code in the mail, priced from your rate list. "
-            "Qty and Rate can be edited."), level="SUPPORT", wrap=True)
-        self.lines_note.setVisible(self._lines_mode)
+        self.lines_note = C.label("", level="SUPPORT", wrap=True)
         layout.addWidget(self.lines_note)
         layout.addWidget(self.lines_table)
+        # item 56: while DeepSeek is still reading the mail -- shown in
+        # place of the lines table/single-item form, neither of which has
+        # anything real to show yet. Plain text, not a spinner widget:
+        # this dialog has no existing busy/loader plumbing of its own
+        # (unlike the live-run windows BOQ/Gerber use) and one label is
+        # the smallest honest way to say "this is still working," not
+        # "this screen is broken."
+        self.ai_loading_label = C.label(i18n.t(
+            "Asking AI to match every item in the mail against your rate "
+            "list — this can take a few seconds…"), level="SUPPORT", wrap=True)
+        layout.addWidget(self.ai_loading_label)
+        # item 55: a line of the mail that matched NOTHING on the rate
+        # list at all -- never silently dropped. Shown once, plainly,
+        # rather than leaving the person to notice the quotation is
+        # quietly short by however many items this is.
+        self.unmatched_note = QLabel("")
+        self.unmatched_note.setWordWrap(True)
+        self.unmatched_note.setStyleSheet(_warning_css())
+        layout.addWidget(self.unmatched_note)
+        # NOT called here: _populate_lines_table() inserts rows, which
+        # fires self.lines_table's own itemChanged -> _recalculate() ->
+        # _finalise_lines() -> self.preview, a widget this constructor
+        # has not reached yet -- the identical crash class the comment on
+        # the single-item item_picker.setCurrentIndex() block below
+        # already guards against. Called once, safely, at the very end of
+        # __init__ instead (self.preview exists by then too).
 
         self.item_picker = QComboBox()
         for match in self.matches:
@@ -686,7 +732,143 @@ class QuotationDialog(PrismDialog):
                                     on_click=lambda: self._finish(send=True))
         self.footer.set_primary(self.send_btn)
 
+        # Safe now: every widget _finalise_lines()/_finalise() can reach
+        # (self.preview included) exists at this point.
+        self._populate_lines_table()
+        self.lines_table.itemChanged.connect(self._recalculate)
         self._source_changed()
+        # item 56: fired last, once every widget _on_ai_matched()/
+        # _on_ai_match_failed() touch (lines_table, lines_note, verdict,
+        # single_form...) exists -- this screen has no plumbing to defer
+        # construction otherwise, and starting the worker any earlier
+        # risks the `done` signal landing before __init__ has returned.
+        if self._ai_pending:
+            self._start_ai_match()
+
+    def _populate_lines_table(self):
+        """Fills self.lines_table from self.requests, or shows the "AI is
+        still reading the mail" state while item 56's worker is in
+        flight -- pulled out of __init__ so _on_ai_matched()/
+        _on_ai_match_failed() can call it again once a real answer (or
+        none) comes back, instead of duplicating the row-building logic."""
+        self.lines_table.setRowCount(0)
+        if self._ai_pending:
+            self.ai_loading_label.setVisible(True)
+            self.lines_note.setVisible(False)
+            self.lines_table.setVisible(False)
+            self.unmatched_note.setVisible(False)
+            return
+        self.ai_loading_label.setVisible(False)
+        for r, req in enumerate(self.requests):
+            self.lines_table.insertRow(r)
+            qty = req.quantity if req.confident else Decimal(1)
+            cells = [req.item.code, req.item.description, f"{qty}", req.item.unit,
+                     f"{req.item.rate_for(qty)}", ""]
+            for c, text in enumerate(cells):
+                cell = QTableWidgetItem(text)
+                if c in (0, 1, 5):
+                    cell.setFlags(cell.flags() & ~Qt.ItemIsEditable)
+                if c == 2 and not req.confident:
+                    cell.setBackground(theme.qcolor(theme.WARN_BG))
+                    cell.setToolTip(i18n.t("No quantity was written next to "
+                                           "this code — check it."))
+                # item 55/56: a code is exact (find_requests()), but a
+                # free-text line -- whether matched locally
+                # (find_free_text_requests()) or by AI (ai_match.py) -- is
+                # Prism's best GUESS at which rate-list row a line of the
+                # mail meant. Shown on the Code/Description cells, not
+                # just Qty: the whole row, not only its quantity, is what
+                # needs checking here. Always on for an AI match (item
+                # 56's own instruction: "we still have to keep check
+                # this" -- nothing an AI matched is ever shown as
+                # pre-confirmed, regardless of how sure it says it is).
+                if c in (0, 1) and not req.match_confident:
+                    cell.setBackground(theme.qcolor(theme.WARN_BG))
+                    cell.setToolTip(i18n.t(
+                        "Prism's best guess for \"{line}\" — not a catalogue "
+                        "code, check the row before sending.").replace(
+                            "{line}", req.evidence[:120]))
+                self.lines_table.setItem(r, c, cell)
+        head = self.lines_table.horizontalHeader()
+        row_h = self.lines_table.verticalHeader().defaultSectionSize()
+        self.lines_table.setFixedHeight(
+            head.sizeHint().height() + row_h * max(2, min(8, len(self.requests))) + 4)
+        self.lines_table.setVisible(self._lines_mode)
+        if self._lines_from_ai:
+            note = i18n.t(
+                "Every item Prism could read from the mail, matched to your "
+                "rate list by AI — highlighted rows are not a catalogue "
+                "code, check them before sending. Qty and Rate can be "
+                "edited.")
+        elif self._lines_from_free_text:
+            note = i18n.t(
+                "Every item Prism could read from the mail, matched to your "
+                "rate list by wording (not a catalogue code) — highlighted "
+                "rows are Prism's best guess, check them. Qty and Rate can "
+                "be edited.")
+        else:
+            note = i18n.t(
+                "Every product code in the mail, priced from your rate list. "
+                "Qty and Rate can be edited.")
+        self.lines_note.setText(note)
+        self.lines_note.setVisible(self._lines_mode)
+        self.unmatched_note.setText(i18n.t(
+            "Could not match {n} line(s) from the mail to anything on your "
+            "rate list — add them yourself if they belong in this "
+            "quotation:\n{lines}").replace(
+                "{n}", str(len(self._unmatched_free_text))).replace(
+                "{lines}", "\n".join(
+                    f"  • {ln}" for ln in self._unmatched_free_text)))
+        self.unmatched_note.setVisible(bool(self._unmatched_free_text))
+
+    # ── item 56: AI matching for a free-text, no-code inquiry ──────────────
+    def _start_ai_match(self):
+        api_key = (self.cfg.get("openrouter_api_key") or "").strip()
+        self._ai_worker = AIMatchWorker(
+            api_key, autoquote.inquiry_text(self.row), self.items)
+        self._ai_worker.done.connect(self._on_ai_matched)
+        self._ai_worker.failed.connect(self._on_ai_match_failed)
+        self._ai_worker.start()
+
+    def _fall_back_to_local_matching(self):
+        """No key, or the AI call itself failed -- never a dead end, just
+        a less accurate one. Same local matching item 55 already proved
+        correct on the owner's own real inquiry and rate list."""
+        quoting = CB.get_quoting()
+        free_requests, unmatched = quoting.find_free_text_requests(
+            autoquote.inquiry_text(self.row), self.items)
+        self._ai_pending = False
+        if len(free_requests) >= 2:
+            self.requests = free_requests
+            self._unmatched_free_text = unmatched
+            self._lines_from_free_text = True
+        self._lines_mode = len(self.requests) >= 2
+        self.single_form.setVisible(not self._lines_mode)
+        self._populate_lines_table()
+        self._recalculate()
+
+    def _on_ai_matched(self, requests: list, unmatched: list):
+        self._ai_pending = False
+        if len(requests) >= 2:
+            self.requests = requests
+            self._unmatched_free_text = unmatched
+            self._lines_from_ai = True
+            self._lines_mode = True
+        else:
+            # DeepSeek also found fewer than two usable lines -- fall back
+            # to the same local matching a missing key would have used,
+            # rather than leaving the screen on its loading state forever.
+            self._fall_back_to_local_matching()
+            return
+        self.single_form.setVisible(not self._lines_mode)
+        self._populate_lines_table()
+        self._recalculate()
+
+    def _on_ai_match_failed(self, error: str):
+        QMessageBox.warning(self, i18n.t("Matching the mail"), i18n.t(
+            "Couldn't ask AI to match the items in this mail ({error}) — "
+            "matching them by wording instead.").replace("{error}", error))
+        self._fall_back_to_local_matching()
 
     def _compare(self):
         _CompareDialog(self).exec()

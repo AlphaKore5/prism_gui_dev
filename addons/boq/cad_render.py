@@ -16,10 +16,17 @@ Three different formats are three different problems, not one:
   - **DWG**: Autodesk's closed, proprietary binary format. No library,
     no AI, nothing but Autodesk's own tooling (or a reverse-engineered
     convert) opens it at all. `ezdxf.addons.odafc` wraps the free "ODA
-    File Converter" -- a SEPARATE desktop program, not a pip package --
-    to turn it into a DXF `Drawing` first; from there it is the same
-    DXF->PNG path above. If that program is not installed, this says so
-    plainly rather than guessing or silently doing nothing.
+    File Converter" first -- a SEPARATE desktop program, not a pip
+    package -- to turn it into a DXF `Drawing`; from there it is the
+    same DXF->PNG path above. If ODA isn't installed, this falls back
+    to the engine's own DWG->DXF path (`core.boq.dwg_to_dxf`, reached
+    through `core_bridge` per CONTRIBUTING.md's add-on boundary) rather
+    than failing outright -- the SAME converter search the real BOQ
+    measurement already uses, including Prism's own bundled `dwg2dxf`
+    for machines with nothing installed at all (see
+    prism_terminal/core/vendor/dwg2dxf/README.md). Only if that also
+    finds nothing does this say so plainly, rather than guessing or
+    silently doing nothing.
 
 Nothing here decides WHETHER a drawing may be sent anywhere at all --
 that is, unchanged, `addons/boq/dialog.py`'s own `_drawing_consent()`
@@ -42,22 +49,35 @@ def odafc_installed() -> bool:
 
 
 def dwg_to_drawing(dwg_path: str):
-    """A DWG file -> an ezdxf Drawing, via the ODA File Converter. Raises
-    CadRenderError with a real, actionable reason -- the converter isn't
-    installed, or the file itself couldn't be read -- never a bare
-    traceback from the add-on."""
+    """A DWG file -> an ezdxf Drawing. ODA File Converter first if it's
+    installed (most reliable -- full DWG spec, not a reverse-engineered
+    reader); otherwise the engine's own DWG->DXF search
+    (`core.boq.dwg_to_dxf`), which tries ODA again by other means and then
+    Prism's own bundled `dwg2dxf` -- the identical, already-validated path
+    the real BOQ measurement uses, not a second implementation of "convert
+    a DWG" for this preview alone. Raises CadRenderError with a real,
+    actionable reason -- nothing installed anywhere, or the file itself
+    couldn't be read -- never a bare traceback from the add-on."""
     from ezdxf.addons import odafc
-    if not odafc.is_installed():
-        raise CadRenderError(
-            "Reading a .dwg file needs the free ODA File Converter "
-            "installed on this machine (odaconverter.com) — Prism does not "
-            "bundle it. Export the drawing as .dxf instead, or install the "
-            "converter and try again.")
+    if odafc.is_installed():
+        try:
+            return odafc.readfile(dwg_path)
+        except Exception as e:                              # noqa: BLE001
+            raise CadRenderError(
+                f"Couldn't convert {os.path.basename(dwg_path)}: {e}") from e
+
+    import core_bridge as CB
+    boq = CB.get_boq()
     try:
-        return odafc.readfile(dwg_path)
+        dxf_path, _notes = boq.dwg_to_dxf(dwg_path)
+    except boq.BoqError as e:
+        raise CadRenderError(str(e)) from e
+    import ezdxf
+    try:
+        return ezdxf.readfile(dxf_path)
     except Exception as e:                                  # noqa: BLE001
         raise CadRenderError(
-            f"Couldn't convert {os.path.basename(dwg_path)}: {e}") from e
+            f"Couldn't read the converted drawing: {e}") from e
 
 
 def render_dxf_to_png(source, out_path: str, *, dpi: int = 200) -> str:

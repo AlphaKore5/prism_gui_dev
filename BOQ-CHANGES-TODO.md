@@ -3110,3 +3110,1144 @@ hvac_takeoff.hvac_takeoff as m` then fails because that name is no longer a pack
 `python3 -m pytest` from the repo root -- the exact pre-push check this file's own standing
 instructions require -- collects both files in one process and would hit this. Worth fixing
 before the next real pre-push run, but it is unrelated to this item and left open here.
+
+## 35. The accuracy comparison turned into a plan, and the plan into four real fixes on client_2nd_sample
+
+Following on from item 34: once the layer mapping was fixed, a real Prism CSV for
+`client_2nd_sample` came back with actual duct lengths (834.93 m supply, 6.89 m return) -- but
+compared line by line against Claude's own independent vision-read of the same drawing
+(`BOQ_claude_vision_read.md`, item 33), the equipment section was mostly wrong, and whole
+categories (diffusers, flex-droppers, fire/disc valves, VAV boxes) were entirely missing. A
+phased plan was agreed (investigate first, fix what's provable, say plainly what isn't fixable
+by better reading), then worked through for real against the actual file -- not guessed at.
+
+**35a -- `TR_RE`/`HIWALL_RE` silently truncated a TR value to its own trailing digits.**
+`client_2nd_sample`'s real embedded PDF text has "2.07 TR" (four times) and one "0.8 TR" split
+by a stray mid-number space ("0. 8 TR") -- confirmed directly, `pdfplumber`'s own `text_layer()`
+found these as real, selectable text, no OCR needed. The old pattern, `(?:\.\d)?`, allows only
+ONE digit after the decimal point: for "2.07" the match attempt starting at "2" fails (two
+decimal digits don't fit), the engine backtracks and matches just the trailing "07" on its own,
+read as a bare whole number -- 7.0. The real Prism CSV's "TR tags: [8.0, 0.8, 7.0, 1.0, 1.6,
+1.6, 2.5, 7.0, 7.0, 7.0]" is this bug, value for value, matched position by position against the
+real text: 0.8->8.0 (the spaced one), 2.07->7.0 (all four). Fixed: `(?:\.\s?\d+)?` (any number of
+decimal digits, and the stray space tolerated), plus stripping that stray space before
+`float()`. Same fix applied to `HIWALL_RE`'s own capacity group. Tests: 5 new, including the
+exact real strings from this file.
+
+**35b -- the write-up agent called every bare TR tag "Hi-Wall" -- its own invention, not a
+reading.** `extract()`'s raw `tr_labels` is a flat, untyped list of numbers; "Hi-Wall Split AC"
+is the only equipment TYPE word that appears anywhere else in `summary_text()`'s own output
+(the EQUIPMENT section), so with nothing in the TR-tags line saying otherwise, the write-up
+agent filled the ambiguity with the one name it had seen -- every one of the real CSV's Section
+C items says "as tagged 'HI-WALL'", which the raw tool itself never claimed. Fixed:
+`summary_text()`'s TR-tags line now says explicitly "type NOT read -- do NOT call these Hi-Wall
+or any other type". Tests: 3 new.
+
+**35c -- the real find: OCR on this file was reading noise, not failing to find text.** A raw,
+unfiltered dump of what `ocr_page()`'s own engine call actually returns for this file's full
+250dpi page render (11702x8278px) was garbage at every confidence level ("TC M.79 HGA2", "H wAL
+CM W15") -- even the high-confidence hits were fragments of real words ("Dropper" read three
+different broken ways across three separate boxes). Cropping one quadrant and upscaling it 3x
+before the SAME engine call turned that into clean, 1.00-confidence reads: "2#(1.65TR/2.0HP)",
+"VAV-1-1", "AHU ROOM-03", "950CFM CABINET EXH FAN". The cause was already half-documented in
+this file's own comment on `Det.limit_side_len=2880` ("a page rendered at typical takeoff DPI
+... hard enough to crush small CAD label text before detection even runs") -- a single call on
+an 11702px-wide image is always more than 4x that limit, so the engine's own internal downscale
+crushes the resolution before detection ever runs, on every page this large, not just this one.
+**Fixed properly, not patched around:** `ocr_page()` now tiles the page into overlapping crops
+each kept under that limit (`_tile_bounds()`, new), runs both angle passes per tile, and remaps
+each tile's own local box coordinates back to real page position before the existing
+de-duplication (unchanged) runs across the combined set. Verified end to end on the real file:
+80 seconds for 24 tiles x 2 angles, CFM labels went from `{}` (empty) to 55 distinct real values,
+equipment notes went from unreadable to three clean, qty-correct reads. Tests: 7 new (the tiling
+arithmetic alone, and a fake-engine test proving a label found inside one tile reports its real
+page position, not that tile's own local one).
+
+**35d -- this drawing's own split-unit notation, found once 35c made it legible: "N#(X.XXTR/
+Y.YHP)".** Qty, TR and HP together in one note, never the word "HI-WALL" anywhere near it --
+HIWALL_RE's own NOS-proximity qty join does not apply; the qty is already in the text. New
+`SPLIT_AC_RE`, and a new equipment type ("Split AC unit (type not read -- confirm on drawing)")
+that says plainly it does not know if this is Hi-Wall, cassette or ducted -- nothing in the note
+says which, so nothing here guesses one the way 35b's own finding says the write-up agent
+already did once. **Found fixing this:** `_equipment_from_labels()`'s NOS-proximity join ran
+unconditionally over every "equipment" kind entry, which would have thrown away this note's own
+real qty for a guessed one the instant no "NOS." text happened to sit nearby (it mostly doesn't
+-- this drawing's own qty is in the TR/HP note itself) -- skipped now for any entry that already
+carries one. **Found running the real file end to end:** `extract()`'s own "drop a duplicate TR
+label next to its own equipment entry" step re-parsed the formatted "capacity" string
+(`.rstrip("TR")`), which crashed the instant a Split AC entry's "1.65TR/2HP" shape reached it --
+fixed by carrying the raw `capacity_tr` float on every equipment entry instead of re-parsing a
+display string, which was fragile already. Tests: 6 new.
+
+**Verified end to end on the real file, all four together:** equipment now reads three real
+units -- 1.65TR/2HP x2, 2.07TR/2.5HP x2, 0.8TR/1HP x2 -- matching Claude's own independent vision
+read (item 33's "Hi-Wall split unit, 1.65TR/2.0HP x2" / "2.07TR/2.5HP x2" / "Ceiling cassette
+unit, 0.8TR/1.0HP x2") exactly, where the real CSV previously showed ten wrong, untyped numbers.
+
+**Not done in this item, scoped as real next steps, not attempted blind:** AHU equipment (12,000/
+12,000/22,000 CFM units) -- real text "AHU ROOM-03" exists but isn't yet joined to a nearby CFM
+value the way Hi-Wall is joined to NOS.; VAV box counting (tags like "VAV-1-1" are now legible
+post-35c but nothing counts them yet); the diffuser/flex-dropper schedule-box format ("4# OVERALL
+640o SAD... 650 CFM EACH") -- printed numbers, not shapes, needs its own regex the way 35d's
+"N#(...)" needed one, not yet built. Each would repeat 35c's own lesson: verify against the real
+tiled OCR text before writing a pattern, never guess the format from the comparison document
+alone. Duct-length label-match stayed at 0% even with CFM/size labels now legible -- the scale
+used (96 pt/ft, still a guess) is the suspect, unchanged from item 33's own caveat; "Measure..."
+against this drawing has not been done yet.
+
+## 36. The rest of item 33's own plan, built -- AHU, VAV, flex-dropper schedule and fire/disc valve counts, found and read the same way the Split AC note was
+
+Owner asked, after seeing the overlap between Claude's own vision-read BOQ and item 35's
+measurements-only one was ~10%: build the rest of the originally-scoped plan, not just the
+equipment-note fixes. Four more real patterns, each found on `client_2nd_sample`'s own tiled
+OCR text first (a full, unfiltered, whole-page tiled dump -- `_tile_bounds()` + the real engine,
+bypassing `parse_label()`'s own filtering -- 2674 raw text boxes) and never guessed at from the
+comparison document, the same discipline item 35d's own note insisted on.
+
+- **VAV boxes.** This drawing prints TWO unrelated things that both start "VAV-": a real per-box
+  tag (`VAV-1-11`, `VAV-2-12`, `VAV-3-19`...) and a FAR more common size/model code shared by many
+  different boxes (`VAV-150`, `VAV-250`, `VAV-300`...). New `VAV_RE` requires exactly one digit
+  for the zone, which the size code's own three-digit tail never satisfies -- confirmed it
+  excludes "VAV-150" etc. entirely rather than over-counting. Real result on the file: **15
+  distinct tags**, deduped by the cleaned tag (not raw OCR text, which varies: `"VAV-3-1"` vs
+  `"[VAV-3-1]"` vs a stray-digit `"5VAV-2-12"` all collapse to one). Lower than the ~50-53
+  estimated in the vision-read (item 33) -- said here plainly, not papered over: that number was
+  always a "highest tag seen" extrapolation the vision-read itself called medium-confidence, and
+  15 is what the tool can actually currently read with real OCR confidence, not necessarily the
+  real total on the drawing.
+- **AHUs.** `AHU_CFM_RE` reads "2000CFM AHU-01" -- tag and airflow together in one note. Checked
+  for real whether AHU-02/AHU-03 have the same pattern anywhere within 500pt of their own tags:
+  they do not. Real result: one AHU read (AHU-01, 2000 CFM); AHU-02/03 stay unread rather than
+  getting a guessed or interpolated figure.
+- **Flex-dropper schedule.** Two real spellings on this file, `"N#Dropper@NNNcfm"` and
+  `"NDrop.@NNNcfm"` (neither a typo of the other -- both appear independently). `DROPPER_RE`
+  reads qty and CFM together per note; kept as separate schedule lines, never summed, since two
+  genuinely different dropper types can share a qty+CFM pair and still be two real things (the
+  real file has two distinct "2 x @150cfm" types at different positions -- confirmed they stay
+  two lines, not one, via the existing position-aware dedupe). Real result: **8 distinct types**.
+- **Fire/disc valves.** `DISC_VALVE_RE` reads `"N# FA DISC VALVE ..."` directly. Real result: **27
+  total** -- an exact match to the vision-read's own count (10 + 17 = 27), the strongest
+  cross-check in this whole item.
+
+**Same double-booking guard already used for TR tags (item 35a/35b), extended on purpose:** an
+AHU's or a dropper's own CFM number must never ALSO land as a second, generic `cfm` reading --
+`cfm_spans` (mirroring `hiwall_spans`) excludes it from the plain `CFM_RE` pass. All four new
+kinds flow through the existing `dedupe_labels()` unchanged, with `_label_value_key()` taught
+their own shape (vav: the cleaned tag; ahu: tag+cfm; dropper: qty+cfm; disc_valve: qty) rather
+than falling through to its generic raw-text catch-all, which would have kept OCR's own
+re-readings of the same physical note as false duplicates.
+
+`summary_text()` gained four new sections (AHU / VAV count with the size-code warning repeated
+in-line / dropper schedule / disc valve total), all read with `.get(...)`, never a bare
+`res[...]` -- a result dict built before this item (an older saved run, or every OTHER test in
+this file's own minimal fixture) must keep summarising, not `KeyError`.
+
+**Verified end to end on the real file, all four together, alongside item 35's fixes:** AHU-01 at
+2000 CFM; 15 VAV tags; 8 dropper schedule lines; 27 disc valves (matching the vision-read
+exactly). Tests: 27 new, all in `hvac_takeoff/test_hvac_takeoff.py`.
+
+**Diffuser schedule, built after the owner's own pushback ("solve everything, and make this
+apply to all HVAC drawings, not just this one"):** confirmed the real format is THREE separate
+OCR fragments per entry ("4# OVERALL 640o SAD", "NECK DIA-400o", "450 CFM EACH"), with real
+spelling noise (the diameter symbol reads as o/0/phi/Phi/%/missing; "OVERALL" is followed by a
+space, a hyphen, or nothing). Rather than risk a 3-fragment proximity join silently pairing the
+wrong CFM or neck size with the wrong entry on a crowded legend -- exactly the fragility item
+35d's own comment already flagged once, for the Hi-Wall+NOS join this session moved away from --
+`DIFFUSER_RE`/`SQ_DIFFUSER_RE` read ONLY qty + overall size, as an honest, count-only entry.
+`summary_text()`'s own new section says explicitly that CFM and neck size are NOT joined here, so
+the write-up agent is never tempted to guess a pairing either. Real result: **83 diffusers total**
+across 17 distinct schedule-line readings -- close to the vision-read's own ~89 estimate (item 33),
+a real cross-check, not a round number assumed to look right.
+
+**The real root cause of the 0% label-match, found investigating the owner's demand to fix
+everything properly rather than re-stating the same "scale may be wrong" guess a third time:**
+`SIZE_RE`'s own range check (`2 <= w <= 120`) assumes every duct size is written in INCHES. This
+drawing -- like a great many real HVAC drawings, especially outside the US -- writes every duct
+size in MILLIMETRES ("550x300", "1000x88"...). 550 is never a plausible duct WIDTH in inches (45+
+feet) so the old check silently rejected every single real size label on the sheet; this is why
+duct depth stayed "?" and label-match stayed 0% through every earlier fix in this item, none of
+which touched SIZE_RE at all. A second, compounding bug: `\d{1,3}` only matches 3 digits, so a
+4-digit mm size like "1000" silently truncated to its own last 3 digits ("1000x88" read as
+"000"x"88", i.e. 0in wide) -- the exact same failure shape as the TR_RE truncation bug (item
+35a), just never looked for in this regex until now. Fixed both at once: `\d{1,4}`, and a second
+acceptance branch for 50-3000 (both numbers) that converts mm to inches before it ever reaches
+`split_by_labels()` -- which was never broken; it was being handed nothing to pair against.
+**This is explicitly a GENERAL fix, not one keyed to this file:** it lives in `parse_label()`
+itself, runs on every drawing this tool ever reads, and changes nothing for a drawing that
+already uses inches (the small-number branch is untouched, byte-for-byte, from before this
+item). A metric-convention drawing -- which this client's own file already proves is a real,
+not hypothetical, case -- now gets the same label-matching every inch-convention drawing already
+had, automatically, without anyone adding a per-file rule for it.
+
+**Verified end to end on the real file: label-match went from 0% to 20%** (46 of 234 runs now
+carry a real, matched depth -- e.g. "9.8x9.8", "11.8x15.7" -- where every single run previously
+showed "?"). Not 100%: this drawing's duct routing is still heavily diagonal and many runs
+genuinely have no size label within reach, a real, separate limit (the straight-only extractor,
+already flagged honestly in item 33) that a unit fix cannot solve by itself -- said here plainly,
+not claimed as fully fixed.
+
+Tests: 11 new for the diffuser schedule and summary_text's own new section, 5 new for the
+inches/millimetres fix (including one that proves a converted mm label actually pairs with
+`split_by_labels()`, not just that the number looks right in isolation) -- 93 total in
+`hvac_takeoff/test_hvac_takeoff.py`, all passing, alongside the full 290-test BOQ/takeoff suite.
+
+**What is still genuinely open, said plainly rather than rounded up to "done":** the straight-
+only duct extractor itself (bends, offsets and angled runs are not measured -- a structural
+limit of this tool's geometry pairing, not a regex gap); AHU-02/AHU-03's own airflow (no CFM note
+was found near either tag on this file -- a real absence on this drawing, not a bug to fix here);
+and the real "Measure..." scale confirmation from the owner, still not done on this file.
+
+## 37. The BOQ result box showed raw markdown -- `**like this**` -- instead of rendering it
+
+Found from a screenshot the owner sent of Prism's own "Make my BOQ" screen: every `**bold**`
+marker, every `>` notice-blockquote, the `⚠` warning lines -- all shown as literal characters,
+not formatted. The owner's own comparison point was exact: the same write-up text pasted into
+claude.ai's web chat renders properly (bold headings, real blockquotes); Prism's own window did
+not, for the identical text.
+
+**Root cause, read in the code, not guessed:** `addons/boq/dialog.py`'s result box
+(`self.result`) was a `QPlainTextEdit`, filled with `.setPlainText(...)`. `QPlainTextEdit` is
+Qt's plain-text widget by design -- it has no concept of markdown or rich text at all, so
+`**bold**` and `> notice` show exactly as typed. The writing AI's own prompt (`core/boq.py`'s
+`formatting_prompt()`) asks for markdown -- headings, bold, tables -- because that is the format
+every other place this same text is read (claude.ai's chat, the exported `.docx`/PDF) already
+renders. Only this one display box in Prism's own GUI was never updated to match.
+
+**Fix:** `self.result` is now a `QTextEdit`, and every place that filled it
+(`_on_written`, `_send_followup`'s "stop" path via `continue_record`, `_offer_followup`'s
+history-replay) goes through one new helper, `_show_result(text)`, which calls
+`self.result.setMarkdown(text)` instead of `setPlainText(text)`.
+
+**The one real trap this fix had to avoid:** three places in the same file read the box back out
+afterwards -- `_ask_recheck` (is there a previous answer at all), `_send_followup` (paste the
+previous answer into the next prompt as context), `_offer_followup` (same, for the "anything to
+change?" window). All three used `.toPlainText()`. Tested directly (not assumed): once a table
+has been rendered by `setMarkdown()`, Qt turns it into a real `QTextTable` object, and
+`.toPlainText()` on that just concatenates every cell's text with no row/column separator at all
+-- a real BOQ table's numbers would come back as an unreadable flat list, silently wrecking every
+follow-up/recheck prompt's own "PREVIOUS ANSWER" section. `.toMarkdown()` does not have this
+problem -- confirmed it round-trips a markdown table back to real `|`-delimited rows, and round-
+trips plain text (what every existing test fixture in `tests/test_boq_dialog.py` pokes into this
+box directly) back unchanged, spaces and all. All three read sites now use
+`self.result.toMarkdown().strip()` instead of `.toPlainText()`.
+
+**Verified, not assumed:** a direct PySide6 check (`setMarkdown()` then `toPlainText()` vs.
+`toMarkdown()`) on a real markdown table, confirming the row-mangling and the toMarkdown() fix,
+before touching the dialog's own code. All 132 tests in `tests/test_boq_dialog.py` pass unchanged
+-- they poke the box directly with plain, non-markdown fixture text, which `toMarkdown()` returns
+byte-for-byte; the combined 300+-test BOQ/takeoff suite passes too.
+
+**This is general, not file-specific:** every BOQ/BOM this add-on writes, in any industry, goes
+through this same result box -- the fix applies the next time anyone opens the "Make my BOQ"
+screen, not just on this drawing.
+
+## 38. A .dwg no longer needs anything installed, on an Apple Silicon Mac or 64-bit Windows
+
+The owner's own words: "i dont care what you do how you do just fucking do it i want this
+working for windows as well as for mac." Before this, a customer attaching a `.dwg` with no ODA
+File Converter installed was told to go install one -- correct, but a real wall between "attach
+the drawing" and "get a BOQ" for anyone who hadn't already.
+
+**What's bundled:** `dwg2dxf` (GNU LibreDWG), the GPL tool `core/boq.py` already knew how to
+drive (`_run_dwg2dxf`, full-then-minimal fallback, read-back validation) -- it just required the
+customer to `brew install libredwg` or similar first. Now a copy ships inside Prism for the two
+platforms that matter: Apple Silicon Mac and 64-bit Windows. `core/vendor/dwg2dxf/README.md` has
+the full provenance -- where each binary came from, the exact checksum verified against GitHub's
+own release API at fetch time, and the one real failure mode found while verifying this (below).
+No PyPI wheel bundles these the way `imageio-ffmpeg` does for FFmpeg, so the files are vendored
+directly in the repo under `prism_terminal/core/vendor/dwg2dxf/` (~57 MB total) -- picked up by
+`packaging/prism.spec`'s existing generic engine-data walk with no spec change at all, confirmed
+by replicating that exact walk against the real tree rather than assuming it.
+
+**Windows (`win64/`):** downloaded as-is from LibreDWG's own GitHub release (not a third party),
+verified against the digest GitHub's own release API reports for that exact file. Five files --
+`dwg2dxf.exe` and the four DLLs it needs -- sit side by side; Windows' own DLL search order finds
+them with nothing to install, no registry entry, no admin rights.
+
+**macOS (`macos-arm64/`):** LibreDWG publishes no official Mac binary at all. This is Homebrew's
+own build, copied, with its one dependency (`libredwg.0.dylib`) relinked from the Homebrew
+Cellar's absolute path to `@loader_path/...` via `install_name_tool`, both ad-hoc re-signed.
+Verified, not assumed: ran the copy with `PATH=/usr/bin:/bin` and no Homebrew/`DYLD_*` anywhere in
+the environment, and diffed its output against the real Homebrew binary's on an actual client-
+shaped `.dwg` -- byte-identical. Apple Silicon only; an Intel Mac still falls through to ODA or a
+manual `brew install`, same as before this existed -- no official LibreDWG Mac build exists for
+Intel either, and the one unofficial third-party build that does had its own release notes
+reporting Homebrew's build silently truncating DXF output on at least one file -- not a risk worth
+taking on an architecture this feature doesn't even need to cover.
+
+**The real failure mode this testing found (not theoretical):** converting an actual complex
+architectural `.dwg` through dwg2dxf produced a file that LOOKED complete -- exit 0,
+`SECTION`/`ENDSEC`/`EOF` all present -- that `ezdxf.readfile()`, and even `ezdxf.recover.readfile()`,
+both refuse to open (`DXFStructureError: Invalid tag`). A clean exit code is not proof a DXF is
+actually readable. `core/boq.py`'s `dwg_to_dxf()` already guarded against exactly this before any
+of today's work -- opens the result with `_read_dxf()` before trusting it, retries with a minimal
+conversion if that fails, raises a clear `BoqError` naming both attempts if even that can't be
+read -- so nothing about that validation needed changing; today's work is documented proof it's
+load-bearing, not defensive boilerplate, with a real reproduction case attached.
+
+**Priority, fixed in the same change:** `find_dwg_converter()`'s tools-dir glob and PATH search
+checked `dwg2dxf`'s name before ODA's, so installing the bundled copy would have made Prism prefer
+its own less-reliable reverse-engineered reader over a customer's own real ODA install the moment
+both existed on the same machine -- caught before shipping, not after. ODA's names are now checked
+first at every stage; Prism's own bundled `dwg2dxf` is tried dead last, only once every other
+possibility -- an explicit override, anything already on the machine -- has come up empty.
+
+**Also fixed:** `addons/boq/cad_render.py`'s `dwg_to_drawing()` (the AI-vision preview path, a
+separate code path from the real measurement pipeline) only ever tried ODA and raised if it wasn't
+there. It now falls back to `core.boq.dwg_to_dxf` through `core_bridge` -- the identical,
+already-validated search the real BOQ measurement uses -- rather than duplicating the logic a
+second time for this one path alone.
+
+**Licensing:** LibreDWG is GPL-3.0-or-later. `NOTICE` carries the attribution and licence pointer;
+`core/vendor/dwg2dxf/README.md` is the source offer for the exact versions bundled (both trace
+back to LibreDWG's own release tarballs, with checksums).
+
+**Tested, not assumed done:** `tests/test_core_boq_dwg2dxf.py` (new -- platform-tag detection, the
+install-into-tools-dir logic including the idempotent no-op and the never-raises guarantee on an
+unsupported platform, and the full ODA-beats-dwg2dxf priority ordering) plus updated tests in
+`tests/test_boq_cad_render.py` for the new fallback path. 159 tests across both files plus
+`tests/test_boq_dialog.py` pass. Run for real on this machine, not just unit-mocked: the installed
+tools-dir copy converting a real multi-megabyte client-shaped `.dwg` standalone, byte-identical to
+the system Homebrew binary, both the success and the genuine-failure case through the real
+`dwg_to_dxf()` entry point.
+
+**Not done:** actually building/signing a frozen Prism.app and Prism.exe with this inside and
+running the .dwg flow end-to-end from a packaged build -- only a source-checkout run, per
+RELEASE_ISSUES.md's own "before I say done" checklist, item 1. Also not done: a win32 or Linux
+vendor copy (32-bit Windows and Linux are not real customer platforms per CLAUDE.md), and an
+Intel-Mac vendor copy (no trustworthy binary exists to vendor at all, see above).
+
+## 39. A scanned PDF drawing was filed as a "sample BOQ" -- "Make with drawing" never turned on for it
+
+The owner attached a real client file -- a hand-sketched SS personal storage locker fabrication
+drawing (970x450x2000mm, 18/19 SWG, qty 40, every dimension already labelled) -- as a `.pdf`,
+typed a one-line request, and got a refusal: "I can't read the attachment... there is no measured
+data... I have no file-building tool." The owner's own correction mid-diagnosis mattered: this
+add-on already HAS the exact mechanism for showing an AI a drawing when there's nothing to
+deterministically measure -- "Make with drawing", explicit and consent-gated, built specifically
+so a customer with no NDA/confidentiality constraint can choose to let the AI actually look,
+while one who does care never presses it. The button just never turned on.
+
+**Root cause, read in the code, not guessed:** `core.boq.classify_inputs()` sorted a `.pdf`
+purely by extension, into `templates` (a sample BOQ) -- a `.dwg`/`.dxf` was the only thing that
+ever became `cad_path`, and `addons/boq/dialog.py`'s "Make with drawing" button is
+`setEnabled(bool(cad_path))`. A scanned drawing with zero extractable text (confirmed directly --
+`pypdf` returns 0 characters for the owner's actual file) got told to the writer as "an example
+BOQ showing the firm's usual style". The writer's own refusal was correct given what it was told;
+it was told the wrong thing.
+
+**Fix:** `classify_inputs()` now checks the text `CB.files.attach()` already extracted (no extra
+I/O) -- a `.pdf` with real text (`>= _PDF_TEXT_MIN_CHARS`, 40) is still a template; with little or
+none, it goes into `cad`, the same role a `.dwg`/`.dxf` gets. `addons/boq/dialog.py`'s `_absorb()`
+then branches on extension: a real `.dwg`/`.dxf` still auto-measures exactly as before; a PDF
+drawing instead sets `cad_path`, enables "Make with drawing" directly, and shows a new inline note
+(`pdf_drawing_hint`) naming both of the real next steps -- press "Make with drawing", or type the
+numbers into "Input measurements" instead. `_ask_recheck()` picks a new prompt
+(`MAKE_WITH_DRAWING_NO_MEASUREMENT_PROMPT`) when there is no measured summary at all, instead of
+telling the AI to "cross-check against the measured figures below" when there are none.
+
+**Found along the way, not fixed (a provider limitation, not a Prism bug):** "Prism Agent Deep"
+(DeepSeek, `deepseek/deepseek-v3.2` / `deepseek-v4-flash` on OpenRouter) has no vision input at
+any tier -- confirmed directly against OpenRouter's own `/api/v1/models`
+`architecture.input_modalities` (`agents.py`'s own `PRISM_AGENT_HAS_VISION`, already correct, 30
+Oct 2026). "Make with drawing" already warns and falls back to text-only when the picked agent
+can't see the file (`_prepare_drawing_attachment`'s existing `has_vision()` check) -- for a job
+with no deterministic measurement at all, that still means no quantities. A PDF-only drawing like
+this one needs "Prism Agent Claude" specifically.
+
+**Tested, not assumed done:** new tests in `tests/test_boq_dialog.py` --
+`AttachingATextlessPdfDrawingEnablesMakeWithDrawing` (cad_path set, button enabled, `_measure()`
+never called on a PDF -- it would raise "need .dwg or .dxf" on the file the owner correctly
+attached as the drawing -- the hint names both real next steps, a real .dwg still measures exactly
+as before, a real text-bearing sample-BOQ PDF still goes to templates) and a new
+`core.boq.classify_inputs` case in `ASampleBoqDefinesTheDeliverable`. 186 tests across
+`test_boq_dialog.py`, `test_boq_cad_render.py`, `test_core_boq_dwg2dxf.py` and
+`test_double_line_ducts.py` pass -- one pre-existing, unrelated failure in this file
+(`test_attaching_a_second_one_updates_the_count_and_pluralises`, confirmed via `git stash` to
+already fail on unmodified code) was found and left alone, not folded into this fix's own count.
+
+**A second bug found and fixed while testing this, in the tests themselves, not the product:**
+`tests/test_core_boq_dwg2dxf.py`'s own mocking of `core.ffmpeg.tools_dir()` used
+`mock.patch.dict(sys.modules, ...)` to swap the whole module -- works when nothing else has
+imported `core.ffmpeg` yet, and silently stops working the moment something else has (Python's
+`from . import ffmpeg` then finds the real module already cached as an attribute on the `core`
+package, before ever consulting `sys.modules` again). Invisible running the file alone; real,
+making those tests quietly exercise the actual `~/.prism/tools`, the moment it ran alongside
+`test_boq_dialog.py`/`test_boq_cad_render.py` (which import the real engine first). Fixed by
+patching `tools_dir` as an attribute on the real, already-imported module instead.
+
+## 40. "Prism Agent Deep" couldn't see a drawing at any tier -- fixed to a real vision-capable DeepSeek model, verified live
+
+Follows directly from item 39: even with "Make with drawing" correctly turned on for a PDF
+drawing, the owner pointed out DeepSeek still couldn't look at it -- `PRISM_AGENT_MODELS["Prism
+Agent Deep"]` was `deepseek/deepseek-v3.2` and `PRISM_AGENT_FOLLOWUP_MODELS["Prism Agent Deep"]`
+was `deepseek/deepseek-v4-flash`, both confirmed text-only (checked against OpenRouter's own
+`/api/v1/models` `architecture.input_modalities`, 30 Oct 2026). The owner suggested
+`deepseek-v4.1-flash` based on a Gemini-sourced description of an OpenRouter "Files API" (upload
+first, get an `or_file_` id, reference it in the chat call).
+
+**Verified independently, not taken on either source's word:** queried OpenRouter's own
+`/api/v1/models` directly -- `deepseek/deepseek-v4.1-flash` really exists and really has
+`input_modalities: ['text', 'image']`. The Gemini-sourced "Files API" (separate upload step) does
+not match what this codebase already does or needs: `core/openrouter.py` already sends a PDF
+inline, as a `{"type": "file", "file": {"file_data": "data:application/pdf;base64,..."}}` block,
+the same request shape Claude already uses -- no separate upload call. Tested for real: sent the
+owner's own `drawing1_KJ.pdf` to `deepseek-v4.1-flash` over a live OpenRouter chat-completions
+call, this exact inline shape, asking for the drawing's overall height and quantity. It answered
+"The overall height is 2000 mm, and the quantity is 40." -- both correct, read off the real
+drawing. The response's own `annotations` show OpenRouter OCRs the PDF's text AND renders the page
+to an image server-side before the model ever sees it -- which is why a model whose own
+`input_modalities` list says only `'image'`, not `'file'`, still reads a PDF sent this way: it
+never needs native PDF support, only `'image'`, which `deepseek-v4.1-flash` has.
+
+**Fix:** both `PRISM_AGENT_MODELS["Prism Agent Deep"]` and `PRISM_AGENT_FOLLOWUP_MODELS["Prism
+Agent Deep"]` now point at `deepseek/deepseek-v4.1-flash`, and `PRISM_AGENT_HAS_VISION["Prism
+Agent Deep"]` is `True`. Both tiers, not just generation: "Make with drawing"/"Verify and remake"
+always run on the FOLLOWUP tier (`dialog.py`'s `_ask_recheck` → `_send_followup` →
+`_start_followup_run(..., followup=True)`) -- fixing only the generation-tier model would have
+left the one feature that actually needs vision still blind. Priced it too, not just confirmed it
+works: `deepseek-v4.1-flash` is cheaper per prompt token than the old v3.2 ($0.045/M vs $0.26/M)
+with a far larger context window (1,048,576 vs 163,840) -- a straight improvement, not a
+quality-for-price trade. It is also, checked directly, the cheapest STABLY PINNED vision-capable
+DeepSeek model OpenRouter currently lists -- the one cheaper entry, `deepseek-flash-latest`, is an
+unpinned rolling alias this codebase has no reason to trust to stay the same model underneath it
+-- which is why both tiers now deliberately use the same model rather than hunting a second,
+marginally cheaper one purely to preserve the two-tier pattern.
+
+**Tested:** `tests/test_boq_agents.py`, `tests/test_boq_openrouter_writer.py` and
+`tests/test_boq_dialog.py` updated -- the three places a test asserted the old, now-wrong
+"DeepSeek has no vision" behaviour (one of them the structural "follow-up is never the same model
+as generation" invariant, now carrying an explicit, reasoned exception for this one agent) now
+assert the new, correct behaviour, with the no-vision code path itself still covered by patching
+`PRISM_AGENT_HAS_VISION` directly rather than deleted. 217 tests across
+`test_boq_agents.py`/`test_boq_openrouter_writer.py`/`test_boq_dialog.py`/`test_boq_cad_render.py`/
+`test_core_boq_dwg2dxf.py`/`test_double_line_ducts.py` pass (the one pre-existing, unrelated
+failure from item 39 still isolated, still left alone).
+
+## 41. "Make with drawing" via a Prism Agent crashed on completion -- found live, in the owner's own real run
+
+The owner pressed "Make with drawing" (DeepSeek, item 38/39's own fix) in a real `python3 main.py`
+session and pasted the real traceback: `AttributeError: 'BoqDialog' object has no attribute
+'_followup_stage'`, raised inside `_on_followed_up`, the progress window closing with no visible
+output or error.
+
+**Root cause:** `_start_followup_run()` has always had two branches -- a Prism Agent (OpenRouter,
+`return`s immediately) and a browser agent (`_fu_start_next()`, below the return). Only
+`_fu_start_next()` ever set `self._followup_stage`/`self._followup_agent`; `_on_followed_up` reads
+both, and is shared by BOTH branches. Every existing test that touched this path mocked
+`OpenRouterWriteWorker` entirely and never drove its `done` signal through to `_on_followed_up` --
+so nothing had ever actually run this far. Fixed by setting both attributes in the Prism-Agent
+branch too, mirroring exactly what the browser-agent branch already does.
+
+**Verified the fix, not just the absence of the old error:** reverted the dialog.py fix with `git
+stash`, confirmed a new regression test reproduces the EXACT reported traceback line-for-line, then
+restored the fix and confirmed the same test passes -- and, driving the signal for real, hit a
+SECOND real bug: `_on_followed_up` ends by opening a real `FollowupDialog.exec()` ("anything to
+change?"), which hangs forever outside a live app (CLAUDE.md's own testing trap). Every existing
+BOQ test that reaches this point already mocks `FollowupDialog`; this test now does too.
+
+**A real mess found and cleaned up while chasing this, disclosed per RELEASE_ISSUES.md's own
+rule:** reproducing/verifying this fix via `python -m unittest` (not `devtools/suite_runner.py`)
+bypasses the pytest conftest fixture that sandboxes `config.RUNS_DIR`/`CONFIG_PATH` -- so, it turns
+out, has every `python -m unittest tests.test_boq_dialog` run this whole session, and plausibly
+others before it. Found and removed: 21 junk `~/.prism/runs/*.json` + 10 `boq_priced_reference_*
+.csv` files and 56 trivial (`About this run.txt` only, 196 bytes each) folders under `~/Desktop/
+Prism Artifacts/Bill of Quantities — 500 brackets/`, all precisely identified by distinctive
+test-fixture query text ("BOQ — sai", "Bill of Quantities — 500 brackets") and today's timestamps,
+none touched outside that exact, verified set. The owner's own real runs from today -- including
+the actual run that hit this bug -- were confirmed untouched and are exactly where they should be.
+`~/.prism/config.json` itself was checked and was never touched (`api_key` is not the test
+fixture's `"k"`). Needs a real fix beyond today's cleanup: either run this suite through pytest
+(so conftest's sandbox applies), or give `test_boq_dialog.py` its own explicit sandbox the way
+`test_double_line_ducts.py`/others already do for files they write -- not done here, flagged for
+next time this file is touched.
+
+**What the owner's own real run actually produced, read directly from the real files (the two
+`.docx`s in `~/Desktop/Prism Artifacts/Bill of Quantities/2026-11-02 17-24/`):** both Prism Agent
+Deep and Prism Agent Claude DID correctly read the real numbers off the locker drawing (970×450mm,
+SS304, 18/19 SWG, qty 40, 15 compartments) -- the earlier fixes (items 39/40) genuinely worked end
+to end. But roughly half of each document was a broken, malformed python-docx SCRIPT the model
+wrote for the person to run themselves, opening with "I can't attach a file in this chat" --
+reasonable for a model that only knows it is in a plain chat with no file tool, wrong here:
+`openrouter_writer.write_file()` already turns the model's own text into the real file, no script
+needed, ever. Neither existing prompt said so. Fixed: `_run_prism_agent()` now appends a short,
+explicit note to every document-producing stage's prompt (format/recheck/followup, never
+standards/interpret) saying plainly that the real file is built automatically from the text
+answer, and to never write a script or claim it can't attach a file.
+
+**Verified against the real API, not assumed from reading the prompt:** re-sent the owner's own
+`drawing1_KJ.pdf` to `deepseek-v4.1-flash` with the new note appended, no `max_tokens` cap (matching
+`core/openrouter.py`'s own real request, not my first, artificially capped attempt -- which looked
+broken for an unrelated reason, the model spending its whole budget on reasoning before any answer,
+confirmed by checking `finish_reason` and raising the cap rather than guessed past). Clean result:
+`finish_reason: "stop"`, a complete, correctly-structured BOQ table with the real figures, no script,
+no "can't attach a file".
+
+**Tested:** new regression test in `tests/test_boq_dialog.py`
+(`test_make_with_drawing_via_a_prism_agent_does_not_crash_on_completion`), proven against the real
+crash via `git stash` before being proven against the fix. 197 tests across
+`test_boq_dialog.py`/`test_boq_cad_render.py`/`test_core_boq_dwg2dxf.py`/`test_boq_agents.py`/
+`test_boq_openrouter_writer.py` pass (the one pre-existing, unrelated failure from item 39 still
+isolated, still left alone).
+
+## 42. "Make with drawing" still stayed off -- item 38's own fix was right for one reason and wrong for the opposite one
+
+The owner's report, the day after item 38 shipped: same symptom, new file -- `reference_BOQ.xlsx`
+(a real sample) and `Trolley -Drg 19.9.26-Updated (1).pdf` (a real, 10-page, multi-item pharma
+trolley/rack drawing set) attached, both landed in "2 sample templates attached", and "Make with
+drawing" stayed disabled.
+
+**Root cause:** item 38's fix was "a .pdf with real extractable text is a template; with none, a
+drawing" -- right for a SCANNED drawing (no text layer at all), wrong for a REAL, CAD-exported one.
+Checked directly: the trolley PDF has 2,842 characters of genuine extracted text across its 10
+pages -- comfortably over the 40-char floor -- but it's all dimension numbers and one-line
+material/capacity callouts ("Material - SS", "Weight Capacity - 30 Kg", "16 SWG Top"), never
+anything reading like a BOQ document. "Has text" was never the right question.
+
+**Fix:** `classify_inputs()` now requires a .pdf's text to actually READ like a BOQ document --
+`_looks_like_boq_document()` checks for at least two distinct hits from a real BOQ-vocabulary list
+(`_BOQ_DOCUMENT_SIGNALS`: "description", "quantity"/"qty", "rate", "amount", "preamble", "sr.no",
+"bill of quantities", etc. -- two, not one, so a drawing's own title block saying "qty" once in
+passing still isn't enough). Confirmed directly against both real files: the trolley PDF has ZERO
+hits and now classifies as `cad`; a synthetic real-BOQ-shaped text passes. The textless
+`drawing1_KJ.pdf` from item 38 is unaffected (still filtered out before the vocabulary check ever
+runs).
+
+**A second, real, distinct incident found and fixed while re-testing this, disclosed per
+RELEASE_ISSUES.md's own rule, again:** re-running `tests/test_boq_dialog.py` via
+`python -m unittest` (not `devtools/suite_runner.py`) to verify this fix found MORE of the exact
+same contamination item 41 already logged and supposedly cleaned up -- because item 41's cleanup
+removed the junk files, not the cause: pytest's own `conftest.py` sandboxes `config.CONFIG_PATH`/
+`RUNS_DIR` only when this file is collected BY PYTEST, and every `python -m unittest
+tests.test_boq_dialog` run throughout BOTH sessions reached the real ones regardless. This time
+fixed at the actual cause, not just swept up after again: `tests/test_boq_dialog.py` now sandboxes
+itself at module level with plain `unittest.mock.patch` (no pytest fixture machinery), covering
+`config.CONFIG_PATH`, `config.RUNS_DIR`, AND `config.ARTIFACTS_DIR` (missed by item 41's own
+diagnosis -- the actual second real write path behind the Desktop `Prism Artifacts` pollution; its
+own `artifacts_root()` caches by that constant's value, so patching it before any test runs is
+sufficient on its own, no cache reach-in needed). Works identically whether this file is run via
+pytest or directly -- and is harmless layered under conftest's own fixture when both are active, so
+nothing had to be removed from conftest.py. Verified, not assumed: ran the full 140-test file
+afterward and confirmed, directly, that no new file landed in the real `~/.prism/runs/` or the real
+Desktop `Prism Artifacts` folder — the structural fix item 41 said was still owed.
+
+**The actual junk found this time (6 run files + 3 CSVs + 18 Desktop subfolders, all from the
+`python -m unittest` runs made WHILE WRITING item 41's own fix, before it could take effect) was
+removed, precisely, by the same method as item 41: matched by distinctive fixture query text
+("BOQ — sai", "Bill of Quantities — 500 brackets") and today's timestamps, nothing else touched.
+The owner's own two real runs from 2 Nov (17-24 and 17-54, both real multi-KB .docx files) were
+re-confirmed untouched.**
+
+**Tested:** `tests/test_boq_dialog.py` gets a new `test_a_real_cad_exported_pdf_with_lots_of_text_
+is_still_a_drawing` (the trolley PDF's own real extracted text, reproduced verbatim from page 1),
+and the existing PDF-classification tests' fixture text was strengthened to carry genuine BOQ
+vocabulary (two signal hits, not one) now that the bar is real content, not just length. 140 tests
+in `test_boq_dialog.py` pass alone; the pre-existing, unrelated failure logged in item 39 is GONE
+now too (not reproduced, not chased further -- a net improvement, not a regression to explain).
+
+## 43. Confirmed (not assumed): a written-spec-plus-drawing PDF already classifies correctly under item 42
+
+The owner's next real file, checked before any new code was written: a two-page PDF where page 1
+is a written prose specification ("Specifications for your liquid nitrogen (LN2) container storage
+rack... Required Quantity: 1...", 2,183 real characters) and page 2 is the actual drawing (4
+characters -- an image, no text layer). Ran it through `classify_inputs()` directly: it already
+lands in `cad`, not `templates` -- the spec page's prose trips only one `_BOQ_DOCUMENT_SIGNALS`
+word ("quantity", inside "Required Quantity: 1"), under item 42's two-hit bar. No code change
+needed; `test_a_pdf_with_a_written_spec_page_plus_a_drawing_page_is_still_a_drawing` locks this
+real case in as a permanent regression test, using the file's own real extracted text, not a
+synthetic stand-in.
+
+## 44. "Make with drawing" only used the drawing page, not the written-spec page it was sent alongside
+
+The owner asked me to build the LN2 rack BOQ myself (reading the real drawing + spec directly) and
+compare it against what Prism's own "Make with drawing" produced. It was weaker than it should
+have been: it marked caster quantity, frame wall thickness and a whole back-panel component as
+"TO CONFIRM" or left them out entirely -- all of which page 1's own written specification states
+outright ("Each bay must have 2 Swivel-Brake casters in the front and 2 fixed casters in the
+back"; "wall thickness of at least 2.0 mm (14 Gauge)"; "covered... from both sides as well as top
+and back side"). Its own output said "Source: Extracted from the attached drawing only."
+
+**Root cause, confirmed, not assumed:** `cad_render.prepare_for_ai()` already sends a .pdf WHOLE,
+every page, unchanged (its own docstring says so) -- the spec page genuinely reached the model.
+The gap was the prompt's own wording. `VERIFY_PROMPT`, `MAKE_WITH_DRAWING_PROMPT` and
+`MAKE_WITH_DRAWING_NO_MEASUREMENT_PROMPT` all said "the attached drawing" / "labelled on the
+drawing" throughout -- which reads as "the visual/CAD page", not "the attached file, whatever
+pages it has." The model wasn't ignoring page 1 because it couldn't see it; it had been told, in
+effect, that only drawn content counted.
+
+**Fix:** all three prompts now say "the attached file," explicitly instructed to read EVERY page --
+a written specification is "exactly as real a source as a drawn sketch page, never background or
+secondary" -- and to say so when a written spec answers something the drawing itself leaves
+unlabelled, or when the two disagree.
+
+**Verified against the real API with the real file, not assumed from the prompt text:** re-sent
+the LN2 rack PDF with the new prompt. Confirmed in the real answer: the 2.0 mm/14-gauge wall
+thickness (spec-only, now present), the 2 swivel + 2 fixed caster count per bay (spec-only, now
+present), the back panel (spec-only, now present), and the 260 kg vs. 200 kg load-capacity
+conflict across the two pages (now flagged) -- all four of the real gaps found in the comparison,
+confirmed fixed, not just plausible. The answer opens by naming what it read: "the written
+specification page and both drawing sheets. The BOQ below combines them."
+
+**Tested:** `tests/test_boq_dialog.py`'s own prompt-content assertion
+(`test_with_no_previous_answer_it_makes_from_the_drawing_instead_of_verifying`) updated to match
+the new wording ("reading the attached file directly"). 141 tests in `test_boq_dialog.py` pass.
+
+## 45. The person's own typed request never reached "Make with drawing" at all
+
+The owner built their own BOQ by hand from the LN2 rack drawing + spec and compared it against
+item 44's fix: raw material in Kg and the "+100mm to length and breadth for scrap" the owner had
+explicitly typed in the ask box were both completely absent from the AI's output. The owner then
+pointed out: a follow-up message about the 100mm, sent the next day, HAD worked.
+
+**Root cause, found by reading the code, not guessed:** `_send_followup()` -- the function every
+"Make with drawing" / "Verify and remake" press goes through -- builds its prompt from the fixed
+boilerplate note (`VERIFY_PROMPT`/`MAKE_WITH_DRAWING_PROMPT`/`MAKE_WITH_DRAWING_NO_MEASUREMENT_
+PROMPT`) plus optional MEASURED FIGURES and PREVIOUS ANSWER sections. It never read `self.ask`'s
+own text anywhere. `_write()` ("Make my BOQ") already carries the person's own request through,
+both as `project_context` and via `_format_request_line`; `_send_followup()` never did. That's
+why the owner's own instructions reached the model only via their follow-up message -- a
+follow-up's own typed text directly BECOMES the prompt's `note`, so it naturally carried through;
+the FIRST "Make with drawing" press, with nothing but the fixed boilerplate, never had a path for
+it at all.
+
+**A real near-miss in the fix itself, caught before shipping, not after:** the obvious fix --
+append `self.request` -- would have traded one bug for a worse one. `self.request` is only ever
+set inside `_run()` ("Make my BOQ") or restored from History; pressing "Make with drawing" as the
+very FIRST action in a session (attach, type, press -- the owner's own actual workflow, and
+exactly the case item 38 built this whole path for) means `self.request` does not exist as an
+attribute yet at all. Confirmed directly: a freshly constructed dialog has `hasattr(d, "request")
+== False`. Used `self.ask.text()` instead -- the box's own LIVE current content, which also fixes
+a second, smaller problem for free: if the person edits their ask after a first write-up and
+before "Verify and remake", `self.request` would have stayed frozen at the old text; `self.ask.
+text()` always reflects what's actually in the box right now.
+
+**Verified against the real API with the owner's own exact original request, not assumed from the
+code:** re-sent the LN2 rack PDF with the owner's verbatim typed text ("...add raw material in Kg
+and also do add 100mm to length and breadth for scrape") now included via the fix. Real result:
+a full per-item Kg breakdown (275.62 kg total, each assumption -- density, unstated sheet
+thickness -- named plainly) and the 100mm scrap addition shown worked into every cutting-size
+calculation ("(8.5 ft + 100 mm) × (2.20 ft + 100 mm)..."), not just claimed.
+
+**Tested:** two new tests in `tests/test_boq_dialog.py` -- the typed ask text reaching the prompt,
+and an empty ask adding no empty section (same pattern as the existing MEASURED FIGURES/PREVIOUS
+ANSWER checks) -- plus an explicit `assertFalse(hasattr(self.d, "request"))` proving the test
+reproduces the real no-attribute case the naive fix would have crashed on, not a hypothetical.
+201 tests across `test_boq_dialog.py`/`test_boq_cad_render.py`/`test_core_boq_dwg2dxf.py`/
+`test_boq_agents.py`/`test_boq_openrouter_writer.py` pass.
+
+## 46. A real reference BOQ (14 rows) was told to the model as unreadable — it wasn't, Prism's own code just never showed it
+
+The owner asked why an earlier follow-up (before today's fixes) gave a ~273-279 kg weight
+estimate, noticeably different from both my own hand derivation (~202 kg, deliberately
+incomplete) and item 45's fresh test. Read the actual follow-up `.docx` the owner pointed at.
+Found two separate things in it:
+
+**A real, reproducible Prism-side bug, confirmed in code, not guessed:** the document's own text
+says *"the workbook [`reference_BOQ.xlsx`] was supplied as a binary attachment whose contents were
+not readable in this pass."* False -- `core.files.attach()` reads it fine, computing a correct,
+detailed profile (14 rows, every column, the real data). The bug is in `context_block()`, the
+function that puts attachment content into every Prism-Agent prompt: a spreadsheet's profile was
+only ever shown when the table was BIG (`_row_count > PROFILE_ABOVE_ROWS`, 40 rows) -- the
+function's own docstring says "for a spreadsheet, gives the profile", with no such size
+condition, but the code only honoured that above 40 rows. `.xlsx` (unlike `.csv`/`.txt`) never
+gets a `text` field at any size (`_extract_text()` has no `.xlsx` branch, only the separate
+`tabular_profile()` path) -- so a SMALL `.xlsx`, this 14-row reference BOQ included, fell through
+every branch straight to "binary file -- uploaded directly to the tool; contents not inlined",
+identical to what a genuinely unreadable file gets, even though its profile was computed and
+correct the whole time. The model's own claim it "could not read" the file was honest, given what
+it was actually told.
+
+**Why this one mattered more than a generic template:** `reference_BOQ.xlsx` isn't a blank style
+sample -- it's the client's own prior BOQ for THIS SAME rack, including a row for "LN2 Rack 4-Bay
+(8 ft)" stating **Net SS304 Wt: 287.45 kg, Gross Wt to Order incl. wastage: 316.20 kg** -- numbers
+the model never got to see or reconcile against.
+
+**Fix:** `context_block()` now shows a spreadsheet's profile whenever one exists and there's no
+real text to paste instead -- unchanged above the 40-row threshold (still says "too large to
+paste"), unchanged for a small `.csv`/`.txt` that DOES have real text (still pasted whole, not
+summarised -- a regression I introduced on the first pass at this fix and caught by running the
+existing test suite before calling it done, not after: `ASmallSheetStillGoesInWhole`'s 40-row csv
+test failed the first version). Only the genuine gap -- small table, profile computed, no text
+field, no existing branch ever reached -- now gets its profile shown instead of being told to the
+model as "not inlined."
+
+**A separate, real finding in that same follow-up document, disclosed plainly rather than quietly
+fixed around:** it also describes the source PDF as 3 pages (a written spec plus "Page 2" and "an
+identical Page 3") dated 26 Oct **2025**. The real file has 2 pages, and the drawing's own title
+block reads 26 Oct **2023** (read directly off the rendered page, not assumed). This is the model
+inventing detail, not a Prism code path -- noted here because the owner should know this
+particular follow-up's own output is not fully trustworthy on page count or date, even though its
+weight arithmetic (close to the reference file's own 287 kg) held up well.
+
+**Tested:** `tests/test_attachments.py` gets `ASmallXlsxStillShowsItsProfile` (a synthetic,
+reference-BOQ-shaped `.xlsx` fixture, not the owner's real file) covering both the fix and the
+no-regression guard for small `.csv`. 165 tests across `test_attachments.py`/`test_intent.py`/
+`test_boq_dialog.py` pass.
+
+## 47. "Make with drawing" had no instruction against copying a sample's own numbers
+
+Follows directly from item 46: now that a reference file's content (item 46) actually reaches the
+model on the "Make with drawing" path, the owner asked the obvious next question -- will a
+reference's own figures leak into the BOQ's actual numbers? `reference_BOQ.xlsx` isn't a blank
+style sample; it already contains a row for this exact product's own prior weight (287.45 kg
+net). Checked, not assumed.
+
+**Root cause:** `core.boq.formatting_prompt()`'s own `has_template` branch already has exactly
+the right instruction -- match a sample's format/conventions, but "do not copy the sample's rows
+or quantities... every quantity you present must trace back to the measured data". That function
+is called only from `_write()` ("Make my BOQ"). `_send_followup()` (every "Make with drawing" /
+"Verify and remake" press) never calls it and never said anything, either way, about a template's
+own numbers -- a PDF-only drawing's ONLY path to a BOQ at all (item 38) carried a reference file's
+real content (now that item 46 fixed it) with zero guidance on whether to trust its specific
+figures.
+
+**Fix:** `_send_followup()` now includes the same instruction, adapted for this path (no
+"measured data" section to point at -- points at "your own reading of the file" instead), only
+when `self.templates` is non-empty -- same conditioning pattern as the ask/measured-figures/
+previous-answer sections already use.
+
+**Verified against the real API, with the owner's real reference file and real drawing, not
+assumed from the prompt text:** sent both together. The real answer's own closing line: *"No
+sample rows, quantities or weights have been copied; all dimensions and quantities above are read
+from the attached LN2_rack.pdf. The 10% wastage convention is taken from the sample as a
+comparable design decision."* -- exactly the intended split: format/convention from the sample,
+every number independently re-derived from the current drawing. Confirmed directly: neither
+287.45 nor 316.20 (the reference's own net/gross weight) appear anywhere in the output.
+
+**Tested:** two new tests in `tests/test_boq_dialog.py` -- the warning appears when a template is
+attached, and is absent when none is. 145 tests in `test_boq_dialog.py` pass.
+
+## 48. A real BOQ .docx landed inside an unrelated earlier session's artifacts folder
+
+The owner asked why a fresh "Make with drawing" run -- no reference file this time, just a typed
+request -- still had no raw material Kg and no 100mm scrap addition, despite items 45 and 47. Asked
+to check the timeline rather than guess. Found the actual saved prompt record for that exact run
+(`prompt_recheck_2026-11-03 22-56-16.txt`) -- it has item 38/41/44's own text, confirmed those
+fixes are live, but NO "THE PERSON'S OWN REQUEST FOR THIS JOB" section at all. `self.ask.text()`
+was genuinely empty the moment that "Make with drawing" was pressed -- not a bug in item 45's fix,
+a real empty input, correctly producing no section (item 45's own "no empty section" test covers
+exactly this). So: re-type the request and press again, not a code problem on its own.
+
+**But something worse was found tracing it:** that run's own `deliverable_path` pointed inside
+`Desktop/Prism Artifacts/Create an Instagram post for Dhanteras/2026-11-03 22-36/` -- a
+completely unrelated add-on's session from earlier the same day. The BOQ .docx was really saved
+there, confirmed on disk, not a logging glitch.
+
+**Root cause, traced through `core/config.py`, not guessed:** `self._task_name` /
+`self._artifacts_dir` are only ever set inside `_run()` ("Make my BOQ"'s own
+`CB.config.begin_run()` call). "Make with drawing" pressed as the first action in a session (no
+`_run()` ever called -- item 38's own real workflow, and the exact case items 45/47 already found
+the same gap for two other attributes) means `_save_deliverable()`'s `task` argument falls back to
+the bare `self._doc` ("Bill of Quantities"). That alone should still be safe --
+`config.artifact_task_dir()` opens a fresh folder whenever `task` doesn't match the module-level
+`_run` state's own task -- except `_run["continued"]` is a GLOBAL, process-wide flag, not scoped
+per add-on or session: once any earlier add-on's own follow-up left it `True`,
+`artifact_task_dir()`'s own check (`_run.get("continued") or _run.get("task") == task`) is
+satisfied regardless of whether `task` actually matches, and it keeps returning whatever folder
+was last active process-wide -- another add-on's, from however long ago, the exact Instagram
+folder found here.
+
+**Fix:** `_send_followup()` now establishes the same real, job-specific context `_run()` already
+does -- `CB.config.begin_run(self._task_name, ...)` -- the first time it is reached without one,
+using the live ask text (same `self.ask.text()` item 45 already reads) to name it. Guarded so a
+session that already has one (pressed "Make my BOQ" first, then "Make with drawing") is never
+re-begun and never loses real, already-established state.
+
+**Tested:** two new tests in `tests/test_boq_dialog.py` -- `begin_run()` is called with this job's
+own task name when none exists yet (proven against the real bug first: reverted the fix with `git
+stash`, confirmed the test fails with "begin_run... Called 0 times", then confirmed it passes with
+the fix restored), and an already-established session is never re-begun. 147 tests in
+`test_boq_dialog.py` pass.
+
+## 49. The actual deliverable .docx was badly formatted -- never rendered and looked at before today
+
+The owner asked about the kg/scrap issue again, and separately flagged that the generated Word
+file looks worse than one Claude itself produced directly, and worse than the real reference
+`.xlsx`. The kg/scrap question is item 48's own (the ask box was empty that run; nothing new
+here). The formatting complaint led somewhere real: nobody had ever actually rendered a generated
+`.docx` and looked at it before today.
+
+**What rendering one found, visually, not guessed:** `macOS qlmanage -t` (Quick Look's own
+thumbnailer, no LibreOffice available on this machine) on a real generated file showed every
+`**bold**`/`` `code` `` span in the writer's own answer sitting in the document as LITERAL
+asterisks and backticks -- "**Client:** Pharmatech Company" with its own punctuation marks,
+visible in the title line, every TO CONFIRM note, every emphasised table cell. `parse_markdown()`
+has only ever parsed BLOCK structure (headings/paragraphs/bullets/tables); the text INSIDE a
+block was passed to `doc.add_paragraph()`/table cells verbatim, markdown syntax characters and
+all. The same root cause item 37 already fixed in the dialog's own result box (`QPlainTextEdit`
+vs `QTextEdit`) -- this is that exact bug one layer over, in the actual file the person opens
+afterwards, in a part of the pipeline nobody had checked with their own eyes before. The PDF path
+(`markdown_to_pdf` / `_markdown_to_html`) had the identical bug -- escaped the text but never
+translated the markdown syntax inside it either.
+
+**Also found, same screenshot:** a 7-column BOQ table, python-docx's own default even-width
+columns, on a portrait page -- "Description / source" wrapped into 6+ lines per row while a
+3-character "Unit" column sat mostly empty at the same width. Every real BOQ seen in this whole
+session (items 38-48's own test files included) has this exact shape: a few narrow numeric/unit
+columns beside one or two long description columns.
+
+**Fix, both paths:** `_add_inline_markdown()` (docx) and `_inline_markdown_to_html()` (PDF) now
+parse `**bold**` into a real bold run/`<b>`, `` `code` `` into a real monospace run/`<code>`,
+applied everywhere text is added -- headings, paragraphs, bullets, table headers (bolded even
+when the AI's own text wasn't already `**bold**`) and table cells. `markdown_to_docx()` also now:
+sets a consistent body font (Calibri, 10.5pt) instead of whatever python-docx's own
+locale-dependent default happens to be; switches the page to landscape, since every real BOQ this
+add-on produces has a wide table a portrait page was never going to fit; and gives each table
+column a width proportional to its actual content length (`_set_column_widths()`, clamped so one
+freak value can't starve or swallow a whole row) instead of the even split that caused the
+wrapping in the first place.
+
+**Verified by actually rendering the fixed file and looking at it, the same way the bug was
+found, not assumed fixed from the code:** regenerated the exact LN2 rack BOQ, rendered it again
+with `qlmanage -t`. No asterisks or backticks anywhere; bold text is really bold; `LN2_rack.pdf`
+is really monospace; the main table's description column is now wide and its unit/qty columns
+narrow, landscape, each row a reasonable height instead of 10+ wrapped lines.
+
+**Tested:** two new test classes in `tests/test_boq_openrouter_writer.py` --
+`MarkdownToDocxRendersInlineMarkdownForReal` (bold/code in a paragraph, a table header, and
+inside a table cell) and `MarkdownToDocxUsesLandscapeAndRealColumnWidths` (landscape page, a long
+description column measurably wider than a short Qty column). 28 tests in
+`test_boq_openrouter_writer.py` pass.
+
+## 50. "100mm for scrap" was read as a sheet-panel-only instruction -- tube/rod cut lengths never got it
+
+The owner asked for Prism's accuracy to be compared against the same LN2 rack job done on
+claude.ai. Every underlying formula checked out on both sides (net lengths matched exactly,
+unit-weight math matched once the density difference was accounted for) -- the real, numeric gap
+(Prism's total 275.62 kg vs claude.ai's 244.85 kg, ~12.6% apart) traced to two different
+*interpretations* of the same ambiguous instruction, not a calculation error:
+
+1. **Cladding thickness** -- not stated anywhere in the source PDF; Prism assumed 2.0 mm for every
+   unspecified sheet, claude.ai assumed 1.2 mm. Flagged by both as an assumption; not this item's
+   fix (there is no "right" guess without the client confirming it).
+2. **Scrap/wastage scope** -- the owner's own ask box said "add 100mm in length and breadth for
+   scrap". Prism's writer read "length and breadth" as a 2D, sheet-panel instruction and applied
+   it only to sheet/plate panels; its own notes said so plainly ("Tubes use cut lengths from
+   stated dimensions; no tube scrap allowance is specified"). claude.ai, asked the identical PDF
+   and instruction, applied the same allowance to every cut piece -- tube, pipe, flat bar and rod
+   included, not sheets alone.
+
+**Fix:** both prompt-building paths that embed the person's own words -- `addons/boq/dialog.py`'s
+`_send_followup()` ("Make with drawing"/"Verify and remake") and `prism_terminal/core/boq.py`'s
+`formatting_prompt()` ("Make my BOQ", via its `project_context` argument) -- now scan the
+person's own request for `scrap`/`wastage`/`waste` and, only when one appears, append one explicit
+instruction: apply the allowance to every cut piece (tube/pipe/flat bar/rod cut length, and sheet/
+plate length *and* width), show both net and gross on each line, and state the allowance once near
+the top. Never appended when the person's own words never raised it -- same reasoning as items
+45/47's own conditional sections.
+
+**Tested:** `tests/test_boq_dialog.py` --
+`test_a_scrap_request_gets_told_to_cover_tubes_and_rods_too` /
+`test_no_scrap_wording_means_no_scrap_clarification` (the `_send_followup` path) and
+`test_a_scrap_request_in_the_project_context_covers_tubes_and_rods_too` (the `formatting_prompt()`
+path, called directly). 151 tests in `test_boq_dialog.py` pass.
+
+## 51. No spreadsheet export -- claude.ai's own answer to the same job came back as a real .xlsx
+
+Same comparison as item 50 found this too: claude.ai's BOQ was a real, editable, summable
+spreadsheet; Prism's own deliverable was a single flat `.docx` table (the format picker only ever
+offered Word/CSV/PDF). Not the bigger piece of work claude.ai's own multi-sheet Inputs/BOQ/Summary
+workbook represents (that has live formulas carrying an assumption change through the whole
+sheet -- this module's whole premise, stated in its own docstring, is that it renders the writing
+AI's own finished *text*, which has no formulas to carry over) -- but the smaller, real gap: every
+other export here already runs off the same `parse_markdown()` blocks, and a BOQ reader filtering/
+summing a Qty or Kg column in Excel is something a Word table never lets them do at all.
+
+**Fix:** `addons/boq/openrouter_writer.py` gets `markdown_to_xlsx()` -- the same heading/paragraph/
+bullet/table blocks `markdown_to_docx()` reads, onto one real worksheet via `openpyxl` (already a
+project dependency, used the same way `core/boq_price.py` already builds its own priced `.xlsx`).
+Table header cells are bold; a cell that is nothing but a number (e.g. a Qty of `26.213`) is
+written as a real number, not text, so it can actually be summed; inline `**bold**`/`` `code` ``
+markers are stripped to plain text rather than rendered as rich-text runs (a spreadsheet cell holds
+one value, not mixed runs the way a docx paragraph can). Registered in `FORMAT_WRITERS`, and added
+to `addons/boq/dialog.py`'s format picker (`format_combo`, `_FORMAT_PHRASE`) between Word and CSV.
+
+**Tested:** `tests/test_boq_openrouter_writer.py`'s new `MarkdownToXlsxBuildsARealSpreadsheet`
+class (heading+table land on the sheet, a Qty cell is a real `float`/`int` not a string, a header
+cell is bold, a `**bold**` marker is stripped not left literal) -- the old
+`test_an_unknown_format_raises_rather_than_silently_doing_nothing` used `xlsx` as its own example
+of an unregistered format; now rewritten to use `rtf` instead, since `xlsx` is a real one now.
+`tests/test_boq_dialog.py`'s `test_xlsx_is_a_choice_in_the_format_picker`. 32 tests in
+`test_boq_openrouter_writer.py` pass.
+
+## 52. The bigger piece item 51 deferred -- a real, live-formula Inputs/BOQ/Summary workbook
+
+Item 51's own write-up named the gap and deferred it: claude.ai's own answer to the identical LN2
+rack job came back as 3 linked sheets with real Excel formulas -- change one input (a density, a
+wastage allowance) and the whole workbook recalculates. Item 51's flat `.xlsx` closed the smaller
+gap (a real spreadsheet a reader can filter/sum) but was still a static snapshot, numbers pasted
+in by Python, same as the `.docx`. The owner asked for the bigger piece next.
+
+**The real difficulty, thought through before writing code:** a plain OpenRouter chat completion
+cannot itself place a formula at a specific cell address -- it does not know what row its own
+answer will land on in the final sheet (another block, another table, a different answer length
+all shift it). Asking the model to emit real `=Inputs!B7` Excel references directly would mean
+trusting its own guess at a row number it cannot know -- a worse, more fragile version of the
+exact problem being solved. So the model is never asked for a cell address at all: it is asked
+for a named INPUTS table (`Name | Value | Unit | Note`, e.g. `frame_length_ft`) and, in the BOQ
+table(s), a formula written in terms of those NAMES in curly braces --
+`={frame_length_ft}*2+{wastage_mm}/304.8` -- ordinary arithmetic, no cell addresses. This module
+(not the model) then compiles each `{name}` token into the real `Inputs!$B$n` address once it
+knows where that Input actually landed -- a deterministic compile step in code, the one place
+that genuinely does know the row, rather than two different systems (the model's guess and the
+sheet's real layout) that have to agree on a row number neither of them controls end to end.
+
+**Fix, `addons/boq/openrouter_writer.py`:**
+- `_find_inputs_table()` -- the model's own `## INPUTS` heading + table, lifted out of the rest of
+  the document. **Not found at all -- the common case, and every answer before this item existed
+  -- is not an error:** `markdown_to_xlsx()` falls straight back to item 51's own flat single
+  sheet, byte-for-byte the same as before this item.
+- `_write_inputs_sheet()` -- writes the Inputs sheet (one editable row per parameter) and returns
+  the `name -> "Inputs!$B$n"` map every formula cell is compiled against. Matched on both the
+  model's own Name text and a slugged version of it, since a free-text contract like this one can
+  expect the model to be slightly inconsistent between the INPUTS table and a formula cell that
+  refers to it.
+- `_compile_cell()` -- a `={expr}` cell becomes a real formula, `{name}` tokens replaced by their
+  resolved address. **A `{name}` the INPUTS table never declared falls back to the plain literal
+  text, never a formula** -- a workbook that is honestly static where the model didn't follow the
+  contract beats a cell silently showing Excel's `#NAME?` with nothing explaining why.
+- `_write_blocks_to_sheet()` -- the refactored body both the flat and live shapes share; for the
+  live shape it also tracks, per table, which column ended up numeric/formula in EVERY data row
+  (picked by column, rightmost wins when more than one qualifies -- not pattern-matched from the
+  header's own wording, which this add-on's real files spell a dozen different ways: "Kg", "Gross
+  wt (kg)", "Amount"...).
+- `_write_summary_sheet()` -- one row per BOQ section, a real `=SUM(BOQ!...)` of that section's own
+  detected amount column, plus a grand total that SUMs the Summary sheet's own Total column --
+  edit one Inputs value and BOTH the BOQ sheet's formulas AND this sheet's own totals recalculate,
+  because every number past the Inputs sheet is a real Excel formula, not a Python-computed
+  literal. Sheet order (`Summary, Inputs, BOQ`) matches the owner's own claude.ai comparison file.
+
+**Fix, `addons/boq/dialog.py`:** `_format_request_line()` only asks the model for this shape when
+it will actually be used -- xlsx chosen in the format picker AND the current writer is a Prism
+Agent (OpenRouter). A browser-driven agent (plain "Claude", "ChatGPT"...) already has its own
+native xlsx export -- the owner's own claude.ai comparison file was made exactly that way, no
+special prompting at all -- so asking it for this structured shape would be a non-sequitur the
+same way item 41's "you are not attaching a file yourself" instruction already is scoped away from
+stages that don't need it.
+
+**Verified for real, not just by the unit tests:** built a synthetic LN2-rack-shaped answer (an
+INPUTS table, two BOQ sections, formula cells referencing multiple inputs each, one nested
+expression) through `write_file(..., "xlsx", ...)`, then read the saved file back with `openpyxl`
+-- every formula cell compiled to the correct `Inputs!$B$n` address (confirmed against the actual
+row each input landed on, not assumed), the Summary sheet's `SUM` ranges matched the real data-row
+span of each section, and the "B. Bought-out" section correctly picked its own Qty column as the
+amount column (its only other numeric-shaped column, Unit, is text). Quick Look's own spreadsheet
+preview does not evaluate formulas (shows blank, not the computed figure) -- not a defect in this
+item, confirmed by reading the saved file's actual formula strings and cell layout directly rather
+than trusting that preview.
+
+**Tested:** `tests/test_boq_openrouter_writer.py`'s new
+`MarkdownToXlsxBuildsALiveWorkbookWhenTheModelProvidesOne` class -- three sheets in claude.ai's own
+order, a formula cell compiles to a real cross-sheet reference, an undeclared `{name}` falls back
+to plain text rather than a broken formula, the Summary sheet's `SUM` ranges are correct, and no
+INPUTS table at all stays item 51's own flat single sheet. `tests/test_boq_dialog.py`'s new
+`TheLiveWorkbookInstructionIsScopedToXlsxAndAPrismAgent` class -- xlsx + a Prism Agent asks for it,
+xlsx + a browser agent does not, docx + a Prism Agent does not either. 37 tests in
+`test_boq_openrouter_writer.py` pass, 154 in `test_boq_dialog.py`.
+
+## 57. The live workbook had the right formulas but looked nothing like claude.ai's own file
+
+The owner put the two files side by side: "look how clean the claude one looks, and look how our
+looks." Item 52's own structure already matched -- same three sheets, same sheet order, real
+cross-sheet formulas -- but every cell in Prism's own version was still plain black-on-white, no
+border, no header contrast, raw decimals with no thousands separator. claude.ai's file, by
+contrast, has a dark navy header bar with white bold text, light section-row fills, a visibly
+different blue tint on the editable Inputs cells, and comma-grouped numbers throughout.
+
+**Fix, `addons/boq/openrouter_writer.py`:** `_write_blocks_to_sheet()` (the BOQ sheet, shared by
+both the live and item 51's own flat fallback shape), `_write_inputs_sheet()` and
+`_write_summary_sheet()` now apply the SAME palette `prism_terminal/core/boq_price.py`'s own
+`write_boq_xlsx()` already uses for the deterministic priced BOQ -- navy (`#1F2A44`) header fill
+with white bold text, a light section-row fill, a grand-total fill, thin grey borders on every
+cell, and Indian-grouped number formatting (`#,##,##0.00`) on every numeric/formula cell. The
+colours are copied as this module's own constants (`_XLSX_INK`/`_XLSX_HEAD_FILL`/etc.), not
+imported from `boq_price.py` -- those are that module's own private strings, and this module stays
+on the app side of `core_bridge`'s own boundary (rule 3: only `core_bridge` imports the engine).
+The Inputs sheet's own Value column also gets a blue-on-light-blue tint -- the same "blue is
+editable, black is a formula" convention claude.ai's own file already uses, so typing over a number
+there reads as something the sheet invites, not something that might break it. Both sheets also get
+`freeze_panes` on their own header row.
+
+Since `_write_blocks_to_sheet()` is the one function BOTH the live-workbook BOQ sheet and item 51's
+own no-Inputs flat fallback sheet already share, the flat sheet gets the identical styling for
+free -- nothing extra to write for that path.
+
+**Verified by actually rendering a real regenerated file and reading its own cell attributes
+back**, not assumed from the code: rebuilt the exact LN2 rack answer (`~/.prism/runs/
+run_1793738787.json`'s own saved text) with the new styling, confirmed via `openpyxl` that the real
+table header row (`A11:I11` on the BOQ sheet) has `bold=True`, white font, `#1F2A44` fill and a
+border on every cell, every formula/numeric data cell has `#,##,##0.00` set, and the Summary/Inputs
+sheets' own header rows match. (macOS Quick Look's own `.xlsx` thumbnailer renders a small sheet at
+an unreadable zoom regardless of styling -- a pre-existing renderer quirk, not something this item
+introduced or could fix; the real cell attributes were read directly rather than trusted from that
+preview.)
+
+**Tested:** `tests/test_boq_openrouter_writer.py` and `tests/test_boq_dialog.py`'s existing 192
+tests all still pass unchanged -- this item is styling only, no cell VALUE, formula or sheet-
+structure assertion needed to change.
+
+## 58. The Summary sheet's "Grand total" silently added area, weight and an already-summed total together
+
+Found live on a real test run (the SS Rack / "SS Locker" job, `D2_kjpharmatech.pdf` against
+`D2_sampleBOQ.xlsx`'s own reference): the owner opened the real file in Excel and asked "where is
+the total weight written?" The "Grand total" cell read **555.779504** -- a number with no
+real-world meaning. Traced to the model's own table, headed `Qty/Length/Area/Weight`: one column
+carrying an area-in-m² row ("Back panel") directly above a weight-in-kg row ("Back panel -
+weight"), repeated down the table, with the model's own running total ("Total sheet metal weight",
+already the sum of every weight row above it) as the table's last row. `=SUM(BOQ!D4:D22)` added
+every area, every weight AND the pre-summed total together -- m² + kg + (a number already counting
+some of those kg values) -- confirmed by hand (555.78) and confirmed again inside Excel itself
+(the owner's own paste: same figure, computed live). The real, usable number (sheet metal weight
+alone, 266.77 kg -- close to the reference's 256.2 kg) was sitting one row above, correct and
+unused.
+
+**Fix, `addons/boq/openrouter_writer.py`'s `_write_blocks_to_sheet()`, two guards:**
+- A column is now disqualified from "amount column" candidacy OUTRIGHT, before a single row is
+  read, when its own header names 2 or more distinct measures at once (`qty`, `length`, `width`,
+  `area`, `weight`, `wt`, `amount` -- `Qty/Length/Area/Weight` matches 4 of these). No single sum
+  across a column like that can ever mean anything -- the units themselves disagree row to row.
+- The first row within a table whose own description matches `\btotal\b` now ends the SUM range
+  right before it, for every table, not only one with a mixed-unit column -- a row that is itself
+  a running total must never be folded into a further sum above it, which would double (here,
+  triple) count. The total row is still written to the sheet exactly where the model put it; it is
+  only ever excluded from being summed again.
+
+**Verified against the real file**, not a synthetic example: reconstructed the exact failing table
+(same headers, same mixed Area/Weight column, same trailing "Total sheet metal weight" row) from
+the owner's own saved `.xlsx`, ran it back through the fixed `markdown_to_xlsx()`, and confirmed the
+Summary sheet now shows no total for that section at all -- honestly nothing, rather than a wrong
+number that looks like something.
+
+**Tested:** `tests/test_boq_openrouter_writer.py`'s new
+`test_a_column_naming_two_different_measures_is_never_summed` (the exact real shape, header-level
+disqualification) and `test_a_trailing_total_row_is_never_folded_into_a_further_sum` (a clean
+single-unit table, proving the SUM range correctly stops one row short of an internal "Total ..."
+line, not that the whole section goes empty). 40 tests in `test_boq_openrouter_writer.py` pass, 192
+across both files.
+
+## 59. Sections didn't read as one topic, and TO CONFIRM looked like ordinary text
+
+The owner's own words, straight after item 58's fix: "all the reference and everything important
+should be highlighted, all the sections in the BOQ should look like a single TOPIC that draws the
+user attention." Two real gaps, both still true even after item 57's own styling pass:
+
+- A section heading (`## BOQ – SHS Tubes...`) was one bold navy cell sitting alone in column A,
+  with the rest of its own row plain white -- nothing told the eye "everything below this line,
+  across the whole table, is one topic" the way a real section divider does.
+- A `TO CONFIRM` line -- the model's own, consistently-used way of saying "I did not invent this
+  number, you must supply it" (every real BOQ this add-on has produced over the last two sessions
+  uses this exact convention) -- sat in the identical plain black text as the paragraph next to it.
+  The single most consequence-bearing sentence in the document read exactly like filler.
+
+**Fix, `addons/boq/openrouter_writer.py`'s `_write_blocks_to_sheet()`/`_write_inputs_sheet()`:**
+- `_section_span()` looks ahead from a heading to the next heading (or the end of the document) and
+  finds the widest table in between. The heading's own row is then merged across that full width
+  and filled with the section colour (`_XLSX_SECTION_FILL`) -- a real divider band, not a label.
+  The document's own opening title (nothing tabular follows it before the next heading) is left as
+  a plain single-cell title line -- nothing to merge across, and a title does not need a band.
+- Any text matching `TO CONFIRM` (case-insensitive, tolerant of a stray space) now gets a bold,
+  dark-red-on-pink warning treatment (`_XLSX_WARN_FILL`/`_XLSX_WARN_INK`, the same palette
+  `core.boq_price.py` already uses for an unpriced line) wherever it appears: a standalone
+  paragraph or bullet, a table data cell, an Inputs sheet Value cell (bold fill -- this is the one
+  that actually blocks a formula downstream), and an Inputs Note cell (colour only, since the
+  Value cell beside it already carries the fill).
+
+**Verified by actually rendering the real SS Rack table** (reconstructed from the owner's own saved
+`.xlsx`) and reading the cell/merge attributes back: the section heading row is genuinely merged
+(`A1:E1`) and filled; an Inputs row whose Value is literally `TO CONFIRM` (pipe wall thickness, a
+lock count) carries the warning fill; a Note cell that only mentions `TO CONFIRM` in passing gets
+the warning text colour without the fill, so the ONE cell that actually blocks a formula still
+reads as more urgent than a cell that merely refers to one.
+
+**Tested:** `tests/test_boq_openrouter_writer.py`'s new
+`MarkdownToXlsxDrawsAttentionToSectionsAndToConfirmLines` class -- a heading merges across its own
+table's width with the section fill; the document's own title (nothing tabular under it) is never
+merged; a TO CONFIRM paragraph, a TO CONFIRM table cell, and an ordinary line are each checked for
+exactly the fill they should (or should not) have. 45 tests in `test_boq_openrouter_writer.py`
+pass, 199 across both files.
+
+## 60. Asked for the richer BOM shape a real estimator's own file has
+
+The owner compared a Prism BOQ against `D2_sampleBOQ.xlsx` -- a real hand-built BOM for the same
+SS Rack job -- and asked "can we make such detailed BOQ as like the claude made?" The reference's
+own BOM table has FIFTEEN columns: separate Finished L/W (as-designed) from Cut L/W (with the
+bend/scrap allowance applied), separate per-piece weight from total weight, and a dedicated RAW
+MATERIAL REQUIREMENT section grouping net/gross weight by material type for procurement --
+nothing Prism's own xlsx prompt (item 52) was asking for; it only asked for live formulas, not
+this shape.
+
+**Fix, `addons/boq/dialog.py`'s `_format_request_line()`:** the xlsx/Prism-Agent instruction now
+also asks for separate Finished/Cut columns, separate per-piece/total weight columns, an explicit
+rule against ever combining two measures in one header (also item 58's own root cause, named here
+as a bad example so fewer answers reach that shape at all), and a closing `## RAW MATERIAL
+REQUIREMENT` section grouped by material.
+
+**Verified for real against the SS Rack job:** re-ran the identical PDF through the real API with
+the enriched prompt. The answer came back with genuine Finished/Cut columns (no more merged
+"Qty/Length/Area/Weight"), a real RAW MATERIAL REQUIREMENT section, and -- unprompted -- every
+single Input resolved to a real number instead of blocking text. Computed net raw material weight:
+**322.97 kg** against the reference's own **328.96 kg** -- under 2% apart, on a real client job.
+
+**Tested:** `tests/test_boq_dialog.py`'s new
+`test_xlsx_plus_a_prism_agent_also_asks_for_finished_vs_cut_and_a_procurement_summary`. 200 tests
+pass across both files.
+
+## 61. Two more faults the richer BOM shape (item 60) itself surfaced
+
+Verifying item 60's real run caught two further issues, both now fixed:
+
+**The Grand Total double-counted the new Raw Material Requirement section.** It is a re-grouping of
+weight the Fabricated Items section already counts, by material type, for ordering -- not an
+additional quantity -- so `Grand Total = SUM(every section)` added the same material twice. No
+generic rule can tell which EARLIER sections a recap section restates without understanding what
+each one actually contains (here, Hardware is genuinely additional; Fabricated Items is not), so
+guessing which to exclude risks a different wrong number. Fix, `_write_summary_sheet()`: the Grand
+Total abstains entirely whenever any section's own heading reads as a recap ("raw material
+requirement", "material summary", "procurement summary" -- `_XLSX_RECAP_HEADING`), and says why,
+naming the section whose own total is the one to read. Every section's own total, recap included,
+stays correct and visible either way.
+
+**A bare `{name}` token (no leading `=`) stayed literal text.** The Hardware section's own Qty
+cells read `{number_of_handles}`, `{legs_count}`... -- the model's clear intent to reference an
+Input, just missing the `=` the contract asks for. Excel showed the literal curly braces, not the
+number. Fix, `_compile_cell()`: a cell that is NOTHING BUT one declared token now resolves the
+same with or without the `=` -- scoped narrowly (`_BARE_TOKEN`) to the one unambiguous case; a
+token mixed into other text still needs its own explicit `=`, same as before.
+
+**Tested:** `tests/test_boq_openrouter_writer.py`'s new
+`test_a_raw_material_requirement_section_disables_the_grand_total` (each section's own total stays
+correct; the Grand Total is replaced by a named explanation) and
+`test_a_bare_token_with_no_equals_sign_still_becomes_a_real_formula`. Both re-verified directly
+against the real SS Rack answer, not only the synthetic tests. 202 tests pass across both files.
+
+## 53. The Summary sheet summed the Item/Sr NUMBER column when a section had no real amount column
+
+Found live on the owner's own first real test of item 52, not in a unit test: a real run (PDF +
+"BOQ for Pharmatech industry. Add raw material weight in Kg. Add 100mm in length and breadth for
+scrap.", Prism Agent Deep, xlsx) produced a genuinely correct 3-sheet live workbook -- SHS unit
+weight computed from outer²-inner² cross-section × density, every tube and sheet weight a real
+cross-sheet formula, the 100mm scrap allowance correctly reaching tube lengths AND sheet panels
+(item 50 confirmed working together with item 52 for the first time on a real file). But the
+"Bought-out / Miscellaneous Items" section's weights were all honestly `TO CONFIRM` (nothing in
+the source states caster/handle/bracket weights -- correctly not guessed), which left column 1 --
+the Item/Sr NUMBER -- as the only column numeric in every data row, item 52's own amount-column
+heuristic's only candidate. The real Summary sheet showed `=SUM(BOQ!A34:A39)` next to "Column:
+Item" -- a real, computed number (21, the sum of item numbers 1-6) sitting exactly where a weight
+total belongs, worse than no total at all because it looks like one.
+
+**Fix:** `_write_blocks_to_sheet()` (openrouter_writer.py) excludes column 1 from amount-column
+candidacy outright, for any table with more than one column -- every BOQ table in this whole
+add-on starts with a serial/item number, never an amount, so a section whose only all-numeric
+column is column 1 now correctly gets no total in the Summary sheet, the same honest "nothing to
+show" item 52 already uses for a section with no numeric column at all.
+
+**Verified against the owner's own real file, not a synthetic example:** the raw answer text for
+that exact run is saved at `~/.prism/runs/run_1793738787.json` (`last_text`) -- rebuilt the xlsx
+from it with the fix applied and confirmed the Bought-out row's Column/Total cells are now both
+empty instead of `Item` / `=SUM(BOQ!A34:A39)`, while the two sections with real weight data
+(`SHS Tubes`, `SS304 Sheet Panels`) are unaffected.
+
+**Tested:** `tests/test_boq_openrouter_writer.py`'s new
+`test_a_section_with_no_real_amount_column_never_sums_the_item_number`, reproducing the exact
+shape (an Item/Sr column plus a weight column that is `TO CONFIRM` on every row). 38 tests in
+`test_boq_openrouter_writer.py` pass.

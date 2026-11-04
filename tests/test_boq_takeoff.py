@@ -120,6 +120,93 @@ class TheAllIgnoreLayerMapIsCaughtBeforeExtracting(unittest.TestCase):
         self.assertFalse(q.called)
 
 
+def _dialog_with_key(role: str = "supply", api_key: str = "sk-or-x") -> T.IndustryTakeoffDialog:
+    d = T.IndustryTakeoffDialog("HVAC", cfg={"openrouter_api_key": api_key})
+    d.show()
+    d.pdf_path = "/x/fake.pdf"
+    d._fill_mapping([{"key": "k1", "color": "#000000", "linewidth": 1.0,
+                      "kind": "line", "segments": 5, "length_pt": 100.0,
+                      "pages": [0]}])
+    if role != "ignore":
+        d._role_combos[0][1].setCurrentText(role)
+    return d
+
+
+class TheAiTagRecheckRidesTheSameOcrTickNeverASecondCheckbox(unittest.TestCase):
+    """item 2 (5 Nov 2026): per the owner's own instruction, no dedicated
+    GUI space for this -- it is offered or withheld entirely through
+    whether an OpenRouter key exists and whether the existing OCR box is
+    ticked, with one extra, explicit, every-time yes (_ai_tag_consent())
+    before any drawing crop actually leaves the machine -- the same shape
+    addons/boq/dialog.py's own _drawing_consent() already uses."""
+
+    def test_no_api_key_never_asks_and_never_turns_on_ai_tags(self):
+        d = _dialog_with_key(api_key="")
+        with mock.patch.object(T.QMessageBox, "question") as q, \
+                mock.patch.object(T, "HvacTakeoffWorker", _FakeWorker):
+            d._extract()
+        self.assertFalse(q.called)
+        self.assertFalse(_FakeWorker.last.kwargs["use_ai_tags"])
+
+    def test_ocr_box_unticked_never_asks_even_with_a_key_set(self):
+        d = _dialog_with_key()
+        d.ocr_cb.setChecked(False)
+        with mock.patch.object(T.QMessageBox, "question") as q, \
+                mock.patch.object(T, "HvacTakeoffWorker", _FakeWorker):
+            d._extract()
+        self.assertFalse(q.called)
+        self.assertFalse(_FakeWorker.last.kwargs["use_ai_tags"])
+
+    def test_a_key_and_a_ticked_box_ask_once_and_a_yes_turns_it_on(self):
+        d = _dialog_with_key()
+        with mock.patch.object(T.QMessageBox, "question",
+                               return_value=QMessageBox.Yes) as q, \
+                mock.patch.object(T, "HvacTakeoffWorker", _FakeWorker):
+            d._extract()
+        self.assertEqual(q.call_count, 1)
+        self.assertTrue(_FakeWorker.last.kwargs["use_ai_tags"])
+        self.assertEqual(_FakeWorker.last.kwargs["api_key"], "sk-or-x")
+        self.assertTrue(_FakeWorker.last.kwargs["use_ocr"])   # OCR still runs either way
+
+    def test_the_consent_wording_leads_with_what_is_not_sent(self):
+        # Owner's own instruction (5 Nov 2026): say positively that the
+        # whole drawing does NOT go, rather than lead with "will be sent".
+        d = _dialog_with_key()
+        with mock.patch.object(T.QMessageBox, "question",
+                               return_value=QMessageBox.No) as q, \
+                mock.patch.object(T, "HvacTakeoffWorker", _FakeWorker):
+            d._extract()
+        message = q.call_args.args[2]
+        self.assertIn("NOT sent", message)
+        self.assertIn("as a whole", message)
+
+    def test_declining_the_consent_still_extracts_with_ocr_only(self):
+        d = _dialog_with_key()
+        with mock.patch.object(T.QMessageBox, "question",
+                               return_value=QMessageBox.No), \
+                mock.patch.object(T, "HvacTakeoffWorker", _FakeWorker):
+            _FakeWorker.last = None
+            d._extract()
+        self.assertIsNotNone(_FakeWorker.last)                # extraction still happened
+        self.assertFalse(_FakeWorker.last.kwargs["use_ai_tags"])
+        self.assertTrue(_FakeWorker.last.kwargs["use_ocr"])
+
+    def test_the_checkbox_label_never_names_the_ai_recheck_even_when_offered(self):
+        # Owner's own instruction (5 Nov 2026): no dedicated GUI space for
+        # this, not even a label word -- the AI recheck is entirely
+        # invisible until an OpenRouter key exists AND it is about to
+        # actually run, at which point _ai_tag_consent() names it plainly.
+        d = _dialog_with_key()
+        self.assertEqual(d.ocr_cb.text(), "Read text labels (OCR)")
+
+    def test_the_tooltip_names_it_only_for_an_industry_that_offers_one(self):
+        with_recheck = _dialog_with_key()
+        self.assertIn("AI-based read", with_recheck.ocr_cb.toolTip())
+
+        without_recheck = T.IndustryTakeoffDialog("General", cfg={"openrouter_api_key": "sk-or-x"})
+        self.assertEqual(without_recheck.ocr_cb.toolTip(), "")
+
+
 class ZeroDuctRunsIsLoudNotJustAnotherStatusLine(unittest.TestCase):
     def test_zero_runs_names_the_fix_and_uses_the_warn_colour(self):
         import theme
