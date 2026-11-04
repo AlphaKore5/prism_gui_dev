@@ -270,6 +270,7 @@ class TheDialogShowsTheCardOnceMeasured(unittest.TestCase):
         with mock.patch("dialogs.followup_dialog.FollowupDialog") as fake:
             fake.return_value.submitted.return_value = False
             d._on_written({"format": ["1  Brick wall  12.00  m"]}, {})
+        d._show_step(d.S_PRICE)    # prices have their own step now
         self.assertTrue(d.price_box.isVisibleTo(d))
 
     def test_a_write_up_with_nothing_back_leaves_it_hidden(self):

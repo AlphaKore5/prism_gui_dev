@@ -195,6 +195,134 @@ class TheTwoModesAreOneDialog(unittest.TestCase):
                 self.assertIsNotNone(_dialog(key))
 
 
+class TheBoqIsFourStepsAndTheOnePrimaryFollowsTheStep(unittest.TestCase):
+    """The dialog used to be one long column ending in "Make my BOQ". It is
+    now What you have -> Check the count -> Make the BOQ -> Add prices (a BOM
+    has no prices, so three). Nothing about measuring or writing changed; what
+    is pinned here is the order, what the one primary says on each step, and
+    that a greyed primary always says why."""
+
+    def test_a_boq_has_four_steps_and_a_bom_three(self):
+        self.assertEqual([t.text.text() for t in _dialog().tabs._tabs],
+                         ["What you have", "Check the count", "Make the BOQ",
+                          "Add prices"])
+        self.assertEqual(len(_dialog("bom").tabs._tabs), 3)
+
+    def test_step_one_is_blocked_until_there_is_something_to_make_it_from(self):
+        d = _dialog()
+        d.show()
+        self.assertEqual(d.pages.currentIndex(), 0)
+        self.assertFalse(d.run_btn.isEnabled())
+        self.assertIn("Say what the BOQ is for", d._why.text())
+        d.ask.set_text("CCTV for the site")
+        self.assertTrue(d.run_btn.isEnabled())
+        self.assertEqual(d.run_btn.text(), "Next: count it")
+
+    def test_next_walks_to_the_count_without_starting_anything(self):
+        from unittest import mock
+        d = _dialog()
+        d.show()
+        d.ask.set_text("CCTV for the site")
+        with mock.patch.object(BoqDialog, "_run") as run:
+            d.run_btn.click()
+        self.assertFalse(run.called)
+        self.assertEqual(d.pages.currentIndex(), d.S_COUNT)
+        self.assertEqual(d.run_btn.text(), "Next: make the BOQ")
+
+    def test_next_on_the_count_step_makes_the_document_and_shows_it(self):
+        from unittest import mock
+        d = _dialog()
+        d.show()
+        d.ask.set_text("CCTV for the site")
+        d._show_step(d.S_COUNT)
+        with mock.patch.object(BoqDialog, "_run", return_value=True) as run:
+            d.run_btn.click()
+        self.assertTrue(run.called)
+        self.assertEqual(d.pages.currentIndex(), d.S_MAKE)
+
+    def test_a_run_that_refuses_to_start_keeps_you_on_the_count_step(self):
+        from unittest import mock
+        d = _dialog()
+        d.show()
+        d.ask.set_text("CCTV for the site")
+        d._show_step(d.S_COUNT)
+        with mock.patch.object(BoqDialog, "_run", return_value=False):
+            d.run_btn.click()
+        self.assertEqual(d.pages.currentIndex(), d.S_COUNT)
+
+    def test_run_itself_reports_whether_it_started(self):
+        from unittest import mock
+        from PySide6.QtWidgets import QMessageBox
+        d = _dialog()
+        with mock.patch.object(QMessageBox, "information"):
+            self.assertFalse(d._run())            # nothing typed, nothing attached
+
+    def test_the_make_step_waits_for_a_document_and_says_so(self):
+        d = _dialog()
+        d.show()
+        d._show_step(d.S_MAKE)
+        self.assertFalse(d.run_btn.isEnabled())
+        self.assertIn("appears here when it is ready", d._why.text())
+        d.result.setPlainText("Item, Qty")
+        d._refresh_primary()
+        self.assertTrue(d.run_btn.isEnabled())
+        self.assertEqual(d.run_btn.text(), "Next: add prices")
+
+    def test_the_last_step_finishes_by_closing(self):
+        d = _dialog()
+        d.show()
+        d._show_step(d.S_PRICE)
+        self.assertEqual(d.run_btn.text(), "Finish")
+        d.run_btn.click()
+        self.assertFalse(d.isVisible())
+
+    def test_a_bom_finishes_on_its_make_step(self):
+        d = _dialog("bom")
+        d.show()
+        d._show_step(2)
+        d.result.setPlainText("Part, Qty")
+        d._refresh_primary()
+        self.assertEqual(d.run_btn.text(), "Finish")
+
+    def test_the_count_page_says_so_when_there_is_nothing_to_count(self):
+        d = _dialog()
+        d.show()
+        d._show_step(d.S_COUNT)
+        self.assertTrue(d.count_hint.isVisibleTo(d))
+
+    def test_prices_say_what_they_are_for_until_a_boq_exists(self):
+        d = _dialog()
+        d.show()
+        d._show_step(d.S_PRICE)
+        self.assertTrue(d.price_hint.isVisibleTo(d))
+        self.assertFalse(d.price_box.isVisibleTo(d))
+
+    def test_back_goes_one_step_and_is_hidden_on_the_first(self):
+        d = _dialog()
+        d.show()
+        self.assertFalse(d.back_btn.isVisibleTo(d))
+        d._show_step(2)
+        d.back_btn.click()
+        self.assertEqual(d.pages.currentIndex(), 1)
+
+    def test_opening_a_past_job_lands_on_the_document(self):
+        from unittest import mock
+        d = _dialog()
+        d.show()
+        with mock.patch.object(BoqDialog, "_offer_followup"):
+            d._resume_from_history({"last_text": "Item, Qty", "request": "x",
+                                    "query": "x", "_path": ""})
+        self.assertEqual(d.pages.currentIndex(), d.S_MAKE)
+
+    def test_the_experts_box_holds_who_writes_and_researches(self):
+        d = _dialog()
+        d.show()
+        self.assertFalse(d.writer_combo.isVisibleTo(d))     # shut by default
+        d.more.toggle.click()
+        self.assertTrue(d.writer_combo.isVisibleTo(d))
+        self.assertTrue(d.industry_combo.isVisibleTo(d))    # industry never hidden
+
+
 if __name__ == "__main__":
     unittest.main()
 
@@ -1380,6 +1508,7 @@ class TheMeasurementIsATable(unittest.TestCase):
             d._on_measured(self.Q, ["a note"])
         self.assertEqual(len(d.meas_table.rows()), 5)
         self.assertIn("LENGTHS BY LAYER", d.summary)     # the AI's text, intact
+        d._show_step(d.S_COUNT)    # the count lives on step 2 now
         self.assertTrue(d.meas_box.isVisibleTo(d))
 
 
@@ -1760,6 +1889,7 @@ class ExternalMeasurementsAreASecondWayIn(unittest.TestCase):
         self.assertEqual(d.q, {"external": True,
                                "text": "DUCT SUMMARY\n  supply 20x30 38.8m\n"})
         self.assertEqual(d.summary, "DUCT SUMMARY\n  supply 20x30 38.8m\n")
+        d._show_step(d.S_COUNT)    # the count lives on step 2 now
         self.assertTrue(d.ext_meas_box.isVisibleTo(d))
         self.assertEqual(d.ext_meas_view.toPlainText(), d.summary)
 
@@ -1813,6 +1943,7 @@ class ExternalMeasurementsAreASecondWayIn(unittest.TestCase):
         with mock.patch.object(CB.config, "RUNS_DIR", tempfile.mkdtemp()), \
                 mock.patch.object(CB.config, "save_artifact"):
             d._use_external_measurements("text")
+        d._show_step(d.S_COUNT)    # the count lives on step 2 now
         self.assertTrue(d.ext_meas_box.isVisibleTo(d))
         d.cad_path = "/x/site.dxf"
         with mock.patch.object(CB.config, "RUNS_DIR", tempfile.mkdtemp()), \
