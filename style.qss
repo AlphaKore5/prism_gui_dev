@@ -1187,8 +1187,8 @@ QListWidget::item:selected {
 
 #pageTitle {
     font-family: "Geist";
-    font-size: 26px;
-    font-weight: 600;
+    font-size: 30px;
+    font-weight: 400;
     color: #111110;
     background: transparent;
 }

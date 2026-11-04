@@ -1195,6 +1195,10 @@ class PageHeader(QFrame):
     and one or two secondary ones. Exactly one primary per surface.
     """
 
+    _INSET = theme.PAGE_PAD   # card edge lines up with the content cards below
+    _INSET_TOP = 12
+    _INSET_BOTTOM = 4
+
     def __init__(self, title: str, subtitle: str = "", actions: list = None,
                  parent=None):
         super().__init__(parent)
@@ -1203,8 +1207,11 @@ class PageHeader(QFrame):
         self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
 
         row = QHBoxLayout(self)
-        row.setContentsMargins(theme.PAGE_PAD, theme.SPACE_4,
-                               theme.PAGE_PAD, theme.SPACE_4)
+        # The band is a white rounded card floating on the stone page (the
+        # AlphaKore preview's .phead): inset so the card edge clears the page
+        # sides, with the text padded inside it.
+        row.setContentsMargins(self._INSET + 24, self._INSET_TOP + theme.SPACE_4,
+                               self._INSET + 16, self._INSET_BOTTOM + theme.SPACE_4)
         row.setSpacing(theme.SPACE_4)
 
         col = QVBoxLayout()
@@ -1245,8 +1252,11 @@ class PageHeader(QFrame):
         r = QRectF(self.rect())
 
         if not has_wallpaper(self):
+            card = r.adjusted(self._INSET, self._INSET_TOP, -self._INSET,
+                              -self._INSET_BOTTOM)
+            painter.setBrush(QColor(theme.CARD))
             painter.setPen(QPen(QColor(theme.HAIRLINE), 1))
-            painter.drawLine(QPointF(r.left(), r.bottom() - 0.5), QPointF(r.right(), r.bottom() - 0.5))
+            painter.drawRoundedRect(card.adjusted(0.5, 0.5, -0.5, -0.5), 16, 16)
             return
 
         central = self.window().findChild(QWidget, "central")
