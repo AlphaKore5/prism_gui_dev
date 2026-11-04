@@ -384,3 +384,43 @@ def test_on_a_server_without_the_team_inbox_the_plain_inbox_still_works(calls, m
     page.activate()
     pick(page, "Asha Patel")
     assert page.bar.isHidden() and page._bar_ok is False and page.thread._bubbles
+
+
+# ── the thread and the message bar ───────────────────────────────────────────
+
+def test_a_sent_template_reads_as_a_template_not_as_stored_text():
+    from addons.whatsapp.thread import Bubble
+    from PySide6.QtWidgets import QLabel
+    b = Bubble({"direction": "out", "text": "[template] order_ready_test", "created_at": "2026-11-03T12:09:00+0530", "status": "read"}, tail=True)
+    assert b.body.text() == "Order ready test" and b.body.toolTip() == "[template] order_ready_test"
+    assert "TEMPLATE MESSAGE" in {l.text() for l in b.findChildren(QLabel)}
+    plain = Bubble({"direction": "in", "text": "Hello there", "created_at": "2026-11-03T12:09:00+0530"}, tail=True)
+    assert plain.body.text() == "Hello there" and "TEMPLATE MESSAGE" not in {l.text() for l in plain.findChildren(QLabel)}
+
+
+def test_the_thread_cannot_be_dragged_sideways():
+    from addons.whatsapp.thread import MessageThread
+    t = MessageThread()
+    bar = t.horizontalScrollBar()
+    bar.setRange(0, 60)
+    bar.setValue(30)
+    assert bar.value() == 0
+
+
+def test_the_message_bar_grows_to_show_a_long_placeholder_on_a_narrow_window():
+    from addons.whatsapp.thread import Composer
+    wide, narrow = Composer(), Composer()
+    for c, w in ((wide, 900), (narrow, 280)):
+        c.set_active(False, "Window closed — send a template to reach them")
+        c.resize(w, c.height())
+        c.show()
+    assert narrow.height() > wide.height() >= Composer.MIN_H
+
+
+def test_one_line_in_the_message_bar_sits_in_the_middle_with_no_stray_scroll_bar():
+    from addons.whatsapp.thread import Composer
+    c = Composer()
+    c.resize(700, c.height())
+    c.show()
+    assert c.height() == Composer.MIN_H
+    assert not c.edit.verticalScrollBar().isVisible()

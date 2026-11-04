@@ -437,6 +437,7 @@ class AgentsSection(QWidget):
 
     def _opened(self, reply: dict):
         if self.editor is not None:
+            self.editor.hide()
             self.editor.setParent(None)
             self.editor.deleteLater()
         self.editor = AgentEditor(self, dict(reply.get("agent") or {}))

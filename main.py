@@ -423,6 +423,10 @@ def main():
     # not only seven — see theme.apply_palette.
     theme.apply_palette(app)
 
+    # The wheel scrolls the page, never the drop-down under the pointer.
+    from widgets import wheel_guard
+    wheel_guard.install(app)
+
     # Before the first widget exists, and before the licence gate — that
     # dialog is the very first thing a new customer sees, and it is the one
     # screen they cannot skip. Also before the stylesheet, which both of

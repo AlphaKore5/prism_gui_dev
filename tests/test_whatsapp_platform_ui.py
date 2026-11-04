@@ -225,6 +225,9 @@ def test_submit_stays_off_until_there_is_a_name_and_a_message(editor):
 
 
 def test_meta_rules_are_checked_and_block_submit(editor, calls):
+    # Typing "Bad Name" is now cleaned to "bad_name" in the field (test_whatsapp_templates_ui), so the service's name rule can only be met
+    # by a name that arrives some other way, such as one already on file in a resubmit. Read-only is how the editor holds such a name.
+    editor.name_edit.setReadOnly(True)
     editor.name_edit.setText("Bad Name")
     editor.body_edit.setPlainText("{{1}} is here for you")
     editor._lint()

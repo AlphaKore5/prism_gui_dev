@@ -488,7 +488,7 @@ class InboxPage(QWidget):
         who = row.get("contact_name") or row.get("contact_phone") or i18n.t("Unknown")
         self._set_head(row, who)
         self.banner.hide()
-        self.composer.set_active(True, i18n.t("Type a message — Enter to send, Shift+Enter for a new line"))
+        self.composer.set_active(True, i18n.t("Type a message"))
         self.thread.show_note(i18n.t("Loading…"))
         self.profile.load(row.get("contact_id"), self._contact_row())
         self.quick.contact_id = row.get("contact_id") or ""
@@ -552,7 +552,7 @@ class InboxPage(QWidget):
             self.composer.set_active(False, i18n.t("Window closed — send a template to reach them"))
         else:
             self.banner.hide()
-            self.composer.set_active(True, i18n.t("Type a message — Enter to send, Shift+Enter for a new line"))
+            self.composer.set_active(True, i18n.t("Type a message"))
 
     # ── sending ──────────────────────────────────────────────────────────────
     def _send(self, text: str, bubble=None):

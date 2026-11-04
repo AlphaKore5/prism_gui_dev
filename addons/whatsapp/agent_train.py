@@ -31,6 +31,7 @@ class TrainPanel(QWidget):
         self.chat = QVBoxLayout()
         self.chat.setSpacing(theme.SPACE_1)
         col.addLayout(self.chat)
+        col.addStretch(1)                       # the spare height goes here, not into the bubbles above it, which stay as tall as their words
         self.note = ui.note()
         col.addWidget(self.note)
         row = QHBoxLayout()
