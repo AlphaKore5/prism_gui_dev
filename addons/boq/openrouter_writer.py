@@ -908,10 +908,9 @@ def markdown_to_pdf(text: str, path: str) -> str:
             "Exporting a PDF needs the bundled browser engine "
             "(Playwright/Chromium), which isn't available here. DOCX and "
             "CSV still work without it.") from e
-    from core import browser
     os.makedirs(os.path.dirname(os.path.abspath(path)) or ".", exist_ok=True)
     with sync_playwright() as pw:
-        b = browser.launch_chromium(
+        b = CB.browser.launch_chromium(
             pw, args=["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"])
         try:
             page = b.new_page()

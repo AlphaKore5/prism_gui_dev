@@ -138,6 +138,7 @@ from core import files as files            # noqa: E402
 from core import voice as voice            # noqa: E402
 from core import mailer as mailer          # noqa: E402
 from core import skills as skills          # noqa: E402
+from core import browser as browser        # noqa: E402  (addons/boq's own PDF export, Prism Studio)
 
 
 def resolved_agents(chosen: dict) -> list[tuple[str, str]]:

@@ -112,9 +112,17 @@ class EnsureBundledDwg2dxfInstallsIntoTheToolsDir(unittest.TestCase):
                           "the source offer doc has no business next to a "
                           "binary find_dwg_converter() might return as THE "
                           "converter path")
-        mode = os.stat(dst_exe).st_mode
-        self.assertTrue(mode & 0o100, "the copied exe must be executable "
-                         "even if PyInstaller's datas dropped the +x bit")
+        # Unix-only check: this test always mocks the TARGET as macOS (see
+        # setUp), but os.chmod/os.stat still go through the REAL host OS --
+        # found on a real Windows CI runner, 1.7.0: Windows has no owner-
+        # execute permission bit to set in the first place (a .exe there
+        # runs regardless of chmod), so os.chmod(dst_exe, 0o755) is a no-op
+        # and this assertion is checking a concept that does not exist on
+        # that host, not a real bug a Windows customer would ever hit.
+        if os.name == "posix":
+            mode = os.stat(dst_exe).st_mode
+            self.assertTrue(mode & 0o100, "the copied exe must be executable "
+                             "even if PyInstaller's datas dropped the +x bit")
 
     def test_second_call_is_a_cheap_noop_not_a_recopy(self):
         boq._ensure_bundled_dwg2dxf()
