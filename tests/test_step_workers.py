@@ -12,7 +12,98 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import core_bridge as CB  # noqa: E402
 
-from addons.step.workers import StepApplyWorker  # noqa: E402
+from addons.step.workers import (StepApplyWorker, StepAskWorker,  # noqa: E402
+                                 StepPlanWorker, image_attachment)
+
+
+class AskAndPlanCallOpenRouterNeverGroq(unittest.TestCase):
+    """Groq is gone from STEP (2026-11-06): Ask and Edit's suggestion/plan
+    stages are both a direct OpenRouter call, Claude Haiku 5.5 by default
+    or Claude Sonnet 5.5, never a browser tab and never Groq's API."""
+
+    def test_ask_calls_openrouter_with_the_chosen_model_and_key(self):
+        fake_sf = mock.MagicMock()
+        fake_sf.ask_prompt.return_value = "PROMPT"
+        cfg = {"openrouter_api_key": "sk-or-test"}
+        with mock.patch.object(CB, "get_stepfile", return_value=fake_sf), \
+                mock.patch.object(CB.openrouter, "openrouter_chat",
+                                  return_value=" answer ") as chat:
+            worker = StepAskWorker(cfg, {"file": "a.step"}, "q?",
+                                   model="anthropic/claude-sonnet-5.5")
+            done = []
+            worker.done.connect(done.append)
+            worker.run()
+        chat.assert_called_once()
+        args, kwargs = chat.call_args
+        self.assertEqual(args[0], "sk-or-test")
+        self.assertEqual(args[1], "anthropic/claude-sonnet-5.5")
+        self.assertEqual(args[2], "PROMPT")
+        self.assertEqual(kwargs["attachments"], [])
+        self.assertEqual(done, ["answer"])
+
+    def test_ask_defaults_to_haiku(self):
+        fake_sf = mock.MagicMock()
+        fake_sf.ask_prompt.return_value = "PROMPT"
+        with mock.patch.object(CB, "get_stepfile", return_value=fake_sf), \
+                mock.patch.object(CB.openrouter, "openrouter_chat",
+                                  return_value="a") as chat:
+            StepAskWorker({}, {"file": "a.step"}, "q?").run()
+        self.assertEqual(chat.call_args[0][1], "anthropic/claude-haiku-5.5")
+
+    def test_ask_attaches_the_rendered_picture_only_when_given_one(self):
+        fake_sf = mock.MagicMock()
+        fake_sf.ask_prompt.return_value = "PROMPT"
+        pic = {"kind": "image", "mime": "image/png", "b64": "x", "name": "s.png"}
+        with mock.patch.object(CB, "get_stepfile", return_value=fake_sf), \
+                mock.patch.object(CB.openrouter, "openrouter_chat",
+                                  return_value="a") as chat:
+            StepAskWorker({"openrouter_api_key": "k"}, {"file": "a.step"},
+                         "q?", attachments=[pic]).run()
+        self.assertEqual(chat.call_args.kwargs["attachments"], [pic])
+
+    def test_plan_calls_openrouter_with_the_chosen_model(self):
+        fake_sf = mock.MagicMock()
+        fake_sf.plan_prompt.return_value = "PLAN PROMPT"
+        with mock.patch.object(CB, "get_stepfile", return_value=fake_sf), \
+                mock.patch.object(CB.openrouter, "openrouter_chat",
+                                  return_value='{"changes": []}') as chat:
+            worker = StepPlanWorker(
+                {"openrouter_api_key": "k"}, {"file": "a.step"}, "q?",
+                "advice", model="anthropic/claude-sonnet-5.5")
+            done = []
+            worker.done.connect(done.append)
+            worker.run()
+        self.assertEqual(chat.call_args[0][1], "anthropic/claude-sonnet-5.5")
+        self.assertEqual(done, ['{"changes": []}'])
+
+    def test_a_failed_call_reports_the_real_error_not_a_crash(self):
+        fake_sf = mock.MagicMock()
+        fake_sf.ask_prompt.return_value = "PROMPT"
+        with mock.patch.object(CB, "get_stepfile", return_value=fake_sf), \
+                mock.patch.object(CB.openrouter, "openrouter_chat",
+                                  side_effect=RuntimeError("no key set")):
+            failed = []
+            worker = StepAskWorker({}, {"file": "a.step"}, "q?")
+            worker.failed.connect(failed.append)
+            worker.run()
+        self.assertEqual(failed, ["no key set"])
+
+
+class ImageAttachmentReadsPrismsOwnRenderOnly(unittest.TestCase):
+    """The content block an OpenRouter vision call needs -- base64 of
+    Prism's own already-drawn PNG, never the STEP file."""
+
+    def test_builds_the_content_block_shape(self):
+        import tempfile
+        path = os.path.join(tempfile.mkdtemp(), "sheet.png")
+        with open(path, "wb") as f:
+            f.write(b"\x89PNGfakebytes")
+        block = image_attachment(path)
+        self.assertEqual(block["kind"], "image")
+        self.assertEqual(block["mime"], "image/png")
+        self.assertEqual(block["name"], "sheet.png")
+        import base64
+        self.assertEqual(base64.b64decode(block["b64"]), b"\x89PNGfakebytes")
 
 
 class TheBuiltFileGetsAStampedNameNotTheFlatOne(unittest.TestCase):

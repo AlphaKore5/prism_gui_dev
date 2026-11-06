@@ -158,6 +158,20 @@ class TheCustomersOwnEnclosure(unittest.TestCase):
         self.assertEqual(wb["Holes"].max_row - 1,
                          sum(len(p["holes"]) for p in self.report["parts"]))
 
+    def test_the_holes_sheet_names_the_same_tags_as_the_drawing(self):
+        import openpyxl
+        out = os.path.join(tempfile.mkdtemp(), "dimensions.xlsx")
+        SF.write_xlsx(self.report, out)
+        wb = openpyxl.load_workbook(out)
+        rows = list(wb["Holes"].iter_rows(values_only=True))
+        header = rows[0]
+        self.assertEqual(header[-1], "Tags")
+        top_13 = [r for r in rows[1:] if r[0] == "top" and r[1] == 13.0][0]
+        self.assertEqual(top_13[-1], "H3")
+        # The 18-hole vent row is one GROUP tag, not 18 repeats of it.
+        top_3 = [r for r in rows[1:] if r[0] == "top" and r[1] == 3.0][0]
+        self.assertEqual(top_3[-1], "G5")
+
     def test_the_drawing_sheet_shows_every_part(self):
         out = tempfile.mkdtemp()
         drawn = SF.render_sheet(self.report, out)
@@ -172,6 +186,120 @@ class TheCustomersOwnEnclosure(unittest.TestCase):
         # The sheet itself carries the model's name.
         self.assertEqual(os.path.basename(drawn["png"]),
                          "Assem1 - drawing sheet.png")
+
+
+REAL_CORE = sample_jobs.path("step_file_demo", "PET CORE 02 06.STEP")
+
+
+@unittest.skipUnless(HAVE and os.path.exists(REAL_CORE),
+                     "cadquery missing, or " + (sample_jobs.missing(
+                         "step_file_demo", "PET CORE 02 06.STEP") or ""))
+class TheMouldersOwnCore(unittest.TestCase):
+    """A real customer part whose Draft once read 19 holes for a part with
+    roughly 11-13: one threaded, chamfered bore's diameter bands (16.50 /
+    18.00 / 19.00 / 24.50 mm, all one axis -- fifteen of the "18.00" faces
+    are thread-crest slivers under 0.1 mm long) were each counted as their
+    own hole, AND four of its round features (Ø10.0, convex -- locating
+    pins/bosses on this mould core, not bores) were counted as holes too.
+    Pinned here, witnessed directly against this file's own faces, so that
+    regression never comes back quietly."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.report = SF.analyse(REAL_CORE, mode="metal")
+        cls.holes = cls.report["parts"][0]["holes"]
+
+    def test_the_stepped_bore_reads_as_one_hole_not_four(self):
+        dias = {h["dia_mm"] for h in self.holes}
+        self.assertNotIn(18.0, dias)
+        self.assertNotIn(19.0, dias)
+        self.assertIn(24.5, dias)
+
+    def test_a_convex_boss_is_not_read_as_a_hole(self):
+        dias = {h["dia_mm"] for h in self.holes}
+        self.assertNotIn(10.0, dias)
+
+    def test_the_hole_count_did_not_explode(self):
+        self.assertEqual(sum(h["count"] for h in self.holes), 13)  # was 19
+
+
+REAL_TEST_B = sample_jobs.path("step_file_demo", "PET_CORE_TEST_B.STEP")
+
+
+@unittest.skipUnless(HAVE and os.path.exists(REAL_TEST_B),
+                     "cadquery missing, or " + (sample_jobs.missing(
+                         "step_file_demo", "PET_CORE_TEST_B.STEP") or ""))
+class TheNamedHoleScheduleOfSampleB(unittest.TestCase):
+    """A deliberately hard feature-recognition test block (23 holes, 5
+    faces, every hole individually tagged B1-B23 with its own stages on
+    the sender's own PDF hole schedule) and 4 rounded OUTER corners
+    (R6, "4 PL.") that are not holes at all. Ground truth is that PDF's
+    own schedule, totalled by this test the same way _holes_of groups
+    them: one position per tag, at that tag's LARGEST stage diameter.
+    Before the corner-fillet fix this read as 27 holes (a phantom
+    "Ø12 x4" from the 4 corners); before the stepped-hole fix it would
+    also have split B1, B8-B11 and B15-B18's multi-stage bores apart."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.report = SF.analyse(REAL_TEST_B, mode="metal")
+        cls.holes = cls.report["parts"][0]["holes"]
+
+    def test_matches_the_senders_own_hole_schedule_exactly(self):
+        # TAG: largest Ø stage, from the PDF's own HOLE SCHEDULE table.
+        expected = {3.0: 2, 4.0: 5, 6.0: 7, 8.0: 2, 10.0: 2, 15.0: 4, 22.0: 1}
+        got = {h["dia_mm"]: h["count"] for h in self.holes}
+        self.assertEqual(got, expected)
+
+    def test_the_total_is_23_not_27(self):
+        self.assertEqual(sum(h["count"] for h in self.holes), 23)
+
+    def test_no_phantom_corner_hole(self):
+        self.assertNotIn(12.0, {h["dia_mm"] for h in self.holes})
+
+    def test_every_hole_is_individually_tagged(self):
+        named = SF._named_holes(self.report["_shapes"][0][1])
+        self.assertEqual(len(named), 23)
+        self.assertEqual([h["tag"] for h in named],
+                         [f"H{i}" for i in range(1, 24)])
+        # Every tag lands on one of the three views Prism actually draws —
+        # the one that shows that hole as a circle to point an arrow at.
+        for h in named:
+            self.assertIn(h["view"], {"FRONT VIEW", "TOP VIEW", "SIDE VIEW"})
+
+    def test_the_drawing_sheet_names_and_points_at_every_hole(self):
+        out = tempfile.mkdtemp()
+        drawn = SF.render_sheet(self.report, out)
+        self.assertGreater(os.path.getsize(drawn["png"]), 5000)
+        svg = SF.sheet_svg(self.report)
+        for tag in ("H1", "H10", "H23"):
+            self.assertIn(tag, svg)
+        # One leader-arrow colour per tagged hole, not the plain black
+        # lines the rest of the drawing uses.
+        self.assertIn("#1a5fb4", svg)
+
+    def test_asking_for_one_tagged_hole_leaves_its_six_siblings_alone(self):
+        """Ø6 has 7 real holes (H11, H14, H15, H16, H18, H19, H22) on this
+        part. Before hole-tagging, "enlarge this one" could only ever say
+        "enlarge the Ø6 holes" and grow all 7 at once. Naming H11 must
+        grow exactly that one and leave the other six Ø6 holes be."""
+        out = os.path.join(tempfile.mkdtemp(), "one-hole.step")
+        plan = {"changes": [{"op": "enlarge_hole", "part": "PET_CORE_TEST_B",
+                             "dia_mm": 6.0, "new_dia_mm": 7.0,
+                             "hole": "H11", "why": "fit a bolt"}],
+                "advice": []}
+        done = SF.apply_plan(REAL_TEST_B, plan, out)
+        self.assertTrue(any("H11" in l and "1 hole(s) enlarged" in l
+                            for l in done["log"]), done["log"])
+        after = SF.analyse(out, mode="metal")["parts"][0]["holes"]
+        by_dia = {h["dia_mm"]: h["count"] for h in after}
+        self.assertEqual(by_dia.get(6.0), 6)    # one left this group
+        self.assertEqual(by_dia.get(7.0), 1)    # ... and landed in a new one
+
+        pred = SF.predicted_parts(self.report, plan)[0]["holes"]
+        pred_by_dia = {h["dia_mm"]: h["count"] for h in pred}
+        self.assertEqual(pred_by_dia.get(6.0), 6)
+        self.assertEqual(pred_by_dia.get(7.0), 1)
 
 
 @unittest.skipUnless(HAVE and os.path.exists(REAL),
@@ -613,7 +741,7 @@ class ThePlanIsValidatedNotTrusted(unittest.TestCase):
             '"advice": ["add draft"]}\n```'])
         self.assertEqual(plan["changes"], [
             {"op": "enlarge_hole", "part": "top", "dia_mm": 5.0,
-             "new_dia_mm": 6.5, "why": "M6"}])
+             "new_dia_mm": 6.5, "hole": "", "why": "M6"}])
         self.assertEqual(plan["advice"], ["add draft"])
 
     def test_a_shrink_or_unknown_op_is_dropped(self):
@@ -644,16 +772,40 @@ class ThePromptsCarryNumbersNotTheModel(unittest.TestCase):
         _box_with_hole(cls.path)
         cls.report = SF.analyse(cls.path, mode="plastic")
 
-    def test_groq_hears_the_figures_and_the_confidentiality(self):
+    def test_the_model_hears_the_figures_and_the_confidentiality(self):
         p = SF.ask_prompt(self.report, "make it lighter")
         self.assertIn("60.00 x 40.00 x 8.00", p)
         self.assertIn("make it lighter", p)
         self.assertIn("cannot be shown to you", p)
 
+    def test_the_prompt_names_the_hole_not_just_its_size(self):
+        """Reported 2026-11-05: Ask said "19 holes" and, asked to name
+        them, could not — because the text it was given only ever had
+        "Ø19.0 x 1", nothing a model could point at. Every hole now has
+        its own tag and position in the prompt itself."""
+        p = SF.ask_prompt(self.report, "which hole is this?")
+        self.assertIn("H1", p)
+        self.assertIn("Ø5", p)
+        self.assertIn("use the tag", p)
+
+    def test_a_factual_question_is_told_to_stay_short(self):
+        """Reported live, 2026-11-06: asked plainly "how many holes are
+        there", Haiku correctly named all 23 tags, then ALSO produced an
+        unasked-for Makeability / Cost drivers / Changes report, because
+        the old prompt demanded that structure unconditionally. The
+        prompt itself must now draw the line between a factual question
+        (short) and an open-ended one (the fuller write-up)."""
+        p = SF.ask_prompt(self.report, "how many holes are there?")
+        self.assertIn("FACTUAL", p)
+        self.assertIn("OPEN-ENDED", p)
+        self.assertIn("ONE or TWO plain sentences", p)
+        self.assertIn("do not pad a simple question with a full report", p)
+
     def test_the_planner_gets_the_schema_and_the_honest_out(self):
         p = SF.plan_prompt(self.report, "q", "advice text")
         self.assertIn('"enlarge_hole"', p)
         self.assertIn('"scale"', p)
+        self.assertIn('"hole"', p)
         self.assertIn("never shrunk", p)
         self.assertIn("empty changes list", p)
 
@@ -1054,7 +1206,7 @@ class TheSheetIsDrawnByPrismNotAnAI(unittest.TestCase):
 
     def test_the_hole_table_notes_and_title_block_are_there(self):
         self.assertIn("HOLES (", self.svg)
-        self.assertIn("Ø5 x 1", self.svg)
+        self.assertIn("H1  Ø5", self.svg)
         self.assertIn("NOTES:", self.svg)
         self.assertIn("JOB NAME:", self.svg)
         self.assertIn("Bracket A.step", self.svg)

@@ -10,6 +10,34 @@ Tests: **1966 passing** (6 skipped, 8 Sep 2026 after Round 16 landed on main —
 
 ---
 
+# 1.7.0 — Live xlsx BOQ workbooks, AI-matched inquiries, HVAC AI tag re-check, DWG support (6 Nov 2026)
+
+- **BOQ xlsx workbooks are now live, formula-driven spreadsheets**, matching the
+  quality of a hand-built one: real section bands, TO CONFIRM highlighting, a
+  separate finished-vs-cut and per-piece-vs-total BOM, scrap/wastage allowance
+  on cut-length stock, and a raw-material-requirement section that no longer
+  double-counts the Grand Total.
+- **Email inquiries can now match a free-text, no-catalogue-code line against
+  your rate list via AI** (DeepSeek, through OpenRouter) — the AI only ever
+  picks a catalogue CODE; the price and description always come from your own
+  rate list, and every AI-matched row is still marked for a human to confirm.
+- **HVAC PDF takeoff reads VAV tags better**: alongside the existing local OCR,
+  an AI-based second read can run on small cropped pieces of the drawing (never
+  the whole file) to catch tags OCR missed — opt-in, rides the existing "Read
+  text labels" tick, asks before anything is sent, off entirely with no
+  OpenRouter key set. Measured live against a real drawing: VAV-box recall
+  went from OCR's own ~31% to ~87%.
+- **.dwg tender drawings** can now be read without an Autodesk licence — a
+  bundled DWG→DXF converter (macOS and Windows) runs automatically when a
+  drawing comes in as .dwg.
+- Engine (`prism_terminal`) bumped accordingly: OpenRouter calls can now cap
+  output length and turn off a "thinking" model's reasoning step (needed for
+  the HVAC AI read above — without it, one call looped for minutes or
+  returned nothing); `verify_key` now checks the key on `/key` instead of the
+  public `/models` endpoint, which answered 200 to any key.
+
+---
+
 # 1.6.13 — Dev builds keep your folders; choose where files go; Uninstall (27 Oct 2026)
 
 - **Dev builds no longer change Windows' idea of your folders.** They used to redirect the

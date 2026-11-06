@@ -1,9 +1,10 @@
 """STEP's background work, off the UI thread.
 
 Three workers because the dialog's three actions are three different kinds
-of wait: OpenCascade reading a model (seconds to a minute), one Groq call
-(seconds), and a boolean cut plus a re-measure plus a render (tens of
-seconds). Each on its own thread, each reporting in its own words.
+of wait: OpenCascade reading a model (seconds to a minute), one OpenRouter
+call to Claude Haiku 5.5 or Claude Sonnet 5.5 (seconds), and a boolean cut
+plus a re-measure plus a render (tens of seconds). Each on its own thread,
+each reporting in its own words.
 
 Every one subclasses workers._Worker -- never QThread directly -- so a
 running worker is anchored until it finishes and cannot be collected
@@ -80,51 +81,72 @@ class StepMeasureWorker(_Worker):
             self.failed.emit(str(e))
 
 
+def image_attachment(path: str) -> dict:
+    """A rendered drawing-sheet PNG -> the content-block shape
+    core.openrouter's own openrouter_chat() expects for a vision model:
+    {"kind": "image", "mime": "image/png", "b64": "...", "name": "..."}.
+    Stdlib-only (base64) on purpose -- this is Prism's OWN already-drawn
+    picture of the parts, never the STEP file, so no engine call is needed
+    to prepare it, only a file read."""
+    import base64
+    with open(path, "rb") as f:
+        data = f.read()
+    return {"kind": "image", "mime": "image/png",
+            "b64": base64.b64encode(data).decode("ascii"),
+            "name": os.path.basename(path)}
+
+
 class StepAskWorker(_Worker):
-    """One Groq call: the measured numbers and the question -- never the
-    model -- in, suggestions out."""
+    """One OpenRouter call: the measured numbers (individually tagged
+    holes) and the question -- and, only with the person's own consent
+    each session, Prism's own rendered picture of the parts -- in,
+    suggestions out. Never the STEP file itself."""
     done = Signal(str)
     failed = Signal(str)
 
-    def __init__(self, cfg: dict, report: dict, question: str):
+    def __init__(self, cfg: dict, report: dict, question: str,
+                 model: str = "anthropic/claude-haiku-5.5",
+                 attachments: list | None = None):
         super().__init__()
         self.cfg, self.report, self.question = cfg, report, question
+        self.model, self.attachments = model, list(attachments or [])
 
     def run(self):
         try:
             SF = CB.get_stepfile()
-            text = CB.router.groq_chat(
-                self.cfg.get("api_key", ""),
-                self.cfg.get("model", "llama-3.3-70b-versatile"),
+            text = CB.openrouter.openrouter_chat(
+                self.cfg.get("openrouter_api_key", ""), self.model,
                 SF.ask_prompt(self.report, self.question),
-                temperature=0.4, timeout=60).strip()
+                attachments=self.attachments,
+                temperature=0.4, timeout=90).strip()
             self.done.emit(text)
         except Exception as e:
             self.failed.emit(str(e))
 
 
 class StepPlanWorker(_Worker):
-    """One Groq call that turns an answer into an exact change plan (JSON) —
-    the same step a reasoning tool does in the browser, kept in-house when
-    Groq is the tool the person picked, so choosing Groq never opens a
-    browser."""
+    """One OpenRouter call that turns an answer into an exact change plan
+    (JSON) -- the same model the question was asked with reviews its own
+    suggestions, in-house, no browser."""
     done = Signal(str)
     failed = Signal(str)
 
     def __init__(self, cfg: dict, report: dict, question: str,
-                 suggestions: str):
+                 suggestions: str, model: str = "anthropic/claude-haiku-5.5",
+                 attachments: list | None = None):
         super().__init__()
         self.cfg, self.report = cfg, report
         self.question, self.suggestions = question, suggestions
+        self.model, self.attachments = model, list(attachments or [])
 
     def run(self):
         try:
             SF = CB.get_stepfile()
-            text = CB.router.groq_chat(
-                self.cfg.get("api_key", ""),
-                self.cfg.get("model", "llama-3.3-70b-versatile"),
+            text = CB.openrouter.openrouter_chat(
+                self.cfg.get("openrouter_api_key", ""), self.model,
                 SF.plan_prompt(self.report, self.question, self.suggestions),
-                temperature=0.2, timeout=60).strip()
+                attachments=self.attachments,
+                temperature=0.2, timeout=90).strip()
             self.done.emit(text)
         except Exception as e:
             self.failed.emit(str(e))

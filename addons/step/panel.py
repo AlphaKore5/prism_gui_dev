@@ -40,10 +40,11 @@ class StepPanel(AddonFrontDoor):
         super().build()
 
     def tool_roles(self):
-        """Mirrors StepDialog: ChatGPT draws a Draft; the reasoning tool
-        reviews the plan for Ask and Edit. Both see numbers and Prism's own
-        render only."""
-        agents = self._agents()
+        """Mirrors StepDialog: ChatGPT draws a Draft; Claude Haiku 5.5 (or
+        Claude Sonnet 5.5, if picked) answers and reviews the plan for Ask
+        and Edit, called directly with your own OpenRouter key. Every one
+        sees the measured numbers and, only with your consent each
+        session, Prism's own render — never the model."""
         return [
             ("image", "Draws the styled sheet (Draft)",
              "ChatGPT, always — its image model is the one that draws a "
@@ -51,10 +52,10 @@ class StepPanel(AddonFrontDoor):
              "the measured figures and Prism's own plain render — never "
              "the model. Prism's own dimensioned sheet is made regardless.",
              "ChatGPT"),
-            ("bulb", "Reviews the change plan (Ask, Edit)",
-             "Your Reasoning tool, falling back to Writing or Research. It "
-             "turns Groq's suggestions into the exact changes Prism can "
-             "apply, from the numbers alone.",
-             next((agents[s] for s in ("brains", "content", "research")
-                   if agents.get(s)), "")),
+            ("bulb", "Answers and reviews the plan (Ask, Edit)",
+             "Claude Haiku 5.5 by default, or Claude Sonnet 5.5 if you "
+             "pick it — called directly with your own OpenRouter key, "
+             "never a browser tab. It turns its own suggestions into the "
+             "exact changes Prism can apply, from the numbers alone.",
+             "Claude Haiku 5.5"),
         ]

@@ -483,6 +483,68 @@ def checksum(path: str) -> str:
     return out
 
 
+def _fix_macos_cv2_openssl_collision(app_bundle: str) -> None:
+    """The stdlib `_ssl` extension and cv2 (vendored for RapidOCR) both ship
+    a file literally named libssl.3.dylib/libcrypto.3.dylib. PyInstaller
+    treats same-named binaries as one file and keeps cv2's copy — found on a
+    real build, real macOS arm64 machine, 1.7.0: the packaged app crashed on
+    launch before any app code ran (_ssl's own dlopen failed, missing a
+    symbol cv2's older OpenSSL build doesn't have), a worse failure than the
+    already-known, already-accepted "RapidOCR falls back to Apple's Vision
+    framework on macOS" gap this same cv2 bundling exists for (see
+    requirements.txt's own comment on opencv-python's pin).
+
+    Tried fixing this inside packaging/prism.spec, at both of PyInstaller's
+    own TOC-building stages (Analysis's binaries= input, and a.binaries
+    after Analysis runs) — neither stuck, because the macOS BUNDLE step runs
+    AFTER both and re-derives Contents/Frameworks' symlinks from what cv2's
+    own compiled extensions still point at internally, independently of
+    whatever this file handed Analysis. So: fixed here instead, as the very
+    last step before signing, directly on the finished .app — there is
+    nothing in PyInstaller's own pipeline left to re-run after this that
+    could undo it.
+
+    cv2 is already a known non-functional dead end for RapidOCR specifically
+    on this exact platform (the Vision fallback above is why that is not a
+    regression on its own); swapping its vendored OpenSSL for the one the
+    rest of the app actually needs cannot make that any worse, and the
+    stdlib `_ssl` extension this fixes is used for every single HTTPS call
+    the whole app makes (OpenRouter, Groq, update checks, licensing — all
+    of it), not just cv2's own."""
+    if not IS_MAC:
+        return
+    import glob
+    real_lib = {}
+    for name in ("libssl.3.dylib", "libcrypto.3.dylib"):
+        found = glob.glob(f"/opt/homebrew/opt/openssl@3/lib/{name}") or \
+            glob.glob(f"/usr/local/opt/openssl@3/lib/{name}")
+        if not found:
+            print(f"!  macOS OpenSSL fix: no system {name} found — skipped "
+                 f"(a build on a machine with real Homebrew openssl@3 must "
+                 f"confirm this before release)")
+            return
+        real_lib[name] = found[0]
+    # Every hit becomes its own real copy, symlink or not -- PyInstaller's
+    # own BUNDLE step was found (same build) to leave some of its OWN
+    # symlinks broken (pointing at "cv2/.dylibs/..." when the real directory
+    # it made is "cv2/__dot__dylibs/...", its own macOS-safe rename of the
+    # leading dot), so resolving a symlink's real path first is not safe to
+    # rely on here; overwriting every location directly is.
+    fixed = 0
+    for name, src in real_lib.items():
+        for hit in glob.glob(os.path.join(app_bundle, "Contents", "**", name),
+                             recursive=True):
+            if os.path.islink(hit) or os.path.exists(hit):
+                os.remove(hit)
+            os.makedirs(os.path.dirname(hit), exist_ok=True)
+            shutil.copyfile(src, hit)
+            os.chmod(hit, 0o755)
+            fixed += 1
+    print(f"[prism] macOS OpenSSL fix: replaced {fixed} libssl/libcrypto "
+         f"location(s) with the system's own (cv2's vendored copy is older, "
+         f"missing a symbol _ssl needs)")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--clean", action="store_true", help="wipe build/ and dist/ first")
@@ -514,6 +576,12 @@ def main():
     if not os.path.exists(target):
         sys.exit(f"build produced nothing at {target}")
     print(f"\n✓ built {target}")
+
+    # Before signing — modifying a signed bundle's contents invalidates the
+    # signature, so this has to run first, not after (same ordering reason
+    # as "sign before archiving" below).
+    if args.engine == "pyinstaller":
+        _fix_macos_cv2_openssl_collision(target)
 
     # Sign BEFORE archiving. A .dmg or .zip made from an unsigned bundle has
     # to be rebuilt, and the mistake is invisible until a customer's Mac

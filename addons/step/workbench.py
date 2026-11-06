@@ -1445,7 +1445,7 @@ class Composer(QFrame):
     def _send(self):
         text = self.edit.toPlainText().strip()
         if text:
-            self.send.emit(text, self.agent.currentData() or "Groq")
+            self.send.emit(text, self.agent.currentData() or "Claude Haiku 5.5")
 
     def set_busy(self, busy: bool, note: str = ""):
         for w in (self.edit, self.agent, self.build_btn, self.send_btn):

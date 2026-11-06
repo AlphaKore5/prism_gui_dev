@@ -248,6 +248,21 @@ except Exception:                                       # not installed: source-
 from PyInstaller.utils.hooks import collect_all as _collect_all
 _cv_datas, _cv_binaries, _cv_hidden = _collect_all("cv2")
 datas += _cv_datas
+# cv2's own wheel vendors its OWN libssl.3.dylib/libcrypto.3.dylib -- found
+# building 1.7.0 on a real macOS arm64 machine: PyInstaller's binary
+# collection treats these as the SAME library (same file name) as the one
+# the stdlib `_ssl` extension is actually linked against, and keeps cv2's
+# copy. cv2's copy is missing a symbol (X509_STORE_get1_objects) `_ssl`
+# needs, so the packaged app crashed on launch -- before any app code ran,
+# worse than the known "RapidOCR unusable on macOS" gap this collect_all()
+# call exists for (core/ocr.py's Vision-framework fallback already covers
+# that; a dead app on launch is not the same class of problem). Dropped by
+# name, not platform-guarded: cv2 does not need its own copy of either on
+# any platform to do its own job here (image decode for RapidOCR), and
+# `_ssl`'s own, correctly-linked copy is left for PyInstaller's normal
+# dependency walk to bundle untouched.
+_cv_binaries = [b for b in _cv_binaries
+               if os.path.basename(b[0]) not in ("libssl.3.dylib", "libcrypto.3.dylib")]
 _extra_binaries = list(_cv_binaries)
 hiddenimports_cv2 = list(_cv_hidden)
 
@@ -546,6 +561,17 @@ a = Analysis(
     win_private_assemblies=False,
     noarchive=False,
 )
+
+# Filtering _cv_binaries above is not enough on its own, and nor is
+# filtering/re-adding to a.binaries here -- tried both on a real macOS arm64
+# build: PyInstaller's BUNDLE step (not Analysis) re-derives the Frameworks/
+# symlinks for a macOS .app from the collected binaries' OWN install names
+# (cv2's extensions still point at "cv2/.dylibs/..." internally), and
+# recreates the collision regardless of what a.binaries says by then. The
+# actual fix lives in packaging/build.py, AFTER PyInstaller is completely
+# done -- see _fix_macos_cv2_openssl_collision() there, called from main().
+# a.binaries = TOC([b for b in a.binaries
+#                   if os.path.basename(b[0]) not in ("libssl.3.dylib", "libcrypto.3.dylib")])
 
 # `playwright install chromium` (.github/workflows/build.yml) pulls in two
 # things nothing in this codebase calls: chromium-headless-shell and

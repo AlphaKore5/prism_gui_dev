@@ -51,12 +51,20 @@ class _Sig:
 def _dialog(cfg=None, root=None):
     """A dialog whose folder question is already answered — cfg carries a
     scratch step_out_dir — so no modal can open in a headless run. Every
-    test that wants the question itself clears the key on purpose."""
+    test that wants the question itself clears the key on purpose.
+
+    _vision_consent is pre-answered False for the same reason: a real
+    QMessageBox.question() call blocks forever in a headless test run
+    (the same trap as the folder question) — tests that specifically
+    exercise the consent prompt itself mock SD.QMessageBox.question and
+    reset _vision_consent to None first."""
     root = root or tempfile.mkdtemp(prefix="prism-test-step-")
     if cfg is None:
         cfg = {"agents": {"visual": "ChatGPT", "brains": "Claude"},
-               "api_key": "gsk_test", "step_out_dir": root}
-    return StepDialog(cfg, [], None)
+               "openrouter_api_key": "sk-or-test", "step_out_dir": root}
+    dlg = StepDialog(cfg, [], None)
+    dlg._vision_consent = False
+    return dlg
 
 
 def _box_step(path: str):
@@ -339,25 +347,27 @@ class AnAgentOnlyEverSeesTheNumbersAndPrismsOwnRender(unittest.TestCase):
 
     def test_the_plan_stage_gets_numbers_advice_and_the_question(self):
         # Only Edit reaches the plan stage now — Ask stops at the answer.
+        # One OpenRouter call, in-house — never a browser, never the file.
         dlg = _dialog()
         m = _fake_measured(dlg)
         dlg.ask.set_text("make it lighter")
         dlg._current = m
         dlg._action_buttons["edit"].setChecked(True)
-        with mock.patch.object(SD, "AutomationWorker", _CaptureWorker):
-            dlg._on_suggested("1) thin the wall", agent="Claude")
+        with mock.patch.object(SD, "StepPlanWorker") as planner:
+            dlg._on_suggested("1) thin the wall", agent="Claude Haiku 5.5")
         # The answer is in the chat at once — no window opened for it.
         self.assertEqual(dlg._live["answer"], "1) thin the wall")
         self.assertIs(dlg.chat_stack.currentWidget(), dlg.chat)
-        seen = _CaptureWorker.seen
-        prompt = seen["kwargs"]["custom_stages"][0][2][0]
-        self.assertEqual(seen["kwargs"]["custom_stages"][0][1], "Claude")
+        args = planner.call_args[0]
+        self.assertEqual(planner.call_args.kwargs["model"],
+                         "anthropic/claude-haiku-5.5")
+        self.assertEqual(args[2], "make it lighter")
+        self.assertEqual(args[3], "1) thin the wall")
+        prompt = SF.plan_prompt(args[1], args[2], args[3])
+        self.assertIn("60.00 x 40.00 x 8.00", prompt)
         self.assertIn("make it lighter", prompt)
         self.assertIn("thin the wall", prompt)
-        self.assertIn("60.00 x 40.00 x 8.00", prompt)
         self.assertNotIn("/secret/place", prompt)
-        for a in seen["args"][2]:
-            self.assertFalse(a["path"].lower().endswith((".step", ".stp")))
     def test_the_groq_question_carries_numbers_and_confidentiality(self):
         dlg = _dialog()
         m = _fake_measured(dlg)
@@ -461,89 +471,68 @@ class AnAgentOnlyEverSeesTheNumbersAndPrismsOwnRender(unittest.TestCase):
         self.assertFalse(dlg.plan_panel.bar.isVisibleTo(dlg.plan_panel))
         self.assertFalse(dlg._awaiting)
 
-class ChoosingAStrongerModelThanGroq(unittest.TestCase):
-    """Groq is the default, fast, in-house path (unchanged — covered
-    elsewhere). Picking ChatGPT or Claude instead routes through the same
-    background-Chrome AutomationWorker Draft/Edit's plan stage already
-    uses, with a fixed ChatGPT -> Claude fallback if the chosen one can't
-    answer. No Gemini option — see MODEL_CHOICES' own comment: it is
-    registered engine-wide as an image-only tool, so any text prompt
-    routed to it comes back as a refused image request, not an answer."""
+class ChoosingAStrongerModelThanHaiku(unittest.TestCase):
+    """Claude Haiku 5.5 is the default, fast, in-house path (2026-11-06:
+    Groq is gone, "remove groq for now instead use claude haiku and claude
+    sonnet5.5", Haiku the default). Picking Claude Sonnet 5.5 instead is
+    the SAME kind of call — a direct OpenRouter request, never a browser
+    tab — just a different, stronger, pricier model id. No fallback chain
+    between them: a failure is reported, not silently retried as a
+    different model."""
 
     def _pick(self, dlg, label_value: str):
         idx = dlg.model_combo.findData(label_value)
         self.assertGreaterEqual(idx, 0, f"{label_value} not offered")
         dlg.model_combo.setCurrentIndex(idx)
 
-    def test_a_chosen_model_builds_the_ask_stage_with_no_engine_failover(self):
+    def test_haiku_is_the_default_pick(self):
+        dlg = _dialog()
+        self.assertEqual(dlg._chosen_model(), "Claude Haiku 5.5")
+
+    def test_a_chosen_model_builds_the_ask_stage_with_its_own_id(self):
         dlg = _dialog()
         m = _fake_measured(dlg)
         dlg.ask.set_text("which material fits best?")
         dlg._current = m
-        self._pick(dlg, "Claude")
-        _CaptureWorker.seen = {}
-        with mock.patch.object(SD, "AutomationWorker", _CaptureWorker):
+        self._pick(dlg, "Claude Sonnet 5.5")
+        with mock.patch.object(SD, "StepAskWorker") as worker_cls:
             dlg._ask(m)
-        seen = _CaptureWorker.seen
-        stage_key, tool, prompts = seen["kwargs"]["custom_stages"][0]
-        self.assertEqual((stage_key, tool), ("ask", "Claude"))
-        self.assertIn("which material fits best?", prompts[0])
-        self.assertIs(seen["kwargs"]["failover"], False)
-        # Claude was already tried as the primary pick — the remaining
-        # chain is the fixed order with it taken out.
-        self.assertEqual(dlg._model_chain, ["ChatGPT"])
+        args, kwargs = worker_cls.call_args
+        self.assertEqual(kwargs["model"], "anthropic/claude-sonnet-5.5")
+        self.assertIn("which material fits best?", args[2])
+        self.assertEqual(kwargs["attachments"], [])   # no consent asked yet
+        worker_cls.return_value.start.assert_called_once()
 
-    def test_a_silent_tool_falls_through_to_the_next_in_the_fixed_order(self):
-        dlg = _dialog()
-        m = _fake_measured(dlg)
-        dlg.ask.set_text("which material fits best?")
-        dlg._current = m
-        self._pick(dlg, "Claude")
-        with mock.patch.object(SD, "AutomationWorker", _CaptureWorker):
-            dlg._ask(m)                                  # tries Claude first
-            _CaptureWorker.seen = {}
-            dlg._on_asked_by_tool(m, "Claude", {}, {})    # Claude said nothing
-            seen = _CaptureWorker.seen
-        stage_key, tool, _prompts = seen["kwargs"]["custom_stages"][0]
-        self.assertEqual((stage_key, tool), ("ask", "ChatGPT"))
-        self.assertEqual(dlg._model_chain, [])
-
-    def test_exhausting_the_chain_fails_cleanly_not_silently_to_groq(self):
+    def test_a_failed_call_reports_the_error_and_never_retries_as_haiku(self):
         dlg = _dialog()
         m = _fake_measured(dlg)
         dlg._current = m
-        dlg._model_chain = []
-        with mock.patch.object(SD.QMessageBox, "warning") as warn, \
-                mock.patch.object(SD, "StepAskWorker") as groq:
-            dlg._ask_via_chain(m)
-            warn.assert_not_called()                  # in the window, not a pop-up
-            groq.assert_not_called()
-        self.assertIn("Neither ChatGPT nor Claude", dlg.status.text())
+        self._pick(dlg, "Claude Sonnet 5.5")
+        with mock.patch.object(SD, "StepAskWorker") as worker_cls:
+            dlg._ask(m)
+            dlg._on_failed("OpenRouter rejected your key.")
+        self.assertIn("OpenRouter rejected your key.", dlg.status.text())
+        self.assertEqual(worker_cls.call_count, 1)   # never silently retried
 
-    def test_a_real_answer_stops_the_chain_and_records_its_agent(self):
+    def test_an_answer_records_which_model_actually_answered(self):
         dlg = _dialog()
         m = _fake_measured(dlg)
         dlg.ask.set_text("which material fits best?")
         dlg._current = m
         dlg._action_buttons["ask"].setChecked(True)
-        dlg._model_chain = ["ChatGPT"]   # would be tried next if this failed
-        # This flows on into _on_suggested -> _next() -> _finish(), which
-        # saves the run for real unless mocked (conftest fails the suite on
-        # a write to the developer's own ~/.prism).
-        with mock.patch.object(CB.config, "save_run"):
-            dlg._on_asked_by_tool(
-                m, "Claude", {"ask": ["PP for cost, ABS for a balance."]},
-                {"ask": "https://claude.ai/chat/x"})
-        self.assertEqual(dlg._model_chain, [],
-                         "a real answer must stop the fallback chain")
+        self._pick(dlg, "Claude Sonnet 5.5")
+        with mock.patch.object(SD, "StepAskWorker") as worker_cls, \
+                mock.patch.object(CB.config, "save_run"):
+            dlg._ask(m)
+            done_cb = worker_cls.return_value.done.connect.call_args[0][0]
+            done_cb("PP for cost, ABS for a balance.")
         key = f"ask · {m['report']['stem']}"
         self.assertEqual(dlg._responses[key],
                          ["PP for cost, ABS for a balance."])
-        self.assertEqual(dlg._stage_agents_map[key], "Claude")
-        self.assertEqual(dlg._links[key], "https://claude.ai/chat/x")
-    def test_groq_still_needs_its_own_key_but_the_others_do_not(self):
-        dlg = _dialog(cfg={"agents": {"brains": "Claude"},
-                           "step_out_dir": tempfile.mkdtemp()})   # no api_key
+        self.assertEqual(dlg._stage_agents_map[key], "Claude Sonnet 5.5")
+
+    def test_without_an_openrouter_key_neither_model_can_be_asked(self):
+        dlg = _dialog(cfg={"step_out_dir": tempfile.mkdtemp()})   # no key
         dlg._on_files_added(["/nowhere/a.step"])
         dlg._action_buttons["ask"].setChecked(True)
         dlg.ask.set_text("which material?")
@@ -551,15 +540,70 @@ class ChoosingAStrongerModelThanGroq(unittest.TestCase):
                 mock.patch.object(SD, "StepMeasureWorker") as worker:
             dlg._generate()
             warn.assert_not_called()                      # in the window, not a pop-up
-            self.assertIn('Groq needs your key', dlg.status.text())
+            self.assertIn("needs an OpenRouter key", dlg.status.text())
             worker.assert_not_called()
-        self._pick(dlg, "Claude")
+        dlg.cfg["openrouter_api_key"] = "sk-or-test"
         with mock.patch.object(SD.QMessageBox, "warning") as warn, \
                 mock.patch.object(SD, "StepMeasureWorker") as worker, \
                 mock.patch.object(CB.config, "save"):
             dlg._generate()
             warn.assert_not_called()
             worker.assert_called_once()
+
+
+class ThePictureLeavesOnlyWithConsentAskedOnce(unittest.TestCase):
+    """2026-11-06: Ask/Edit may now show Claude a rendered picture of the
+    part, never the STEP file itself, and never without the person's own
+    yes — asked once per dialog session, worded "Prism AI" (the owner's
+    own instruction), not the model's real name."""
+
+    def test_the_popup_names_prism_ai_not_the_model(self):
+        dlg = _dialog()
+        dlg._vision_consent = None       # undo _dialog()'s own safety default
+        m = _fake_measured(dlg)
+        with mock.patch.object(SD.QMessageBox, "question",
+                              return_value=SD.QMessageBox.No) as q:
+            dlg._attachments_for(m)
+        title, text = q.call_args[0][1], q.call_args[0][2]
+        self.assertIn("Prism AI", text)
+        self.assertNotIn("Claude", text)
+        self.assertNotIn("Haiku", text)
+        self.assertNotIn("Sonnet", text)
+
+    def test_saying_yes_attaches_the_rendered_picture(self):
+        dlg = _dialog()
+        dlg._vision_consent = None
+        m = _fake_measured(dlg)
+        with mock.patch.object(SD.QMessageBox, "question",
+                              return_value=SD.QMessageBox.Yes):
+            attachments = dlg._attachments_for(m)
+        self.assertEqual(len(attachments), 1)
+        self.assertEqual(attachments[0]["kind"], "image")
+        self.assertEqual(attachments[0]["mime"], "image/png")
+
+    def test_saying_no_attaches_nothing_and_is_not_asked_again(self):
+        dlg = _dialog()
+        dlg._vision_consent = None
+        m = _fake_measured(dlg)
+        with mock.patch.object(SD.QMessageBox, "question",
+                              return_value=SD.QMessageBox.No) as q:
+            first = dlg._attachments_for(m)
+            second = dlg._attachments_for(m)
+        self.assertEqual(first, [])
+        self.assertEqual(second, [])
+        q.assert_called_once()    # asked once for the whole session, not twice
+
+    def test_nothing_to_attach_means_no_popup_at_all(self):
+        """Ask/Edit before Draft has ever run has no rendered picture yet —
+        nothing to ask permission for."""
+        dlg = _dialog()
+        dlg._vision_consent = None
+        m = _fake_measured(dlg)
+        m["drawn"] = {}
+        with mock.patch.object(SD.QMessageBox, "question") as q:
+            attachments = dlg._attachments_for(m)
+        self.assertEqual(attachments, [])
+        q.assert_not_called()
 
 
 class TheFinishedRunCarriesWhatTheFollowUpNeeds(unittest.TestCase):
@@ -615,13 +659,13 @@ class TheConversationIsSavedToOneFilePerModel(unittest.TestCase):
         dlg._current = m
         dlg.ask.set_text("question two")
         dlg._save_conversation(m, [["You asked", "question one"],
-                                   ["Groq", "answer one"]])
+                                   ["Claude Haiku 5.5", "answer one"]])
         with mock.patch.object(CB.config, "save_run"):
             dlg._on_suggested("answer two")
         self.assertEqual(
             dlg._load_conversation(m),
-            [("You asked", "question one"), ("Groq", "answer one"),
-             ("You asked", "question two"), ("Groq", "answer two")])
+            [("You asked", "question one"), ("Claude Haiku 5.5", "answer one"),
+             ("You asked", "question two"), ("Claude Haiku 5.5", "answer two")])
     def test_an_end_to_end_run_actually_writes_the_whole_thread(self):
         """No window, no stubbing of one: the answer arrives and the file is
         written — and a follow-up typed in the chat is appended to it."""
@@ -636,7 +680,7 @@ class TheConversationIsSavedToOneFilePerModel(unittest.TestCase):
         with open(path) as f:
             saved = json.load(f)
         self.assertEqual(saved, [["You asked", "which material fits best?"],
-                                 ["Groq", "PP for cost."]])
+                                 ["Claude Haiku 5.5", "PP for cost."]])
         key = f"ask · {m['report']['stem']}"
         dlg._inline.question = "what about nylon?"
         with mock.patch.object(CB.config, "save_run"):
@@ -644,14 +688,14 @@ class TheConversationIsSavedToOneFilePerModel(unittest.TestCase):
         with open(path) as f:
             saved = json.load(f)
         self.assertEqual(saved[-2:], [["You followed up", "what about nylon?"],
-                                      ["Groq", "Nylon needs drying."]])
+                                      ["Claude Haiku 5.5", "Nylon needs drying."]])
 
 class AFollowUpTypedInsideTheAnswerPopup(unittest.TestCase):
     """The popup's own "Follow up" button (beside Copy/Close) — a note
     typed there re-asks whichever agent answered the first time, not a
     fresh one, and the popup's own content is what gets updated."""
 
-    def test_groq_gets_the_earlier_answer_as_context(self):
+    def test_the_default_model_gets_the_earlier_answer_as_context(self):
         dlg = _dialog()
         m = _fake_measured(dlg)
         dlg.ask.set_text("which material fits best?")
@@ -659,104 +703,67 @@ class AFollowUpTypedInsideTheAnswerPopup(unittest.TestCase):
         dlg._responses[key] = ["PP for cost."]
         fake_dlg = mock.MagicMock()
         with mock.patch.object(SD, "StepAskWorker") as worker_cls:
-            dlg._on_answer_followup(fake_dlg, m, key, "Groq",
+            dlg._on_answer_followup(fake_dlg, m, key, "Claude Haiku 5.5",
                                     "what about Nylon 6?")
         fake_dlg.set_busy.assert_called_once_with(True)
-        prompt = worker_cls.call_args[0][2]
-        self.assertIn("PP for cost.", prompt)
-        self.assertIn("what about Nylon 6?", prompt)
+        args, kwargs = worker_cls.call_args
+        self.assertEqual(kwargs["model"], "anthropic/claude-haiku-5.5")
+        self.assertIn("PP for cost.", args[2])
+        self.assertIn("what about Nylon 6?", args[2])
         worker_cls.return_value.start.assert_called_once()
 
-    def test_a_successful_groq_followup_updates_the_response_and_popup(self):
+    def test_a_successful_followup_updates_the_response_and_popup(self):
         dlg = _dialog()
         m = _fake_measured(dlg)
         key = f"ask · {m['report']['stem']}"
         dlg._responses[key] = ["PP for cost."]
         fake_dlg = mock.MagicMock()
-        dlg._stage_agents_map[key] = "Claude"
-        dlg._on_answer_followup_done(fake_dlg, key, "Nylon 6 needs drying.")
+        dlg._stage_agents_map[key] = "Claude Sonnet 5.5"
+        dlg._on_answer_followup_done(fake_dlg, key, "Nylon 6 needs drying.",
+                                     "Claude Sonnet 5.5")
         # The follow-up is delivered to the chat; the FIRST answer, and who
         # gave it, are exactly as they were.
         self.assertEqual(dlg._responses[key], ["PP for cost."])
-        self.assertEqual(dlg._stage_agents_map[key], "Claude")
+        self.assertEqual(dlg._stage_agents_map[key], "Claude Sonnet 5.5")
         fake_dlg.set_busy.assert_called_once_with(False)
         fake_dlg.set_answer.assert_called_once_with(
-            "Nylon 6 needs drying.", "Groq")
+            "Nylon 6 needs drying.", "Claude Sonnet 5.5")
 
-    def test_an_agent_followup_resumes_the_same_chat_not_a_fresh_one(self):
+    def test_switching_model_on_a_followup_uses_the_new_one(self):
+        """Haiku answered first; the person picks Sonnet in the popup's own
+        "Reply as" row for the follow-up — that follow-up is asked of
+        Sonnet, with the earlier Q&A folded into the prompt as context
+        (there is no "chat" to resume — every call is a fresh, stateless
+        OpenRouter request)."""
         dlg = _dialog()
         m = _fake_measured(dlg)
         dlg.ask.set_text("which material fits best?")
         key = f"ask · {m['report']['stem']}"
         dlg._responses[key] = ["PP for cost."]
-        dlg._links[key] = "https://claude.ai/chat/abc"
-        dlg._stage_agents_map[key] = "Claude"   # Claude answered first
-        _CaptureWorker.seen = {}
-        with mock.patch.object(SD, "AutomationWorker", _CaptureWorker):
-            dlg._on_answer_followup(mock.MagicMock(), m, key, "Claude",
+        dlg._stage_agents_map[key] = "Claude Haiku 5.5"
+        with mock.patch.object(SD, "StepAskWorker") as worker_cls:
+            dlg._on_answer_followup(mock.MagicMock(), m, key,
+                                    "Claude Sonnet 5.5",
                                     "what about Nylon 6?")
-        seen = _CaptureWorker.seen
-        stage_key, tool, prompts = seen["kwargs"]["custom_stages"][0]
-        self.assertEqual((stage_key, tool), ("ask", "Claude"))
-        self.assertEqual(prompts, ["what about Nylon 6?"])
-        self.assertEqual(seen["kwargs"]["resume_urls"],
-                         {"ask": "https://claude.ai/chat/abc"})
-        self.assertIs(seen["kwargs"]["followup"], True)
-        self.assertIs(seen["kwargs"]["failover"], False)
+        args, kwargs = worker_cls.call_args
+        self.assertEqual(kwargs["model"], "anthropic/claude-sonnet-5.5")
+        self.assertIn("PP for cost.", args[2])
+        self.assertIn("what about Nylon 6?", args[2])
 
-    def test_switching_agent_on_a_followup_does_not_resume_the_old_chat(self):
-        """Claude answered first; the person picks ChatGPT in the popup's
-        own "Reply as" row for the follow-up. There is no ChatGPT chat of
-        theirs to resume, so it must start fresh — with the earlier Q&A
-        folded into the prompt instead, the same way Groq's follow-up
-        carries context, not with Claude's chat link."""
+    def test_an_unrecognised_agent_falls_back_to_the_currently_chosen_model(self):
+        """A conversation reopened from before this model picker existed
+        may carry an old agent string (a browser tool's name). It is not a
+        valid OpenRouter choice, so the currently picked model answers
+        instead of crashing or silently guessing."""
         dlg = _dialog()
         m = _fake_measured(dlg)
-        dlg.ask.set_text("which material fits best?")
         key = f"ask · {m['report']['stem']}"
         dlg._responses[key] = ["PP for cost."]
-        dlg._links[key] = "https://claude.ai/chat/abc"
-        dlg._stage_agents_map[key] = "Claude"
-        _CaptureWorker.seen = {}
-        with mock.patch.object(SD, "AutomationWorker", _CaptureWorker):
+        with mock.patch.object(SD, "StepAskWorker") as worker_cls:
             dlg._on_answer_followup(mock.MagicMock(), m, key, "ChatGPT",
                                     "what about Nylon 6?")
-        seen = _CaptureWorker.seen
-        stage_key, tool, prompts = seen["kwargs"]["custom_stages"][0]
-        self.assertEqual((stage_key, tool), ("ask", "ChatGPT"))
-        self.assertIn("PP for cost.", prompts[0])
-        self.assertIn("what about Nylon 6?", prompts[0])
-        self.assertIsNone(seen["kwargs"]["resume_urls"])
-
-    def test_a_successful_agent_followup_updates_response_link_and_agent(self):
-        dlg = _dialog()
-        m = _fake_measured(dlg)
-        key = f"ask · {m['report']['stem']}"
-        dlg._responses[key] = ["PP for cost."]
-        dlg._stage_agents_map[key] = "Claude"
-        dlg._links[key] = "https://claude.ai/chat/abc"
-        fake_dlg = mock.MagicMock()
-        dlg._on_answer_followup_agent_done(
-            fake_dlg, key, "Claude", {"ask": ["Nylon 6 needs drying."]},
-            {"ask": "https://claude.ai/chat/def"})
-        self.assertEqual(dlg._responses[key], ["PP for cost."])   # first answer kept
-        self.assertEqual(dlg._links[key], "https://claude.ai/chat/abc")   # and its chat
-        self.assertEqual(dlg._stage_agents_map[key], "Claude")
-        fake_dlg.set_answer.assert_called_once_with(
-            "Nylon 6 needs drying.", "Claude")
-
-    def test_a_silent_agent_followup_warns_instead_of_updating(self):
-        dlg = _dialog()
-        m = _fake_measured(dlg)
-        key = f"ask · {m['report']['stem']}"
-        dlg._responses[key] = ["PP for cost."]
-        fake_dlg = mock.MagicMock()
-        with mock.patch.object(SD.QMessageBox, "warning") as warn:
-            dlg._on_answer_followup_agent_done(
-                fake_dlg, key, "Claude", {}, {})
-        warn.assert_not_called()
-        self.assertIn("didn't answer", dlg.status.text())
-        fake_dlg.set_answer.assert_not_called()
+        self.assertEqual(worker_cls.call_args.kwargs["model"],
+                         "anthropic/claude-haiku-5.5")
         self.assertEqual(dlg._responses[key], ["PP for cost."])
 
 
@@ -801,23 +808,23 @@ class BuildThisWorksFromAnyFollowUpEvenReopenedOnes(unittest.TestCase):
     def test_build_this_runs_the_plan_stage_without_touching_the_queue(self):
         """The real scenario: a conversation reopened long after the
         first build finished. _current is whatever the fresh re-measure
-        set it to; build_requested must plan from THAT model, and must
-        never call _next() — there is no in-flight queue to advance."""
-        dlg = _dialog(cfg={"agents": {"brains": "Claude"}})
+        set it to; build_requested must plan with the model that answered
+        it (or the currently chosen one), and must never call _next() —
+        there is no in-flight queue to advance."""
+        dlg = _dialog(cfg={"openrouter_api_key": "sk-or-test"})
         m = _fake_measured(dlg)
         dlg._current = m
         dlg.ask.set_text("enlarge the hole")
         key = f"ask · {m['report']['stem']}"
         dlg._responses[key] = ["enlarge the Ø8.1mm hole to Ø8.6mm"]
+        dlg._stage_agents_map[key] = "Claude Sonnet 5.5"
         fake_popup = mock.MagicMock()
-        _CaptureWorker.seen = {}
-        with mock.patch.object(SD, "AutomationWorker", _CaptureWorker):
+        with mock.patch.object(SD, "StepPlanWorker") as planner:
             dlg._build_plan_for(m, key, fake_popup)
         fake_popup.set_busy.assert_called_with(True)
-        seen = _CaptureWorker.seen
-        stage_key, tool, prompts = seen["kwargs"]["custom_stages"][0]
-        self.assertEqual((stage_key, tool), ("plan", "Claude"))
-        self.assertIn("enlarge the Ø8.1mm hole to Ø8.6mm", prompts[0])
+        args, kwargs = planner.call_args
+        self.assertEqual(kwargs["model"], "anthropic/claude-sonnet-5.5")
+        self.assertIn("enlarge the Ø8.1mm hole to Ø8.6mm", args[3])
 
     def test_on_planned_from_the_chat_waits_for_build_and_never_advances_the_queue(self):
         dlg = _dialog()
@@ -884,10 +891,9 @@ class BuildThisWorksFromAnyFollowUpEvenReopenedOnes(unittest.TestCase):
         dlg._queue = []
         dlg.ask.set_text("fit 6mm")
         dlg._action_buttons["edit"].setChecked(True)
-        with mock.patch.object(SD, "AutomationWorker", _CaptureWorker):
-            dlg._on_suggested("enlarge the hole", agent="Claude")
-        stage_key, _tool, _prompts = _CaptureWorker.seen["kwargs"]["custom_stages"][0]
-        self.assertEqual(stage_key, "plan")
+        with mock.patch.object(SD, "StepPlanWorker") as planner:
+            dlg._on_suggested("enlarge the hole", agent="Claude Sonnet 5.5")
+        planner.assert_called_once()
         with mock.patch.object(CB.config, "save_run") as saved:
             dlg._on_planned({"plan": ['{"changes": [], "advice": []}']}, {})
         saved.assert_called_once()
@@ -902,11 +908,10 @@ class BuildThisWorksFromAnyFollowUpEvenReopenedOnes(unittest.TestCase):
         dlg.ask.set_text("fit 6mm")
         key = f"ask · {m['report']['stem']}"
         dlg._responses[key] = ["enlarge the hole"]
-        with mock.patch.object(SD, "AutomationWorker", _CaptureWorker), \
+        with mock.patch.object(SD, "StepPlanWorker") as planner, \
                 mock.patch.object(CB.config, "save_run") as saved:
             dlg._composer_build()
-        stage_key, _tool, _prompts = _CaptureWorker.seen["kwargs"]["custom_stages"][0]
-        self.assertEqual(stage_key, "plan")
+        planner.assert_called_once()
         saved.assert_not_called()
         self.assertFalse(dlg.composer.send_btn.isEnabled())   # busy
 
@@ -935,7 +940,8 @@ class AskAndEditAreTwoThingsAndEachSaysWhoAnswered(unittest.TestCase):
         self.assertEqual(dlg._responses[key], ["PP for cost."])
         self.assertEqual(dlg._stage_agents_map[key], "Claude")
         self.assertEqual(dlg._followups, [
-            {"q": "what about nylon?", "a": "Nylon needs drying.", "agent": "Groq"}])
+            {"q": "what about nylon?", "a": "Nylon needs drying.",
+             "agent": "Claude Haiku 5.5"}])
         turn = dlg.chat.cards[0].turn
         self.assertEqual(turn["answer"], "PP for cost.")
         self.assertEqual(turn["followups"][0]["a"], "Nylon needs drying.")
@@ -1070,21 +1076,29 @@ class TheGuardsSpeakBeforeAnythingRuns(unittest.TestCase):
             warn.assert_not_called()
             worker.assert_called_once()
 
-    def test_edit_without_a_reasoning_tool_is_refused(self):
-        dlg = _dialog(cfg={"agents": {"visual": "ChatGPT"}, "api_key": "k",
-                           "step_out_dir": tempfile.mkdtemp()})
+    def test_edit_needs_no_separate_reasoning_tool_only_the_openrouter_key(self):
+        """2026-11-06: Edit used to need a separately configured "Reasoning"
+        tool under Agents whenever Ask wasn't answered by Groq — removed
+        along with Groq itself. Both models now review their own plan
+        in-house, so Edit needs exactly what Ask needs: the OpenRouter key,
+        nothing configured under Agents at all."""
+        dlg = _dialog(cfg={"step_out_dir": tempfile.mkdtemp()})   # no key
         dlg._on_files_added(["/nowhere/a.step"])
         dlg.ask.set_text("fit 6mm")
         dlg._action_buttons["edit"].setChecked(True)
-        # Groq plans in-house and needs no reasoning tool; picking ChatGPT or
-        # Claude does, so that is where the guard speaks.
-        dlg.model_combo.setCurrentIndex(dlg.model_combo.findData("ChatGPT"))
         with mock.patch.object(SD.QMessageBox, "warning") as warn, \
                 mock.patch.object(SD, "StepMeasureWorker") as worker:
             dlg._generate()
             warn.assert_not_called()                      # in the window, not a pop-up
-            self.assertIn('reasoning tool', dlg.status.text())
+            self.assertIn('needs an OpenRouter key', dlg.status.text())
             worker.assert_not_called()
+        dlg.cfg["openrouter_api_key"] = "sk-or-test"
+        with mock.patch.object(SD.QMessageBox, "warning") as warn, \
+                mock.patch.object(SD, "StepMeasureWorker") as worker, \
+                mock.patch.object(CB.config, "save"):
+            dlg._generate()
+            warn.assert_not_called()
+            worker.assert_called_once()
 
 
 @unittest.skipUnless(HAVE_CAD, "cadquery not installed")
@@ -1237,7 +1251,8 @@ class ItIsOnTheShelfAndInHistory(unittest.TestCase):
         from addons.step.panel import StepPanel
         panel = StepPanel({"agents": {"visual": "ChatGPT", "brains": "Claude"}})
         roles = panel.tool_roles()
-        self.assertEqual([r[3] for r in roles], ["ChatGPT", "Claude"])
+        self.assertEqual([r[3] for r in roles],
+                         ["ChatGPT", "Claude Haiku 5.5"])
         self.assertEqual(panel.KIND, "step")
 
     def test_the_offer_takes_plain_paths(self):
