@@ -554,7 +554,12 @@ class ModelForPicksTheTwoTierCorrectly(unittest.TestCase):
     def test_followup_uses_the_lighter_model(self):
         self.assertEqual(W.model_for("Prism Agent Claude", followup=True),
                          boq_agents.PRISM_AGENT_FOLLOWUP_MODELS["Prism Agent Claude"])
-        self.assertNotEqual(
+        # item 62 (7 Nov 2026): both tiers are claude-haiku-5.5 now, on
+        # purpose (see tests/test_boq_agents.py's own fuller comment on
+        # this exact exception) -- "lighter" no longer means "a different
+        # model" for this one agent, just the right dict either way, which
+        # the assertEqual calls above and below already check.
+        self.assertEqual(
             W.model_for("Prism Agent Claude", followup=True),
             W.model_for("Prism Agent Claude", followup=False))
 

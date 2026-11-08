@@ -93,5 +93,60 @@ class RunOnlyOffersTheAiTagReaderWhenBothGatesAreOn(unittest.TestCase):
         self.assertEqual(seen, ["boom"])
 
 
+class ElvTagReaderCallsOpenrouterWithTheSameCappedShape(unittest.TestCase):
+    """item 63 (7 Nov 2026): ELV's own AI reading -- same cap/reasoning-off
+    shape as HVAC's (same underlying model), the lesson it was found
+    for applies here just as much."""
+
+    def test_sends_the_model_capped_tokens_and_reasoning_off(self):
+        w = W.ElvReadWorker("ELV", "/x/fake.pdf", api_key="sk-or-x")
+        with mock.patch.object(W.CB.openrouter, "openrouter_chat",
+                               return_value="CAM-01") as chat:
+            out = w._tag_reader(b"\x89PNG...")
+        self.assertEqual(out, "CAM-01")
+        args, kwargs = chat.call_args
+        self.assertEqual(args[0], "sk-or-x")
+        self.assertEqual(args[1], W.ELV_VISION_MODEL)
+        self.assertEqual(kwargs["max_tokens"], 900)
+        self.assertEqual(kwargs["extra"]["reasoning"], {"enabled": False})
+
+    def test_the_image_bytes_are_base64_encoded_into_an_image_attachment(self):
+        w = W.ElvReadWorker("ELV", "/x/fake.pdf", api_key="sk-or-x")
+        with mock.patch.object(W.CB.openrouter, "openrouter_chat",
+                               return_value="") as chat:
+            w._tag_reader(b"hello")
+        attachments = chat.call_args.kwargs["attachments"]
+        self.assertEqual(attachments[0]["kind"], "image")
+        self.assertEqual(base64.b64decode(attachments[0]["b64"]), b"hello")
+
+
+class ElvReadWorkerRunsThroughExtractAiRead(unittest.TestCase):
+    def test_run_passes_industry_path_and_the_bound_reader(self):
+        w = W.ElvReadWorker("ELV", "/x/fake.pdf", api_key="sk-or-x")
+        with mock.patch.object(W.industries, "extract_ai_read",
+                               return_value={"method": "ai_tiled", "pages": []}) as ex:
+            w.run()
+        args, kwargs = ex.call_args
+        self.assertEqual(args, ("ELV", "/x/fake.pdf", w._tag_reader))
+
+    def test_the_result_is_emitted_on_done(self):
+        w = W.ElvReadWorker("ELV", "/x/fake.pdf", api_key="sk-or-x")
+        seen = []
+        w.done.connect(seen.append)
+        with mock.patch.object(W.industries, "extract_ai_read",
+                               return_value={"method": "ai_tiled", "pages": []}):
+            w.run()
+        self.assertEqual(seen, [{"method": "ai_tiled", "pages": []}])
+
+    def test_an_extraction_failure_still_emits_failed_not_an_exception(self):
+        w = W.ElvReadWorker("ELV", "/x/fake.pdf", api_key="")
+        seen = []
+        w.failed.connect(seen.append)
+        with mock.patch.object(W.industries, "extract_ai_read",
+                               side_effect=RuntimeError("No OpenRouter key set.")):
+            w.run()
+        self.assertEqual(seen, ["No OpenRouter key set."])
+
+
 if __name__ == "__main__":
     unittest.main()

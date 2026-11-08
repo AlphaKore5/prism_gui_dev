@@ -2357,6 +2357,17 @@ class TheIndustryDropdownGatesThePdfTakeoffButton(unittest.TestCase):
         d.industry_combo.setCurrentText("HVAC")
         self.assertTrue(d.takeoff_btn.isVisibleTo(d))
 
+    def test_the_button_text_names_the_selected_industry_not_always_hvac(self):
+        """Found live, 7 Nov 2026: the button's text was hardcoded to
+        "HVAC PDF takeoff…" even while ELV was selected -- left over from
+        when HVAC was the only industry with a takeoff of its own."""
+        d = _dialog()
+        d.industry_combo.setCurrentText("HVAC")
+        self.assertIn("HVAC", d.takeoff_btn.text())
+        d.industry_combo.setCurrentText("ELV")
+        self.assertIn("ELV", d.takeoff_btn.text())
+        self.assertNotIn("HVAC", d.takeoff_btn.text())
+
     def test_switching_back_to_general_hides_it_again(self):
         d = _dialog()
         d.industry_combo.setCurrentText("HVAC")
@@ -2405,6 +2416,39 @@ class TheIndustryDropdownGatesThePdfTakeoffButton(unittest.TestCase):
         with mock.patch.object(BD, "IndustryTakeoffDialog", _FakeTakeoffDialog):
             d._open_industry_takeoff()
         self.assertEqual(d.summary, "")
+
+    def test_elv_shows_the_button_too(self):
+        d = _dialog()
+        d.industry_combo.setCurrentText("ELV")
+        self.assertTrue(d.takeoff_btn.isVisibleTo(d))
+
+    def test_elv_opens_the_ai_read_dialog_not_the_hvac_one(self):
+        """item 63: ELV has no geometry Step 1 to show -- it must get
+        ElvReadDialog, never IndustryTakeoffDialog, even though both
+        satisfy has_takeoff()."""
+        from unittest import mock
+        import tempfile
+        import core_bridge as CB
+        from addons.boq import dialog as BD
+        from PySide6.QtWidgets import QDialog
+
+        class _FakeElvDialog:
+            def __init__(self, industry, parent=None, cfg=None):
+                self.industry = industry
+            def exec(self):
+                return QDialog.Accepted
+            def measurements_text(self):
+                return "AI READING\n  CAM-01, CAM-02\n"
+
+        d = _dialog()
+        d.industry_combo.setCurrentText("ELV")
+        with mock.patch.object(BD, "ElvReadDialog", _FakeElvDialog), \
+                mock.patch.object(BD, "IndustryTakeoffDialog") as hvac_dlg, \
+                mock.patch.object(CB.config, "RUNS_DIR", tempfile.mkdtemp()), \
+                mock.patch.object(CB.config, "save_artifact"):
+            d._open_industry_takeoff()
+        self.assertEqual(d.summary, "AI READING\n  CAM-01, CAM-02\n")
+        hvac_dlg.assert_not_called()
 
 
 class InputMeasurementsDialogTests(unittest.TestCase):
@@ -2684,3 +2728,42 @@ class PrismAgentRecheckShowsTheRealDrawingNotJustTextItem32(unittest.TestCase):
             d._run_prism_agent("recheck", "Prism Agent Claude", "verify it",
                                self._files(d.cad_path), lambda r, l: None)
         self.assertEqual(ctor.call_args.kwargs["attachments"], [fake_att])
+
+
+class MeasuringADxfAlreadyPutsItsRealTextInTheSummaryItem65(unittest.TestCase):
+    """item 65: core.boq.measure() now returns `text_entities` (it always
+    walked them, just never handed them back) and core.boq.summary_text()
+    now lists them under "TEXT ON THE DRAWING" -- so self.summary (set
+    the moment a DXF/DWG is attached, in _on_measured(), regardless of
+    industry) already carries the drawing's real text, and that summary
+    is folded into every write-up/recheck prompt (_write()/_send_followup()
+    both do `prompt += f"...MEASURED FIGURES:\\n{self.summary}"`).
+
+    This replaced an earlier, narrower fix that tried to read the same
+    text a SECOND time inside _prepare_drawing_attachment(), only for the
+    "recheck" stage -- redundant once the real fix was in the one place
+    every stage and every industry already shares: _measure() itself."""
+
+    def test_a_measured_dxfs_summary_includes_its_own_text(self):
+        from addons.boq.dialog import BoqDialog
+        cfg = {"api_key": "k"}
+        d = BoqDialog(cfg, [], None, mode="boq")
+        q = {"unit": "meters", "unit_code": 6, "unit_confirmed": True,
+            "notes": [], "lengths_by_layer": {}, "areas_by_layer": {},
+            "block_counts": {}, "block_layers": {}, "duct_sizes": [],
+            "text_entities": [((0.0, 0.0), "CAM-01 — dome, ceiling mount")],
+            "layers": ["0"], "entity_count": 1}
+        d._on_measured(q, [])
+        self.assertIn("CAM-01", d.summary)
+        self.assertIn("TEXT ON THE DRAWING", d.summary)
+
+    def test_a_dxf_with_no_text_has_no_text_section(self):
+        from addons.boq.dialog import BoqDialog
+        cfg = {"api_key": "k"}
+        d = BoqDialog(cfg, [], None, mode="boq")
+        q = {"unit": "meters", "unit_code": 6, "unit_confirmed": True,
+            "notes": [], "lengths_by_layer": {"WALLS": 10.0}, "areas_by_layer": {},
+            "block_counts": {}, "block_layers": {}, "duct_sizes": [],
+            "text_entities": [], "layers": ["0", "WALLS"], "entity_count": 1}
+        d._on_measured(q, [])
+        self.assertNotIn("TEXT ON THE DRAWING", d.summary)

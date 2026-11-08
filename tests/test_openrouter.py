@@ -211,5 +211,65 @@ class VerifyKeyReturnsEmptyOnlyWhenItWorks(unittest.TestCase):
         self.assertFalse(sent["models"])
 
 
+class OpenrouterImageReturnsRawBytes(unittest.TestCase):
+    """core.openrouter.openrouter_image -- the Images API (POST /images),
+    a different endpoint and response shape from openrouter_chat's own
+    /chat/completions: the deliverable is pixels (data[0].b64_json), never
+    message.content. The image/visual-stage replacement for ChatGPT
+    (FLUX 3 Klein, core.image_gen) is the one real caller."""
+
+    def test_a_200_with_data_returns_the_decoded_bytes(self):
+        import base64
+        png = b"\x89PNG\r\n\x1a\nfakebytes"
+        b64 = base64.b64encode(png).decode("ascii")
+        with mock.patch.object(OR.requests, "post", return_value=_resp(
+                200, {"data": [{"b64_json": b64, "media_type": "image/png"}]})):
+            out = OR.openrouter_image(
+                "sk-or-x", "black-forest-labs/flux-3-image-klein", "a red panda")
+        self.assertEqual(out, png)
+
+    def test_calls_the_images_endpoint_not_chat_completions(self):
+        import base64
+        b64 = base64.b64encode(b"x").decode("ascii")
+        with mock.patch.object(OR.requests, "post", return_value=_resp(
+                200, {"data": [{"b64_json": b64}]})) as post:
+            OR.openrouter_image("sk-or-x", "black-forest-labs/flux-3-image-klein",
+                                "a red panda")
+        self.assertEqual(post.call_args.args[0], OR.IMAGES_URL)
+        self.assertNotEqual(OR.IMAGES_URL, OR.OPENROUTER_URL)
+        payload = post.call_args.kwargs["json"]
+        self.assertEqual(payload["model"], "black-forest-labs/flux-3-image-klein")
+        self.assertEqual(payload["prompt"], "a red panda")
+
+    def test_no_api_key_raises_without_a_network_call(self):
+        with mock.patch.object(OR.requests, "post") as post:
+            with self.assertRaises(RuntimeError):
+                OR.openrouter_image("", "black-forest-labs/flux-3-image-klein", "x")
+            self.assertFalse(post.called)
+
+    def test_a_200_with_no_image_data_is_a_clear_error_not_a_crash(self):
+        with mock.patch.object(OR.requests, "post", return_value=_resp(
+                200, {"data": []})):
+            with self.assertRaises(RuntimeError) as cm:
+                OR.openrouter_image(
+                    "sk-or-x", "black-forest-labs/flux-3-image-klein", "x")
+        self.assertIn("no image data", str(cm.exception))
+
+    def test_401_raises_with_a_clear_message(self):
+        with mock.patch.object(OR.requests, "post", return_value=_resp(401, {})):
+            with self.assertRaises(RuntimeError) as cm:
+                OR.openrouter_image(
+                    "sk-or-bad", "black-forest-labs/flux-3-image-klein", "x")
+        self.assertIn("rejected", str(cm.exception))
+
+    def test_429_retries_once_then_raises_if_still_limited(self):
+        with mock.patch.object(OR.requests, "post", return_value=_resp(429, {})), \
+                mock.patch.object(OR.time, "sleep"):
+            with self.assertRaises(RuntimeError):
+                OR.openrouter_image(
+                    "sk-or-x", "black-forest-labs/flux-3-image-klein", "x",
+                    retries=1)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -4251,3 +4251,183 @@ empty instead of `Item` / `=SUM(BOQ!A34:A39)`, while the two sections with real 
 `test_a_section_with_no_real_amount_column_never_sums_the_item_number`, reproducing the exact
 shape (an Item/Sr column plus a weight column that is `TO CONFIRM` on every row). 38 tests in
 `test_boq_openrouter_writer.py` pass.
+
+## 62. "Prism Agent Claude" compared against DeepSeek on two different models, not one each
+
+The owner's own request (7 Nov 2026): a side-by-side comparison of "Prism Agent Claude" against
+"Prism Agent Deep" only means something if each agent runs on ONE model throughout, not a
+generation tier on Sonnet and a follow-up tier (the one "Make with drawing"/"Verify and remake"
+actually run on) on Haiku -- a comparison that silently switches models partway through isn't
+comparing what it claims to.
+
+**Fix:** `addons/boq/agents.py`'s `PRISM_AGENT_MODELS["Prism Agent Claude"]` changed from
+`anthropic/claude-sonnet-5.5` to `anthropic/claude-haiku-5.5` -- matching
+`PRISM_AGENT_FOLLOWUP_MODELS["Prism Agent Claude"]`, already Haiku. Both tiers already have vision
+(`PRISM_AGENT_HAS_VISION`, confirmed against OpenRouter's own `input_modalities` for both models),
+so nothing about "Make with drawing" changes.
+
+**Guard tests updated, not deleted:** two existing tests asserted the generation and follow-up
+tiers are never the same model for ANY Prism Agent -- already had one documented exception
+("Prism Agent Deep", both tiers on `deepseek-v4.1-flash` on purpose, item 38). Extended that same
+exception to cover "Prism Agent Claude" too, with the reason written alongside it
+(`tests/test_boq_agents.py::test_the_followup_tier_is_never_the_same_model_as_generation`,
+`tests/test_boq_openrouter_writer.py::test_followup_uses_the_lighter_model`).
+
+**Cost, for reference (live OpenRouter pricing, 7 Nov 2026):** DeepSeek v4.1-flash $0.051/$0.567
+per 1M input/output tokens; Claude Haiku 5.5 $0.10/$0.50. For one BOQ write-up (~4,000 in/out
+tokens each) the two come out effectively identical, ≈₹0.22 either way -- picking one over the
+other is a quality question, not a cost one.
+
+**Tested:** 291 tests across `test_boq_agents.py`, `test_boq_dialog.py`, `test_boq_openrouter_writer.py`,
+`test_boq_cad_render.py`, `test_boq_industries.py`, `test_boq_takeoff.py` pass.
+
+## 63. ELV/CCTV industry added -- no geometry engine, the AI reading itself is the measurement
+
+BOQ is sold across industries (item 26), and until now only HVAC had a PDF-takeoff of its own.
+The owner's own request (7 Nov 2026): ELV/CCTV drawings also need a way to be read -- but unlike
+HVAC, no real ELV drawing has been available yet to calibrate a duct-run-style vector geometry
+library against (the way `VAV_RE`/`DIFFUSER_RE` in `hvac_takeoff.py` were tuned against a real
+client file). Inventing one anyway, untested, would be a confident-looking guess, not a
+measurement. So for ELV, the AI reading itself IS the takeoff -- the owner's own framing:
+"measurements to be inputted offline through the model."
+
+**Two reading modes, the user's own explicit choice every time, never a silent default**
+(the owner's own instruction: offer both, the way HVAC offers OCR alone vs OCR+AI):
+- **"Whole"** -- the entire page, in ONE call to the vision model (Qwen3-VL, same model and
+  settings HVAC's own AI tag re-check already proved). Simple, cheap, right for a small drawing
+  (the owner's own example: KJ Pharmatech) -- but the WHOLE drawing leaves the machine in one
+  piece, not a cropped tile, and the consent wording says so plainly (see below). No local OCR in
+  this mode: a single un-tiled render of a large page crushes small CAD text before OCR's own
+  detector ever sees it, the same reasoning `hvac_takeoff.ocr_page()`'s own tiling fix already
+  established, not re-derived.
+- **"Tiled"** -- the same 2400px tiling `hvac_takeoff.py`'s own OCR step already uses, each tile
+  read TWICE: once by local RapidOCR (never leaves the machine), once by the vision model -- the
+  owner's own "OCR + qwen" framing for this mode, mirroring HVAC's own OCR+AI shape exactly.
+
+Both modes return the model's own raw text findings, page by page -- no regex parsing into
+structured fields (there is nothing proven yet to parse FOR, unlike HVAC's VAV/diffuser patterns);
+`addons/boq`'s write-up stage (DeepSeek) reads that raw text directly and does the interpretation,
+the same "read, then write" split HVAC's own AI VAV-tag re-check uses.
+
+**New files, all stdlib + pdfplumber/pypdfium2/optional-rapidocr, no network code in any of
+them** (only `addons/boq/workers.py` ever imports `core_bridge`/sees an API key, same boundary
+`hvac_takeoff.vision_vav_recount()` already keeps):
+- `addons/boq/elv_takeoff.py` -- `read_whole()`, `read_tiled()`, `extract()`, `summary_text()`.
+  `summary_text()` says plainly, every time, "THIS IS AN AI READING OF THE DRAWING, NOT A MEASURED
+  TAKEOFF" -- never presented as a measured quantity the way `hvac_takeoff`'s duct-run lengths are.
+- `addons/boq/elv_dialog.py` -- `ElvReadDialog`, a NEW, separate dialog from
+  `IndustryTakeoffDialog`, not that dialog with ELV bolted on: HVAC's own dialog is built around a
+  geometry Step 1 (which line colour is which) that ELV has none of. Pick a PDF, pick a mode, read,
+  review, "Use this reading" -- exposes the same `measurements_text()` interface
+  `IndustryTakeoffDialog` does, so `addons/boq/dialog.py`'s own `_open_industry_takeoff()` treats
+  either one the same way once a result exists.
+- **Two separately-worded consent prompts**, not one reused: "tiled" mode reuses HVAC's own "your
+  drawing is NOT sent to AI as a whole" wording, because it's true here too; "whole" mode gets its
+  own, honest wording ("this drawing will be sent... as a whole") -- reusing HVAC's wording for the
+  whole-page path would have been false.
+
+**`addons/boq/industries.py`:** `ELV = "ELV"` added to `NAMES` (one combined industry, the
+real-world umbrella term for CCTV, access control, PA, structured cabling etc. -- not a separate
+CCTV/ELV pair, since those are the same trade's own drawing conventions, not two rule-sets).
+`has_takeoff()` extended to include ELV. New `has_ai_read_modes()` gate (ELV only) -- deliberately
+separate from `has_ai_tag_recheck()` (HVAC only): HVAC's AI read only ever supplements a real
+geometry measurement; here, for an industry with no geometry engine, the AI reading mode choice IS
+the whole takeoff. New `extract_ai_read()` entry point -- a sibling of `extract()`, not an
+overload: `extract()`'s own signature (`layer_map`, `pt_per_ft`) is HVAC's Step-1 geometry shape,
+which ELV has none of. `summary_text()` dispatch extended to ELV.
+
+**`addons/boq/workers.py`:** new `ElvReadWorker`, a sibling of `HvacTakeoffWorker`, same capped/
+reasoning-off OpenRouter call shape (found live testing HVAC's own AI tag re-check: uncapped, one
+tile looped for 10 minutes; some models default to a "thinking" mode that can return a null answer
+unless reasoning is turned off -- both lessons apply here just as much, same model, same settings).
+
+**Guard tests fixed, not broken:** `tests/test_boq_industries.py` used `"ELV"` throughout as its
+own example of a genuinely-unbuilt industry (an unbuilt-industry placeholder, nothing ELV-specific
+about the choice) -- now that ELV is real, every one of those placeholder uses was replaced with
+`"Marine"` instead, and the two assertions that were actually about ELV's own real behaviour
+(`has_takeoff("ELV")`, `summary_text("ELV", ...)`) were rewritten to test the real thing rather than
+silently pass for the wrong reason.
+
+**Tested:** 15 new tests in `tests/test_boq_elv_takeoff.py` (whole vs tiled really calling what
+they say, OCR only in tiled mode, the summary never hiding that this is an AI reading), 11 new in
+`tests/test_boq_elv_dialog.py` (the two consent wordings, mode choice, no-key refusal, worker
+wiring), 6 new in `tests/test_boq_workers.py` (`ElvReadWorker`'s own capped/reasoning-off call
+shape and dispatch), new classes in `tests/test_boq_industries.py` (`has_ai_read_modes`,
+`extract_ai_read` dispatch) and `tests/test_boq_dialog.py` (ELV opens `ElvReadDialog`, never
+`IndustryTakeoffDialog`, even though both satisfy `has_takeoff()`). Full relevant sweep (9 files)
+re-run together: 292 tests pass.
+
+## 64. Item 63's reader generalized into ONE shared "read the drawing" step, DXF-entities-first
+
+Working through item 63 with the owner surfaced the real shape this needed, not the one item 63
+shipped with. Every industry's drawing-reading path is meant to share ONE reader, not three
+disconnected ones (HVAC's own AI tag re-check, ELV's `elv_takeoff.py`, and "Make with drawing"'s
+raw-file-to-writer attachment) -- and that one reader should try REAL data before ever reaching
+for AI, something none of the three did.
+
+**`addons/boq/elv_takeoff.py` is retired, replaced by `addons/boq/drawing_reader.py` -- a module
+shared by every industry, not named for one.** Its reading order, cheapest and most exact first:
+
+1. **Real DXF entities, zero AI.** A `.dwg` converts to `.dxf` first through the engine's own
+   already-built, already-tested `core.boq.dwg_to_dxf()` (reached only via `CB.get_boq()`, per
+   architecture rule 3 -- this is the one call in the module that touches the engine at all). The
+   DXF's own `TEXT`/`MTEXT` entities and named `INSERT` blocks are then read directly off its
+   modelspace: free, instant, exactly what is on the drawing, nothing sent anywhere, no consent
+   prompt needed at all. `core.boq.measure()` already walks the same entity types for HVAC's
+   geometry takeoff, but never returns the raw text it collects (`text_entities` stays a local
+   there) -- rather than grow the engine's own return shape for this one question, this module
+   duplicates the small TEXT/MTEXT/INSERT dispatch itself (`_read_dxf_entities()`, using `ezdxf`
+   directly -- a third-party library, not the engine, so this stays architecture-compliant), the
+   same "copied, not imported" discipline `elv_takeoff.py`'s own `_tile_bounds()` already used.
+2. **AI-tiled, only if step 1 found nothing.** A plain PDF, or a DXF whose labels were drawn as
+   plain line/shape geometry ("exploded") rather than real text entities, falls through to the
+   vision-model reading. **No DXF-to-raster fallback was built** -- no DXF-rendering pipeline
+   exists anywhere in this codebase (confirmed: `hvac_takeoff.py`'s own AI tag re-check only ever
+   rasterizes a PDF via `pypdfium2`, never a DXF), and inventing one untested, this session, with
+   no real file to calibrate against, would be exactly the confident-looking guess `elv_takeoff.py`'s
+   own docstring already refused to make for a geometry engine. A geometry-only DXF instead gets an
+   honest answer (`method: "dxf_no_text"`): export or print it to PDF and attach that instead.
+
+**No more "whole" vs "tiled" mode choice.** Dropped entirely -- `_tile_bounds()` already returns a
+single tile covering the whole page once it fits inside `max_dim`, so "always tiled" behaves
+exactly like "whole" for a small drawing, with no second code path and no second consent wording
+to maintain. `ElvReadDialog` lost its mode radio buttons; its one remaining consent prompt
+("your drawing is NOT sent to AI as a whole") is now unconditionally true, not one of two wordings.
+
+**Every page of a multi-page file is now read, not just page 0.** Found as a real gap before this
+item existed: a PDF whose page 1 is cover text and page 2 is the actual drawing would have had its
+drawing silently never read. `drawing_reader.extract()` reads `page_count(pdf_path)` pages, not one.
+
+**`ElvReadDialog` now picks a PDF, DWG or DXF** (`_DRAWING_FILTER`), not PDF only. Consent is only
+ever asked before reading a PDF -- a DWG/DXF tries real entities first and, per the point above,
+never reaches the AI path at all if that step found nothing, so there is nothing for this dialog to
+gate with a prompt in that case either.
+
+**`addons/boq/industries.py`:** `_elv()` now imports `drawing_reader`, not the retired
+`elv_takeoff`. `extract_ai_read()` dropped its `mode` parameter -- `path` (PDF/DWG/DXF) and
+`tag_reader` only; the reading path is the file's own, never a user choice. `has_ai_read_modes()`
+kept its name (still the right question -- "is this industry read purely by the shared reader" --
+even though there is no longer a user-facing mode to choose).
+
+**`addons/boq/workers.py`:** `ElvReadWorker` dropped its `mode` parameter to match; `api_key` is
+only ever actually spent if the file needs the AI-tiled fallback.
+
+**Guard tests retired with the module they tested, not left stale:** `tests/test_boq_elv_takeoff.py`
+(15 tests, all against the now-gone whole/tiled split) deleted outright, replaced by
+`tests/test_boq_drawing_reader.py` (built against REAL `ezdxf` documents written to temp files for
+the entity-reading tests, not mocks -- the whole point of DXF-entities-first is that it is not a
+guess). `tests/test_boq_elv_dialog.py` rewritten for the no-mode, multi-filetype dialog (consent
+only for a PDF, never for a DWG/DXF). `tests/test_boq_workers.py` and `tests/test_boq_industries.py`
+updated for the dropped `mode` parameter.
+
+**Still open, deliberately not done in this pass:** "Make with drawing" and "Verify and remake"
+(the main, most-used entry points, every industry) still attach the raw file straight to the writer
+agent (`addons/boq/dialog.py`'s `_drawing_consent()`/`_ask_recheck()`/`_send_followup()`) instead of
+routing through `drawing_reader.py` and sending only the extracted text onward. That is the single
+most-used, most load-bearing path in the app, touching every customer's every BOQ job -- rewiring it
+needs the same care, and real drawings to verify against, that this item's own discipline (no
+untested DXF rasterizer) already insisted on elsewhere in this same change. Left for its own item.
+
+**Tested:** full new `tests/test_boq_drawing_reader.py`, rewritten `tests/test_boq_elv_dialog.py`,
+updated `tests/test_boq_workers.py`/`tests/test_boq_industries.py` -- 80 tests pass across the four
+files together.

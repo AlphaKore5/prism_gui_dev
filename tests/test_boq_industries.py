@@ -22,15 +22,19 @@ class WhichIndustriesHaveAPdfTakeoff(unittest.TestCase):
     def test_hvac_has_one(self):
         self.assertTrue(industries.has_takeoff("HVAC"))
 
+    def test_elv_has_one(self):
+        self.assertTrue(industries.has_takeoff("ELV"))
+
     def test_general_does_not(self):
         self.assertFalse(industries.has_takeoff("General"))
 
     def test_an_unknown_industry_does_not(self):
-        self.assertFalse(industries.has_takeoff("ELV"))
+        self.assertFalse(industries.has_takeoff("Marine"))
 
     def test_general_is_first_in_the_dropdown_order(self):
         self.assertEqual(industries.NAMES[0], industries.GENERAL)
         self.assertIn(industries.HVAC, industries.NAMES)
+        self.assertIn(industries.ELV, industries.NAMES)
 
 
 class WhichIndustriesOfferAnAiTagRecheckAlongsideTheirOcr(unittest.TestCase):
@@ -41,11 +45,34 @@ class WhichIndustriesOfferAnAiTagRecheckAlongsideTheirOcr(unittest.TestCase):
     def test_hvac_has_one(self):
         self.assertTrue(industries.has_ai_tag_recheck("HVAC"))
 
+    def test_elv_does_not_this_is_the_other_gate(self):
+        self.assertFalse(industries.has_ai_tag_recheck("ELV"))
+
     def test_general_does_not(self):
         self.assertFalse(industries.has_ai_tag_recheck("General"))
 
     def test_an_unknown_industry_does_not(self):
-        self.assertFalse(industries.has_ai_tag_recheck("ELV"))
+        self.assertFalse(industries.has_ai_tag_recheck("Marine"))
+
+
+class WhichIndustriesAreReadPurelyByAnAiVisionModel(unittest.TestCase):
+    """item 63 (7 Nov 2026): ELV has no geometry engine behind it at all --
+    the AI reading mode (whole page vs tiled) IS the whole takeoff, a
+    different shape from HVAC's AI tag re-check (which only supplements a
+    real geometry measurement). The two gates are deliberately exclusive
+    today."""
+
+    def test_elv_has_one(self):
+        self.assertTrue(industries.has_ai_read_modes("ELV"))
+
+    def test_hvac_does_not_it_has_a_geometry_engine(self):
+        self.assertFalse(industries.has_ai_read_modes("HVAC"))
+
+    def test_general_does_not(self):
+        self.assertFalse(industries.has_ai_read_modes("General"))
+
+    def test_an_unknown_industry_does_not(self):
+        self.assertFalse(industries.has_ai_read_modes("Marine"))
 
 
 class AnIndustryWithNoRuleSetRaisesRatherThanGuessing(unittest.TestCase):
@@ -55,11 +82,11 @@ class AnIndustryWithNoRuleSetRaisesRatherThanGuessing(unittest.TestCase):
 
     def test_scan_layers_raises_for_an_unbuilt_industry(self):
         with self.assertRaises(ValueError):
-            industries.scan_layers("ELV", "/x/does/not/matter.pdf")
+            industries.scan_layers("Marine", "/x/does/not/matter.pdf")
 
     def test_extract_raises_for_an_unbuilt_industry(self):
         with self.assertRaises(ValueError):
-            industries.extract("ELV", "/x/does/not/matter.pdf", {}, 9.0)
+            industries.extract("Marine", "/x/does/not/matter.pdf", {}, 9.0)
 
     def test_extract_threads_vision_tag_reader_through_to_hvac(self):
         """item 2: this dispatcher's own job for the new parameter is
@@ -74,30 +101,61 @@ class AnIndustryWithNoRuleSetRaisesRatherThanGuessing(unittest.TestCase):
         fake_hvac.extract.assert_called_once()
         self.assertIs(fake_hvac.extract.call_args.kwargs["vision_tag_reader"], reader)
 
+
+class ExtractAiReadIsASeparateEntryPointFromExtract(unittest.TestCase):
+    """item 63: extract()'s own signature (layer_map, pt_per_ft) is HVAC's
+    Step-1 geometry shape -- an industry with no geometry engine gets its
+    own entry point, not an overload with those params ignored."""
+
+    def test_extract_still_raises_for_elv_it_has_no_geometry_shape(self):
+        with self.assertRaises(ValueError):
+            industries.extract("ELV", "/x/does/not/matter.pdf", {}, 9.0)
+
+    def test_extract_ai_read_raises_for_an_industry_with_no_ai_read_shape(self):
+        with self.assertRaises(ValueError):
+            industries.extract_ai_read("HVAC", "/x/does/not/matter.pdf", mock.Mock())
+
+    def test_extract_ai_read_threads_path_and_reader_through_to_elv(self):
+        fake_elv = mock.Mock()
+        fake_elv.extract.return_value = {"method": "ai_tiled", "pages": []}
+        reader = mock.Mock()
+        with mock.patch.object(industries, "_elv", return_value=fake_elv):
+            industries.extract_ai_read("ELV", "/x/does/not/matter.pdf", reader)
+        fake_elv.extract.assert_called_once()
+        args, kwargs = fake_elv.extract.call_args
+        self.assertEqual(args, ("/x/does/not/matter.pdf", reader))
+
+    def test_summary_text_dispatches_to_elv_too(self):
+        fake_elv = mock.Mock()
+        fake_elv.summary_text.return_value = "an AI reading"
+        with mock.patch.object(industries, "_elv", return_value=fake_elv):
+            text = industries.summary_text("ELV", {"method": "ai_tiled"})
+        self.assertEqual(text, "an AI reading")
+
     def test_summary_text_raises_for_an_unbuilt_industry(self):
         with self.assertRaises(ValueError):
-            industries.summary_text("ELV", {})
+            industries.summary_text("Marine", {})
 
     def test_layer_preview_raises_for_an_unbuilt_industry(self):
         with self.assertRaises(ValueError):
-            industries.layer_preview("ELV", "/x/does/not/matter.pdf", "k1")
+            industries.layer_preview("Marine", "/x/does/not/matter.pdf", "k1")
 
     def test_roles_and_scales_are_just_empty_not_an_error(self):
         """Read-only lookups used to populate a combo box -- an empty list
         (nothing to offer yet) rather than a raised error, since nothing
         here is being asked to measure anything."""
-        self.assertEqual(industries.roles("ELV"), [])
-        self.assertEqual(industries.scales("ELV"), {})
+        self.assertEqual(industries.roles("Marine"), [])
+        self.assertEqual(industries.scales("Marine"), {})
 
     def test_review_rows_is_just_empty_not_an_error(self):
-        self.assertEqual(industries.review_rows("ELV", {"labels": []}), [])
+        self.assertEqual(industries.review_rows("Marine", {"labels": []}), [])
 
     def test_symbol_counts_and_areas_is_just_empty_not_an_error(self):
-        self.assertEqual(industries.symbol_counts_and_areas("ELV", {}), [])
+        self.assertEqual(industries.symbol_counts_and_areas("Marine", {}), [])
 
     def test_writeup_note_and_derivation_example_are_just_empty_not_an_error(self):
-        self.assertEqual(industries.writeup_note("ELV"), "")
-        self.assertEqual(industries.derivation_example("ELV"), "")
+        self.assertEqual(industries.writeup_note("Marine"), "")
+        self.assertEqual(industries.derivation_example("Marine"), "")
 
 
 class WriteupGuidanceIsHvacsOwnAndLivesHereNotInTheEngine(unittest.TestCase):
@@ -140,10 +198,10 @@ class SavedLayerRolesIsStep1sOwnCrossTenderMemory(unittest.TestCase):
     """
 
     def test_an_unbuilt_industry_has_no_memory_to_read(self):
-        self.assertEqual(industries.saved_layer_roles("ELV"), {})
+        self.assertEqual(industries.saved_layer_roles("Marine"), {})
 
     def test_an_unbuilt_industry_silently_ignores_a_remember_call(self):
-        industries.remember_layer_roles("ELV", {"k1": "supply"})  # must not raise
+        industries.remember_layer_roles("Marine", {"k1": "supply"})  # must not raise
 
     def test_hvac_reads_whatever_hvac_takeoff_itself_has_saved(self):
         with mock.patch.object(industries, "_hvac") as hv:
@@ -250,7 +308,7 @@ class CorrectingAReadingActuallyChangesTheNumbers(unittest.TestCase):
 
     def test_an_unbuilt_industry_never_applies_an_edit(self):
         result = self._result()
-        ok = industries.apply_review_edit("ELV", result, 0, "3 TR")
+        ok = industries.apply_review_edit("Marine", result, 0, "3 TR")
         self.assertFalse(ok)
         self.assertEqual(result["tr_labels"], [8.0])
 

@@ -35,6 +35,9 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (  # noqa: E402
 import roles as R  # noqa: E402
 import theme  # noqa: E402
 import workspace as W  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__))), "prism_terminal"))
+from core import agents as A  # noqa: E402
 from licensing import designation as D, token as T  # noqa: E402
 from licensing.token import TokenError  # noqa: E402
 
@@ -352,6 +355,15 @@ class RoleTable(unittest.TestCase):
                 self.assertIn("visual", role.stages)
             else:
                 self.assertNotIn("media", role.stages)
+
+    def test_a_fresh_marketing_member_defaults_to_prism_image(self):
+        """Against the REAL catalogue, not a fake one: marketing is the
+        role with "visual" in its stages, so a brand-new member's first
+        picked tool for it must be Prism Image (FLUX 3 Klein) — the
+        owner's own "default and first choice" instruction, 2026-11-07 —
+        not ChatGPT or any browser tool."""
+        picked = R.default_agents("marketing", A.CATEGORIES)
+        self.assertEqual(picked.get("visual"), "Prism Image")
 
 
 if __name__ == "__main__":

@@ -127,11 +127,17 @@ class PickingAnAlternative(unittest.TestCase):
     def test_tools_the_user_configured_come_first(self):
         """They picked them, which almost always means they are signed in —
         and a signed-out alternative fails exactly as fast as the tool it is
-        replacing."""
+        replacing. "Claude" here (not "NotebookLM", pre-2026-11-08): the
+        research category was narrowed that day (owner's own urgent call)
+        to Grok/Claude/ChatGPT — Perplexity itself was pulled too, a few
+        hours later the same day, once Chrome 157 proved to crash
+        chromedriver on its page every single time, cookies/cache cleared
+        or not — this test needs its example to actually BE a member of
+        the category it is testing against."""
         picks = A.alternatives_for(
             "research", ["Perplexity"],
-            {"agents": {"research": "Perplexity", "brains": "NotebookLM"}})
-        self.assertEqual(picks[0], "NotebookLM")
+            {"agents": {"research": "Perplexity", "brains": "Claude"}})
+        self.assertEqual(picks[0], "Claude")
 
     def test_prisms_own_renderers_are_never_the_alternative(self):
         """They are local renderers, not web tools. A stage that failed in a
@@ -212,6 +218,152 @@ class GoogleGeminiIsChatGPTsRealFallback(unittest.TestCase):
     def test_it_stays_in_the_visual_category_and_the_registry(self):
         self.assertIn("Google Gemini", A.CATEGORIES["visual"]["agents"])
         self.assertIn("Google Gemini", A.AGENT_REGISTRY)
+
+
+class PrismImageIsTheDefaultVisualTool(unittest.TestCase):
+    """2026-11-07, the owner's own call: "replace that particular step
+    where usually chatgpt is responsible for the generation of images...
+    with image generation through API key... FLUX 3 Klein... made that
+    thing as the default and first choice." Same shape as Prism Studio/
+    Reel/Motion (a local=... registry entry, see core.automation._run_local
+    and core.image_gen), first in the catalogue so roles.default_agents()
+    -- which always picks a category's first name -- hands it to a fresh
+    install without anyone having to find it in Settings."""
+
+    def test_it_is_registered_as_a_local_renderer(self):
+        entry = A.AGENT_REGISTRY["Prism Image"]
+        self.assertEqual(entry.get("local"), "flux_image")
+
+    def test_it_is_first_in_the_visual_catalogue(self):
+        self.assertEqual(A.CATEGORIES["visual"]["agents"][0], "Prism Image")
+
+    def test_it_is_not_offered_as_a_browser_fallback(self):
+        """Local agents are excluded from alternatives_for() -- a stage
+        that failed in a browser is not fixed by handing it to one, and
+        the reverse holds too: nothing should ever try to drive "Prism
+        Image" as a Chrome tab."""
+        for picks in (A.alternatives_for("visual", []),
+                     A.alternatives_for("visual", ["ChatGPT"])):
+            self.assertNotIn("Prism Image", picks)
+
+    def test_every_alternative_still_resolves_with_it_first(self):
+        """The existing "first TWO untried, non-local tools" fallback
+        chain for a real browser failure must still skip straight past
+        this local entry to Canva/Gemini, not choke on it being first."""
+        picks = A.alternatives_for("visual", ["ChatGPT"], {"agents": {}})
+        self.assertTrue(picks)
+        for name in picks:
+            self.assertFalse(A.AGENT_REGISTRY[name].get("local"))
+
+    def test_the_visual_stage_dispatches_to_core_image_gen(self):
+        """The one place a "visual" stage picked as "Prism Image" actually
+        runs: _run_local("flux_image", ...) must hand off to
+        core.image_gen.generate, the same way "reel_web"/"reel"/"motion"
+        hand off to their own renderers — not silently fall through to
+        "Unknown local agent". `query` (the run's own real ask — a
+        follow-up's "use this logo" and nothing else, on a follow-up) must
+        reach it too, not just whatever prior_text happens to hold —
+        2026-11-08's own follow-up bug. `skill_text` (added the same day,
+        same ask: a post's own design rules vary by occasion/client, and
+        a matched skill's house doctrine is this pipeline's own existing
+        way of saying "different rules for a different kind of job") must
+        reach it too, defaulting to "" when the stage matched no skill —
+        never a missing kwarg, since generate() always reads it."""
+        from unittest import mock
+        from core import image_gen as IG
+        with mock.patch.object(IG, "generate", return_value=(
+                "/tmp/flux_1.png", "FLUX 3 Klein drew the image")) as gen:
+            out, note = AU._run_local(
+                "flux_image", "a red panda astronaut", [],
+                {"openrouter_api_key": "k"}, "visual",
+                query="draw our mascot")
+        gen.assert_called_once_with("draw our mascot",
+                                    "a red panda astronaut",
+                                    {"openrouter_api_key": "k"}, [],
+                                    skill_text="")
+        self.assertEqual(out, "/tmp/flux_1.png")
+        self.assertIn("FLUX 3 Klein", note)
+
+    def test_a_matched_skill_reaches_core_image_gen_too(self):
+        from unittest import mock
+        from core import image_gen as IG
+        with mock.patch.object(IG, "generate", return_value=("/x.png", "x")) as gen:
+            AU._run_local("flux_image", "a red panda astronaut", [],
+                          {"openrouter_api_key": "k"}, "visual",
+                          query="draw our mascot",
+                          skill_text="PRISM SKILL — house doctrine...")
+        self.assertEqual(gen.call_args.kwargs["skill_text"],
+                         "PRISM SKILL — house doctrine...")
+
+    def test_a_followup_on_visual_carries_the_original_posts_content(self):
+        """The exact scenario reported 2026-11-08: a first run made a post
+        (content stage wrote the real brief); a follow-up then said only
+        "use this logo". Driven through the real automation.run() — the
+        follow-up's own query AND the original run's seeded content must
+        both reach generate(), not just the follow-up's bare one-liner."""
+        from unittest import mock
+        from core import image_gen as IG
+        with mock.patch.object(AU, "_get_driver",
+                              return_value=(mock.MagicMock(), True)), \
+                mock.patch.object(IG, "generate", return_value=(
+                    "/tmp/flux_2.png",
+                    "FLUX 3 Klein drew: a red panda holding our logo")) as gen:
+            responses, links = AU.run(
+                {}, {"openrouter_api_key": "k"}, attachments=[],
+                prior_responses={"content": [
+                    "a launch post for our valve line, playful tone"]},
+                query="use this logo",
+                custom_stages=[("visual", "Prism Image", ["use this logo"])],
+                failover=False)
+        gen.assert_called_once()
+        args = gen.call_args[0]
+        self.assertEqual(args[0], "use this logo")
+        self.assertIn("a launch post for our valve line, playful tone",
+                      args[1])
+        self.assertEqual(links["visual"], "/tmp/flux_2.png")
+
+    def test_the_artwork_stage_routes_to_generate_artwork_not_generate(self):
+        """"artwork" (a Reel's several-picture stage, core.reel_web's own
+        MAX_GENERATED) is NOT the single-image "visual" path — a run whose
+        agent for it is "Prism Image" must call generate_artwork (the
+        multi-prompt, web-less-safe one), with the real user query and
+        prior responses, and land every path it returns into this run's
+        own responses/links. Driven through the real automation.run(),
+        Chrome stubbed out since every stage here is local."""
+        from unittest import mock
+        from core import image_gen as IG
+        with mock.patch.object(AU, "_get_driver",
+                              return_value=(mock.MagicMock(), True)), \
+                mock.patch.object(IG, "generate_artwork", return_value=(
+                    ["/tmp/a.png", "/tmp/b.png"],
+                    "FLUX 3 Klein drew 2 image(s).")) as gen:
+            responses, links = AU.run(
+                {}, {"openrouter_api_key": "k"}, attachments=[],
+                query="make a Dhanteras post for this company in Vadodara",
+                custom_stages=[("artwork", "Prism Image", ["anything"])],
+                failover=False)
+        gen.assert_called_once()
+        args, kwargs = gen.call_args
+        self.assertEqual(args[0],
+                         "make a Dhanteras post for this company in Vadodara")
+        self.assertEqual(kwargs["has_own_artwork"], False)
+        self.assertEqual(responses["artwork"], ["FLUX 3 Klein drew 2 image(s)."])
+        self.assertEqual(links["artwork"], "/tmp/a.png")
+
+    def test_has_own_artwork_is_true_when_the_client_attached_a_logo(self):
+        from unittest import mock
+        from core import image_gen as IG
+        with mock.patch.object(AU, "_get_driver",
+                              return_value=(mock.MagicMock(), True)), \
+                mock.patch.object(IG, "generate_artwork",
+                                  return_value=(["/tmp/a.png"], "ok")) as gen:
+            AU.run({}, {"openrouter_api_key": "k"},
+                  attachments=[{"path": "/tmp/their_logo.png",
+                               "name": "their_logo.png"}],
+                  query="make a reel",
+                  custom_stages=[("artwork", "Prism Image", ["anything"])],
+                  failover=False, chatgpt_analysis=False)
+        self.assertTrue(gen.call_args.kwargs["has_own_artwork"])
 
 
 # ── 3. the retry pass ────────────────────────────────────────────────────────

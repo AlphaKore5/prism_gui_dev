@@ -38,6 +38,7 @@ from addons.boq import cad_render
 from addons.boq import openrouter_writer
 from addons.boq.measured import MeasuredTable
 from addons.boq.pricing import PricingTable
+from addons.boq.elv_dialog import ElvReadDialog
 from addons.boq.takeoff import IndustryTakeoffDialog
 from addons.boq.workers import OpenRouterWriteWorker
 from widgets.output_panel import short_duration
@@ -679,13 +680,27 @@ class BoqDialog(PrismDialog):
 
     def _on_industry_changed(self, industry: str):
         """Item 26: the PDF-takeoff button is only ever offered for an
-        industry that has one of its own (today, only HVAC) -- an ELV or
-        pharma-tech job must not be shown a button that would silently run
-        HVAC's own OCR/rules against a drawing that was never one."""
+        industry that has one of its own (HVAC, ELV) -- a pharma-tech job
+        must not be shown a button that would silently run HVAC's own
+        OCR/rules (or ELV's own AI read) against a drawing that was never
+        either one. The button's own TEXT must follow the selection too --
+        found live, 7 Nov 2026: it was hardcoded to say "HVAC PDF
+        takeoff…" even while ELV was selected, left over from when HVAC
+        was the only industry with one."""
         self.takeoff_btn.setVisible(industries.has_takeoff(industry))
+        self.takeoff_btn.setText(i18n.t("{industry} PDF takeoff…").format(industry=industry))
 
     def _open_industry_takeoff(self):
-        dlg = IndustryTakeoffDialog(self.industry_combo.currentText(), self, cfg=self.cfg)
+        # item 63: an industry read purely by an AI vision model (no
+        # geometry engine of its own, today only ELV) gets its own dialog
+        # shape -- IndustryTakeoffDialog's Step 1 (which line colour is
+        # which) has nothing to show for an industry with no layer
+        # geometry to map. Both dialogs expose the same measurements_text()
+        # interface, so everything from here down stays unchanged either way.
+        industry = self.industry_combo.currentText()
+        dlg = (ElvReadDialog(industry, self, cfg=self.cfg)
+              if industries.has_ai_read_modes(industry)
+              else IndustryTakeoffDialog(industry, self, cfg=self.cfg))
         if dlg.exec() == QDialog.Accepted:
             self._use_external_measurements(dlg.measurements_text())
 
@@ -1719,7 +1734,21 @@ class BoqDialog(PrismDialog):
         `_drawing_consent()` yes a browser agent's own upload already goes
         through. Returns (files with the drawing removed if it was
         pulled out, the attachment dict or None) — `files` unchanged, and
-        None, for every other stage or agent."""
+        None, for every other stage or agent.
+
+        item 65 superseded an earlier version of this method that tried
+        drawing_reader.extract() here, specifically, before falling back
+        to a whole-image render: a DXF/DWG's real TEXT/MTEXT now reaches
+        the writer a simpler way, for EVERY stage and EVERY industry, not
+        just this one method's own "recheck" case -- core.boq.measure()
+        itself returns that text (`text_entities`), and self.summary
+        (built from it the moment the file was attached, see _measure())
+        is already folded into the prompt for every write-up/recheck call
+        below, drawing or no drawing. So by the time this method runs,
+        the real text is already in the model's hands either way; what
+        THIS method still decides is only whether to ALSO show the model
+        an actual picture of the drawing, as a visual cross-check against
+        those already-correct numbers -- a vision-capable agent only."""
         if stage != "recheck" or not files or not self.cad_path:
             return files, None
         if files[0].get("path") != self.cad_path:

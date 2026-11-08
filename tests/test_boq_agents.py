@@ -64,9 +64,18 @@ class EveryPrismAgentHasAGenerationAndAFollowupModel(unittest.TestCase):
         follow-up/recheck tier is specifically the one "Make with
         drawing"/"Verify and remake" run on, so using a text-only sibling
         there to satisfy a lower price would silently reopen the exact
-        vision gap item 38 fixed."""
+        vision gap item 38 fixed.
+
+        item 62 (7 Nov 2026), a second exception: "Prism Agent Claude" now
+        maps both tiers to claude-haiku-5.5 too -- the owner's own request,
+        to compare a Haiku-written BOQ against "Prism Agent Deep"'s
+        DeepSeek one directly, with nothing about the comparison muddied
+        by a tier switching models partway through a run. Haiku has vision
+        at both tiers already (PRISM_AGENT_HAS_VISION), so this carries no
+        vision regression the way reusing a text-only model would."""
+        same_both_tiers_on_purpose = {"Prism Agent Deep", "Prism Agent Claude"}
         for name in boq_agents.PRISM_AGENTS:
-            if name == "Prism Agent Deep":
+            if name in same_both_tiers_on_purpose:
                 continue
             self.assertNotEqual(boq_agents.PRISM_AGENT_MODELS[name],
                                 boq_agents.PRISM_AGENT_FOLLOWUP_MODELS[name])

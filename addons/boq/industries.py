@@ -22,11 +22,16 @@ from collections import defaultdict
 
 GENERAL = "General"
 HVAC = "HVAC"
+# item 63 (7 Nov 2026): the real-world umbrella term for CCTV, access
+# control, PA, structured cabling and the rest -- one entry, not a
+# separate CCTV/ELV pair, since those are the same trade's own drawing
+# conventions in practice, not two different rule-sets.
+ELV = "ELV"
 
 # Shown in the dropdown, in this order -- General (no special rule-set)
 # first, since that is the common case for an industry with no PDF-takeoff
 # of its own yet.
-NAMES = [GENERAL, HVAC]
+NAMES = [GENERAL, HVAC, ELV]
 
 # A label read confidently enough to trust without a second look --
 # hvac_takeoff's own cutoff (its "unread" warning list already flags
@@ -45,7 +50,7 @@ EDITABLE_KINDS = {"tr", "cfm"}
 
 def has_takeoff(industry: str) -> bool:
     """Whether `industry` has its own PDF-takeoff tool to offer."""
-    return industry == HVAC
+    return industry in (HVAC, ELV)
 
 
 def has_ai_tag_recheck(industry: str) -> bool:
@@ -57,12 +62,36 @@ def has_ai_tag_recheck(industry: str) -> bool:
     return industry == HVAC
 
 
+def has_ai_read_modes(industry: str) -> bool:
+    """Whether `industry` is read PURELY by addons/boq/drawing_reader.py's
+    shared reader -- no vector-geometry engine behind it at all (item 63,
+    generalized into the shared reader at item 64). Separate from
+    has_ai_tag_recheck(): HVAC's geometry measurement is still the primary
+    source there, with AI only supplementing OCR on top of it; here, for an
+    industry with no geometry engine of its own yet, the shared reader's
+    own DXF-entities-first/AI-tiled-fallback result IS the whole takeoff.
+    Mutually exclusive with has_ai_tag_recheck() today (no industry needs
+    both shapes at once), but nothing stops a future one from growing a
+    real geometry engine and moving from this gate to that one."""
+    return industry == ELV
+
+
 def _hvac():
     """Imported lazily: hvac_takeoff/ carries its own heavy OCR/PDF
     dependencies (pdfplumber, pypdfium2, rapidocr) that nobody who never
     touches the HVAC industry should be made to import just by opening
     the BOQ add-on."""
     import hvac_takeoff.hvac_takeoff as m
+    return m
+
+
+def _elv():
+    """Imported lazily, same reasoning as _hvac() -- drawing_reader carries
+    its own optional rapidocr/pypdfium2/ezdxf dependencies. Named `_elv`
+    (not `_drawing_reader`) because this is the lazy accessor ELV's own
+    dispatch uses; the module itself (addons/boq/drawing_reader.py) is
+    shared, not ELV-specific."""
+    from addons.boq import drawing_reader as m
     return m
 
 
@@ -230,7 +259,26 @@ def summary_text(industry: str, result: dict) -> str:
     BoqDialog._use_external_measurements)."""
     if industry == HVAC:
         return _hvac().summary_text(result)
+    if industry == ELV:
+        return _elv().summary_text(result)
     raise ValueError(f"No PDF-takeoff rule-set for {industry!r}")
+
+
+def extract_ai_read(industry: str, path: str, tag_reader, log=None) -> dict:
+    """Step 2 for an industry whose whole takeoff IS the shared reader
+    (has_ai_read_modes()) -- a separate entry point from extract() above,
+    not an overload of it: extract()'s own signature (layer_map, pt_per_ft)
+    is HVAC's Step-1 geometry shape, which this kind of industry has none
+    of. `path` is a PDF, DWG or DXF (drawing_reader.py decides which
+    reading path from the extension, DXF-entities-first); `tag_reader` is
+    the same plain callback shape hvac_takeoff.vision_vav_recount() already
+    uses -- built and owned by addons/boq/workers.py, never by this module
+    or drawing_reader.py itself. No `mode` parameter any more (item 64):
+    the shared reader always tries real DXF entities first and always
+    tiles for the AI fallback, never a user-facing whole/tiled choice."""
+    if industry == ELV:
+        return _elv().extract(path, tag_reader, log=log or (lambda *a: None))
+    raise ValueError(f"No AI-read rule-set for {industry!r}")
 
 
 def review_rows(industry: str, result: dict) -> list[dict]:

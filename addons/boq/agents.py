@@ -96,7 +96,14 @@ NO_RESEARCH = "No research"
 PRISM_AGENTS = ["Prism Agent Claude", "Prism Agent Deep"]
 
 PRISM_AGENT_MODELS = {
-    "Prism Agent Claude": "anthropic/claude-sonnet-5.5",
+    # item 62 (7 Nov 2026): was claude-sonnet-5.5. Swapped to Haiku so
+    # "Prism Agent Claude" runs on the SAME model at both tiers (the
+    # follow-up tier below was already Haiku) -- the owner's own request,
+    # to compare a Haiku-written BOQ against "Prism Agent Deep"'s DeepSeek
+    # one directly, not Sonnet's. Haiku has vision too (PRISM_AGENT_HAS_VISION
+    # below, and this file's own comment on input_modalities), so nothing
+    # about "Make with drawing" changes.
+    "Prism Agent Claude": "anthropic/claude-haiku-5.5",
     # item 38 (2 Nov 2026): was deepseek-v3.2, text-only -- no DeepSeek
     # model at either tier could ever see a drawing, so "Make with
     # drawing"/"Verify and remake" on this agent silently fell back to
