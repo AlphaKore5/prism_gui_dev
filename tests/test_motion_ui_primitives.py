@@ -304,3 +304,88 @@ class InChromium(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ── the rest of the UI kit: checklist, window, swatches ─────────────────────
+
+class UIKitSchemaAndTimes(unittest.TestCase):
+    def test_the_model_is_told_about_the_three_new_types(self):
+        for name in ("ui_checklist", "ui_window", "ui_swatches"):
+            self.assertIn(name, generate._NODE_TYPE_NAMES)
+
+    def test_their_scene_local_times_are_shifted_into_the_second_scene(self):
+        scenes = [
+            {"id": "a", "duration": 3, "nodes": [{"id": "x", "type": "text", "content": "a", "position": [1, 1]}]},
+            {"id": "b", "duration": 3, "nodes": [
+                {"id": "cl", "type": "ui_checklist", "position": [540, 500],
+                 "items": [{"label": "One", "at": 0.5}, {"label": "Two", "at": 1.5}]},
+                {"id": "win", "type": "ui_window", "position": [540, 900], "play_at": 0.8, "play_for": 1.5},
+                {"id": "sw", "type": "ui_swatches", "position": [540, 1500], "at": 2.0,
+                 "groups": [["#111", "#C96442"], ["#0B1F3A", "#F5B301"]]}]},
+        ]
+        r = resolve_motion_spec(validate_motion_spec(_spec(None, scenes=scenes)))
+        nodes = {n["id"]: n for n in r["scenes"][1]["nodes"]}
+        self.assertEqual([i["at"] for i in nodes["cl"]["items"]], [3.5, 4.5])
+        self.assertAlmostEqual(nodes["win"]["play_at"], 3.8)
+        self.assertAlmostEqual(nodes["sw"]["at"], 5.0)
+
+    def test_the_checker_estimates_sensible_boxes(self):
+        l, t, r, b = motion_inspect._node_bounds({"type": "ui_checklist", "position": [540, 600], "font_size": 34,
+                                                  "width": 760, "items": [{"label": "a"}] * 3}, 1080, 1920)
+        self.assertAlmostEqual(r - l, 760)
+        self.assertTrue(250 < b - t < 700, b - t)
+        l, t, r, b = motion_inspect._node_bounds({"type": "ui_swatches", "position": [540, 600], "dot_size": 30,
+                                                  "groups": [["#1", "#2", "#3"], ["#4", "#5", "#6"]]}, 1080, 1920)
+        self.assertTrue(250 < r - l < 700, r - l)
+
+
+@unittest.skipUnless(_chromium(), "Playwright's Chromium is not installed")
+class UIKitInChromium(unittest.TestCase):
+    _session = InChromium._session          # the helpers, not InChromium's tests
+    _at = staticmethod(InChromium._at)
+
+    def test_checklist_rows_arrive_at_their_times_and_their_underlines_fill(self):
+        page = self._session(_spec([{"id": "cl", "type": "ui_checklist", "position": [960, 500], "width": 800, "font_size": 36,
+                                     "items": [{"label": "Animating graphics…", "sub": "Kinetic type, spring reveals", "at": 1.0, "fill": 2.0},
+                                               {"label": "Designing sound…", "at": 2.5, "fill": 2.0}]}]))
+        js = """() => { const h = document.querySelector('[data-motion-id="cl"]'); const rows = [...h.firstElementChild.children];
+                return rows.map(r => ({op: parseFloat(getComputedStyle(r).opacity),
+                    fill: new DOMMatrix(getComputedStyle(r.lastElementChild).transform).a, text: r.textContent})); }"""
+        self._at(page, 0.5); a = page.evaluate(js)
+        self._at(page, 1.9); b = page.evaluate(js)
+        self._at(page, 5.0); c = page.evaluate(js)
+        self.assertEqual((a[0]["op"], a[1]["op"]), (0, 0))
+        self.assertGreater(b[0]["op"], 0.9); self.assertEqual(b[1]["op"], 0)
+        self.assertTrue(0.1 < b[0]["fill"] < 0.9, "the first underline is part-way")
+        self.assertEqual((round(c[0]["fill"], 2), round(c[1]["fill"], 2)), (1.0, 1.0))
+        self.assertIn("Kinetic type", a[0]["text"])
+
+    def test_window_shows_its_title_holds_children_and_moves_the_scrubber(self):
+        page = self._session(_spec([{"id": "win", "type": "ui_window", "position": [960, 540], "width": 900, "height": 600,
+                                     "title": "launch_v1 — live preview", "timecode": "00:15", "progress": 0.8,
+                                     "play_at": 1.0, "play_for": 2.0,
+                                     "children": [{"id": "inner", "type": "text", "content": "LAUNCH DAY", "position": [0, 0],
+                                                   "font_size": 80, "fill": "#111111"}]}]))
+        js = """() => { const h = document.querySelector('[data-motion-id="win"]'); const box = h.firstElementChild;
+                const thumb = box.querySelector('div > div > div') ; const kids = [...box.children];
+                const track = kids.find(k => k.firstElementChild && k.style.height === '2px');
+                const t = new DOMMatrix(getComputedStyle(track.firstElementChild).transform);
+                const inner = h.querySelector('[data-motion-id="inner"]');
+                return {title: box.textContent.includes('launch_v1 — live preview'), tc: box.textContent.includes('00:15'),
+                        x: t.e, trackW: parseFloat(track.style.width), innerInside: !!inner}; }"""
+        self._at(page, 0.5); a = page.evaluate(js)
+        self._at(page, 4.0); b = page.evaluate(js)
+        self.assertTrue(a["title"] and a["tc"] and a["innerInside"])
+        self.assertAlmostEqual(a["x"], 0, delta=1)
+        self.assertAlmostEqual(b["x"], b["trackW"] * 0.8, delta=2)
+
+    def test_swatches_pop_in_one_after_another(self):
+        page = self._session(_spec([{"id": "sw", "type": "ui_swatches", "position": [960, 540], "at": 1.0, "stagger": 0.5,
+                                     "groups": [["#111", "#C96442", "#EEE"], ["#0B1F3A", "#F5B301"], ["#10B981", "#ECFDF5"]]}]))
+        js = """() => [...document.querySelector('[data-motion-id="sw"]').firstElementChild.children].map(c => parseFloat(getComputedStyle(c).opacity))"""
+        self._at(page, 0.5); a = page.evaluate(js)
+        self._at(page, 1.7); b = page.evaluate(js)
+        self._at(page, 4.0); c = page.evaluate(js)
+        self.assertEqual(len(a), 3); self.assertEqual(a, [0, 0, 0])
+        self.assertGreater(b[0], 0.9); self.assertEqual(b[2], 0, "the third has not started")
+        self.assertEqual(c, [1, 1, 1])
