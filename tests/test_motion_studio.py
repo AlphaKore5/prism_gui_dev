@@ -28,7 +28,7 @@ ENGINE = os.path.join(GUI, "prism_terminal")
 if ENGINE not in sys.path:
     sys.path.insert(0, ENGINE)
 
-from core.motion import continuity, studio  # noqa: E402
+from core.motion import camera, continuity, studio  # noqa: E402
 from core.motion.fixtures import materials_fixture  # noqa: E402
 from core.motion.schema import MotionValidationError, validate_motion_spec  # noqa: E402
 
@@ -75,7 +75,7 @@ class WhatTheBrowserSendsIsSanitised(unittest.TestCase):
             {"scene": 1, "node": "panel_1", "dx": 12.345, "dy": -9000, "scale": 99,
              "rotation": 15, "opacity": 3, "text": "x" * 500,
              "material": {"blur": 100, "transmission": 0.4, "bogus": 1}},
-            {"scene": 0, "root": True, "seconds": 99, "shot": {"intent": "push", "zoom": 9},
+            {"scene": 0, "root": True, "seconds": 99, "shot": {"intent": "push", "zoom": 99},
              "handoff_easing": "power3.inOut"},
         ])
         node, scene = got
@@ -84,7 +84,8 @@ class WhatTheBrowserSendsIsSanitised(unittest.TestCase):
         self.assertEqual(len(node["text"]), 400)
         self.assertEqual(node["material"], {"blur": 40.0, "transmission": 0.4})
         self.assertEqual(scene["seconds"], 30.0)
-        self.assertEqual(scene["shot"]["zoom"], 3.0)
+        # Bounded by the camera's own cap (raised from 3 to 12; 99 stays out of range).
+        self.assertEqual(scene["shot"]["zoom"], camera.ZOOM_MAX)
         self.assertEqual(scene["handoff_easing"], "power3.inOut")
 
     def test_junk_and_no_op_records_are_dropped_not_raised(self):
