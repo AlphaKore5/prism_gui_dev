@@ -180,9 +180,12 @@ class CameraKeepsCopyInView(unittest.TestCase):
     """core.motion.camera.keep_in_view and the compile that uses it (pure Python)."""
 
     def test_zoom_is_capped_to_what_the_copy_allows_and_never_below_one(self):
-        # A 700x400 box: width is the limit, 1080 / (700 + 2*43.2) = 1.3733.
-        pos, z = camera.keep_in_view((540, 960), 1.75, [190, 760, 890, 1160], 1080, 1920)
+        # A 700x400 box with a plain 4 % margin: width is the limit, 1080 / (700 + 2*43.2) = 1.3733.
+        pos, z = camera.keep_in_view((540, 960), 1.75, [190, 760, 890, 1160], 1080, 1920, margin=0.04)
         self.assertAlmostEqual(z, 1.3733, places=3)
+        # With no margin given the platform's safe area is used (6 % sides, 11 % top, 20 % bottom).
+        pos2, z2 = camera.keep_in_view((540, 960), 1.75, [190, 760, 890, 1160], 1080, 1920)
+        self.assertAlmostEqual(z2, 1080 / (700 + 2 * 64.8), places=2)
         # A narrow box lets the author's own zoom stand.
         pos, z = camera.keep_in_view((540, 960), 1.5, [390, 860, 690, 1060], 1080, 1920)
         self.assertAlmostEqual(z, 1.5)
@@ -198,10 +201,11 @@ class CameraKeepsCopyInView(unittest.TestCase):
     def test_the_centre_is_clamped_so_the_box_stays_in_view(self):
         (cx, cy), z = camera.keep_in_view((540, 1250), 1.75, [228, 400, 624, 1035], 1080, 1920)
         hw, hh = 1080 / (2 * z), 1920 / (2 * z)
-        self.assertLessEqual(cy - hh, 400 - 1920 * 0.04 + 1)
-        self.assertGreaterEqual(cy + hh, 1035 + 1920 * 0.04 - 1)
-        self.assertLessEqual(cx - hw, 228 - 1080 * 0.04 + 1)
-        self.assertGreaterEqual(cx + hw, 624 + 1080 * 0.04 - 1)
+        # Inside the safe area, not just the frame: top 11 % (211 px) and bottom 20 % (384 px) stay clear.
+        self.assertLessEqual(cy - hh, 400 - 0.11 * 1920 + 1)
+        self.assertGreaterEqual(cy + hh, 1035 + 0.20 * 1920 - 1)
+        self.assertLessEqual(cx - hw, 228 - 0.06 * 1080 + 1)
+        self.assertGreaterEqual(cx + hw, 624 + 0.06 * 1080 - 1)
 
     def test_compounding_pushes_and_a_final_hold_do_not_film_copy_out_of_frame(self):
         scenes = [{"start": i * 3.0, "duration": 3.0, "shot": {"intent": "push", "target": [540, 1000]}}
