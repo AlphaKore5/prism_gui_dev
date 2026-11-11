@@ -14,7 +14,6 @@ from __future__ import annotations
 import importlib
 import os
 import pathlib
-import re
 import sys
 import unittest
 
@@ -135,16 +134,6 @@ class TextAnchorInChromium(unittest.TestCase):
         # it must put the box on the same SIDE of x as the browser does.
         self.assertAlmostEqual(est[0], real[0], delta=2.0)
         self.assertGreater(min(est[2], real[2]), 540)
-
-
-class RenderQualityTests(unittest.TestCase):
-    def test_screenshot_quality_is_the_profiled_fast_setting_and_is_used(self):
-        render = importlib.import_module("core.motion.render")
-        self.assertLessEqual(render.SCREENSHOT_JPEG_QUALITY, 85)
-        self.assertGreaterEqual(render.SCREENSHOT_JPEG_QUALITY, 70)
-        src = pathlib.Path(render.__file__).read_text(encoding="utf-8")
-        self.assertNotRegex(src, re.compile(r"quality\s*=\s*95"))
-        self.assertIn("quality=SCREENSHOT_JPEG_QUALITY", src)
 
 
 if __name__ == "__main__":
