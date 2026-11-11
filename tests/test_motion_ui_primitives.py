@@ -58,6 +58,28 @@ class SchemaAndCatalogue(unittest.TestCase):
         self.assertEqual(camera.normalize_shot({"intent": "macro", "zoom": 10})["zoom"], 10.0)
         self.assertEqual(camera.normalize_shot({"intent": "macro", "zoom": 99})["zoom"], camera.ZOOM_MAX)
 
+    def test_a_light_background_resolves_to_paper_unless_the_author_chose_otherwise(self):
+        def look(project, visual=None):
+            spec = _spec([{"id": "t", "type": "text", "content": "x", "position": [1, 1]}])
+            spec["project"].update(project)
+            if visual is not None:
+                spec["visual"] = visual
+            return resolve_motion_spec(validate_motion_spec(spec))["project"].get("look")
+        self.assertEqual(look({"background": "#FAF9F6"}), "paper")
+        self.assertEqual(look({"background": "#ffffff"}), "paper")
+        self.assertIsNone(look({"background": "#07091A"}))
+        self.assertEqual(look({"background": "#FAF9F6", "look": "tech"}), "tech")
+        self.assertIsNone(look({"background": "#FAF9F6"}, {"spotlight": {"color": "rgba(56,189,248,0.2)"}}),
+                          "an author who set a backdrop value keeps full control")
+        self.assertEqual(look({"background": "#FAF9F6"}, {"look": "ink"}), None,
+                         "a look named under visual is the runtime's to read; the resolver adds none")
+
+    def test_the_storyboard_turn_teaches_the_looks(self):
+        text = generate.storyboard_instructions("a reel", skeleton="cinematic_glass")
+        self.assertIn("LOOK — set project.look", text)
+        self.assertIn('"look": "paper|ink|tech"', text)
+        self.assertNotIn('"background": "#07091A"', text, "the template no longer nudges every film dark")
+
     def test_the_model_is_told_about_the_new_types(self):
         for name in ("cursor", "ui_pill", "ui_input"):
             self.assertIn(name, generate._NODE_TYPE_NAMES)
@@ -221,6 +243,50 @@ class InChromium(unittest.TestCase):
         self.assertEqual(b["ph"], "hidden"); self.assertEqual(b["vis"], 19)
         self.assertEqual(b["btn"], "rgb(161, 161, 170)", "still grey before it is sent")
         self.assertEqual(c["btn"], "rgb(17, 17, 17)", "ink once sent")
+
+    def test_the_caret_sits_on_the_text_line_not_below_it(self):
+        page = self._session(_spec([{
+            "id": "t", "type": "text", "position": [960, 540], "font_size": 100, "fill": "#111111",
+            "type_on": True, "type_rate": 10, "reveal_start": 0.0, "anchor": [0, 0.5],
+            "runs": [{"text": "Shre"}]}]))
+        self._at(page, 0.35)      # 4th character just typed; its caret is showing
+        r = page.evaluate("""() => { const h = document.querySelector('[data-motion-id="t"]');
+              const kids = [...h.querySelectorAll('span > span')];
+              const chars = kids.filter(s => s.textContent.length === 1);
+              const caret = kids.find(s => s.firstElementChild && s.style.width === '0px' && getComputedStyle(s).visibility === 'visible');
+              const c = chars[3].getBoundingClientRect(), b = caret.firstElementChild.getBoundingClientRect();
+              return {chTop: c.top, chBottom: c.bottom, barTop: b.top, barBottom: b.bottom}; }""")
+        centre_gap = abs((r["barTop"] + r["barBottom"]) / 2 - (r["chTop"] + r["chBottom"]) / 2)
+        self.assertLess(centre_gap, 25, f"the bar's centre is {centre_gap:.0f}px from the line's centre: {r}")
+        self.assertLess(r["barTop"], r["chBottom"])
+        self.assertGreater(r["barBottom"], r["chTop"])
+
+    def _corner_and_centre(self, page):
+        from io import BytesIO
+        from PIL import Image
+        self._at(page, 0.2)
+        im = Image.open(BytesIO(page.screenshot(type="png"))).convert("RGB")
+        w, h = im.size
+        return im.getpixel((8, 8)), im.getpixel((w // 2, h // 2)), im.getpixel((w - 8, h - 8)), im.getpixel((w // 4, h // 4))
+
+    def test_a_light_page_is_flat_paper_with_no_wash_ring_or_vignette(self):
+        spec = _spec([{"id": "t", "type": "text", "content": "x", "position": [60, 60], "font_size": 20}])
+        spec["project"]["background"] = "#FAF9F6"                 # no look, no visual: auto-paper
+        for px in self._corner_and_centre(self._session(spec)):
+            for channel, want in zip(px, (250, 249, 246)):
+                self.assertAlmostEqual(channel, want, delta=3, msg=f"not flat paper: {px}")
+
+    def test_a_dark_page_with_no_look_keeps_the_tech_backdrop(self):
+        spec = _spec([{"id": "t", "type": "text", "content": "x", "position": [60, 60], "font_size": 20}])
+        spec["project"]["background"] = "#07091A"
+        corner, centre, *_ = self._corner_and_centre(self._session(spec))
+        self.assertNotEqual(corner, centre, "the spotlight / vignette still paint on a dark page")
+
+    def test_an_explicit_tech_look_on_a_light_page_is_respected(self):
+        spec = _spec([{"id": "t", "type": "text", "content": "x", "position": [60, 60], "font_size": 20}])
+        spec["project"].update(background="#FAF9F6", look="tech")
+        corner, centre, *_ = self._corner_and_centre(self._session(spec))
+        self.assertNotEqual(corner, centre)
 
     def test_an_eight_times_push_keeps_a_word_inside_the_frame_and_crisp(self):
         page = self._session(_spec(
