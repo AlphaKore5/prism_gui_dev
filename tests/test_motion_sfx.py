@@ -64,6 +64,15 @@ class Cues(unittest.TestCase):
         self.assertIn(2.2, [round(t, 3) for t in by["click"]])
         self.assertEqual([round(t, 3) for t in by["chime"]], [2.4])
 
+    def test_a_node_marked_hit_gets_a_low_hit_as_it_enters(self):
+        r = _spec([[{"id": "d", "type": "ui_pill", "position": [270, 700], "label": "Ready", "check": True, "hit": True,
+                     "animation": {"enter": {"time": 1.6, "duration": 0.3, "tweens": [{"channel": "opacity", "from": 0, "to": 1}]}}}]])
+        hits = [c["t"] for c in sfx.cues(r) if c["kind"] == "hit"]
+        self.assertEqual([round(t, 3) for t in hits], [1.6])
+        x = sfx.synthesize([{"t": 1.6, "kind": "hit", "gain": 1.0}], 3.0, bed=False)
+        self.assertGreater(float(np.abs(x[int(1.6 * sfx.SR):int(1.633 * sfx.SR)]).max()), 0.05)
+        self.assertLess(float(np.abs(x[:int(1.55 * sfx.SR)]).max()), 1e-6)
+
     def test_a_camera_move_whooshes_and_a_still_camera_does_not(self):
         moving = _spec([[TYPED]], camera=[{"time": 0, "position": [270, 480], "zoom": 1.0},
                                           {"time": 1.0, "position": [270, 480], "zoom": 2.0, "duration": 1.0}])

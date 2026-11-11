@@ -39,13 +39,13 @@ class Checks(unittest.TestCase):
     def test_each_part_names_what_it_lacks_and_passes_when_it_has_it(self):
         T = {"id": "n", "type": "text", "content": "Name"}
         cases = {
-            "hook": (_scene({"id": "x", "type": "shape_rect"}), _scene(T)),
+            "hook": (_scene(T), _scene(T, {"id": "w", "type": "text", "content": "What we do, for whom"})),
             "act": (_scene(T), _scene({"id": "i", "type": "ui_input", "text": "hi"})),
             "promise": (_scene({"id": "c", "type": "ui_checklist", "items": [{"label": "a"}]}),
                         _scene({"id": "c", "type": "ui_checklist", "items": [{"label": "a"}, {"label": "b"}, {"label": "c"}]})),
             "proof": (_scene(T), _scene({"id": "w", "type": "ui_window", "children": [T]})),
             "payoff": (_scene({"id": "p", "type": "ui_pill", "label": "x"}),
-                       _scene({"id": "p", "type": "ui_pill", "label": "Done", "check": True})),
+                       _scene({"id": "p", "type": "ui_pill", "label": "Done", "check": True, "hit": True})),
         }
         for name, (bad, good) in cases.items():
             self.assertTrue(story.beat_faults(bad, name), f"{name}: should be sent back")
@@ -89,8 +89,87 @@ class InThePrompts(unittest.TestCase):
         p = generate.scene_instructions(1, 5, row, skeleton="story")
         self.assertIn('THIS SCENE\'S PART: "act"', p)
         self.assertTrue(generate.beat_check(_scene({"id": "t", "type": "text", "content": "x"}), row, "story"))
-        self.assertEqual(generate.beat_check(_scene({"id": "i", "type": "ui_input", "text": "x"}), row, "story"), [])
+        ok = _scene({"id": "i", "type": "ui_input", "text": "x", "width": 800, "height": 220, "focus": True,
+                     "continuity_key": "box"})
+        self.assertEqual(generate.beat_check(ok, row, "story", None, False), [])
         self.assertEqual(generate.beat_check(_scene({"id": "t", "type": "text"}), row, None), [])
+
+
+class FocusContinuityDirection(unittest.TestCase):
+    def _txt(self, nid, size, **extra):
+        n = {"id": nid, "type": "text", "content": "A headline here", "position": [540, 900], "font_size": size}
+        n.update(extra)
+        return n
+
+    def test_exactly_one_focus_and_it_must_be_clearly_the_biggest_thing(self):
+        none = _scene(self._txt("a", 120), self._txt("b", 60))
+        self.assertTrue(any("marks no focus" in f for f in story.focus_faults(none)))
+        two = _scene(self._txt("a", 120, focus=True), self._txt("b", 60, focus=True))
+        self.assertTrue(any("2 nodes are marked focus" in f for f in story.focus_faults(two)))
+        weak = _scene(self._txt("a", 100, focus=True), self._txt("b", 96))
+        self.assertTrue(any("not clearly the biggest" in f for f in story.focus_faults(weak)))
+        good = _scene(self._txt("a", 150, focus=True), self._txt("b", 50))
+        self.assertEqual(story.focus_faults(good), [])
+
+    def test_background_nodes_do_not_compete_for_focus(self):
+        s = _scene(self._txt("a", 150, focus=True), {"id": "bg", "type": "light_field", "position": [540, 960],
+                                                   "width": 1400, "height": 2200, "layer": "background"})
+        self.assertEqual(story.focus_faults(s), [])
+
+    def test_the_shot_must_lead_the_eye_to_the_focus(self):
+        s = _scene(self._txt("name", 150, focus=True), self._txt("tag", 50))
+        s["shot"] = {"intent": "push", "target": "tag"}
+        self.assertTrue(any('goes toward "tag"' in f for f in story.focus_faults(s)))
+        s["shot"] = {"intent": "push", "target": "name"}
+        self.assertEqual(story.focus_faults(s), [])
+        s["shot"] = {"intent": "hold"}
+        self.assertEqual(story.focus_faults(s), [])
+
+    def test_something_carries_from_scene_to_scene(self):
+        a = _scene(self._txt("n", 100, continuity_key="mark"))
+        b_ok = _scene(self._txt("m", 100, continuity_key="mark"))
+        b_cold = _scene(self._txt("m", 100))
+        self.assertEqual(story.continuity_faults(b_ok, a, is_last=True), [])
+        self.assertTrue(any("nothing carries over" in f for f in story.continuity_faults(b_cold, a, is_last=True)))
+        self.assertTrue(any("nothing is offered" in f for f in story.continuity_faults(_scene(self._txt("x", 90)), None)))
+        self.assertEqual(story.continuity_faults(a, None), [])
+
+    def test_the_camera_is_directed_not_repeated(self):
+        sc = lambda *i: [{"shot": {"intent": x}} for x in i]
+        self.assertEqual(story.direction_faults(sc("reveal", "push", "hold", "pull", "resolve")), [])
+        self.assertTrue(any("one idea" in f for f in story.direction_faults(sc("push", "push", "hold", "push", "push"))
+                            + story.direction_faults(sc("push", "push", "push", "push", "push"))))
+        self.assertTrue(any("three scenes in a row" in f for f in story.direction_faults(sc("push", "push", "push", "hold", "pull"))))
+        self.assertTrue(any("ends on a" in f for f in story.direction_faults(sc("reveal", "hold", "pull", "hold", "push"))))
+        self.assertEqual(story.direction_faults(sc("push", "hold")), [], "too few named to judge")
+
+    def test_the_hook_needs_a_plain_line_saying_what_it_is_for_and_the_payoff_a_hit(self):
+        one_line = _scene(self._txt("name", 120))
+        self.assertTrue(any("2 text lines" in f for f in story.beat_faults(one_line, "hook")))
+        two_lines = _scene(self._txt("name", 120), self._txt("what", 50))
+        self.assertEqual(story.beat_faults(two_lines, "hook"), [])
+        pill = {"id": "p", "type": "ui_pill", "label": "Quote ready", "check": True}
+        self.assertTrue(any('"hit": true' in f for f in story.beat_faults(_scene(pill), "payoff")))
+        self.assertEqual(story.beat_faults(_scene(dict(pill, hit=True)), "payoff"), [])
+
+    def test_the_build_loop_hands_the_checks_the_previous_scene_and_the_artwork_flag(self):
+        row = {"beat": "hook", "focus": "the name"}
+        scene = _scene(self._txt("name", 140, focus=True, continuity_key="k"), self._txt("what", 50))
+        self.assertEqual(generate.beat_check(scene, row, "story", None, False, False), [])
+        faults = generate.beat_check(scene, row, "story", None, False, True)
+        self.assertTrue(any("hero image" in f for f in faults), "artwork exists but the hook shows none")
+        with_img = _scene(self._txt("name", 140, focus=True, continuity_key="k"), self._txt("what", 50),
+                          {"id": "img", "type": "image", "src": "asset:art1", "position": [540, 400], "width": 200, "height": 200})
+        self.assertFalse(any("hero image" in f for f in generate.beat_check(with_img, row, "story", None, False, True)))
+        self.assertTrue(generate.shot_faults(_scene(), "story"), "a story scene must name a shot")
+
+    def test_the_prompts_teach_the_new_fields(self):
+        t = generate.storyboard_instructions("a reel", skeleton="story")
+        for needle in ('"focus": "the ONE thing', '"carry":', '"shot": "hold|reveal', "10. FOCUS", "11. CONTINUITY", "12. SHOT", "13. HYPE"):
+            self.assertIn(needle, t)
+        hook = generate.scene_instructions(0, 5, {"seconds": 4, "job": "j", "beat": "hook"}, skeleton="story")
+        self.assertIn("a stranger must know within two seconds WHAT THIS IS FOR", hook)
+        self.assertIn("hit             — true", generate._NODE_CATALOGUE)
 
 
 class WhichProfileARunUses(unittest.TestCase):
