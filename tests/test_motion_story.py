@@ -75,6 +75,10 @@ class InThePrompts(unittest.TestCase):
         self.assertIn("ui_checklist", t)                       # the catalogue it builds from
         self.assertIn("~3.6s", t)                              # 20 s * 0.18 for the hook
 
+    def test_the_model_is_told_a_flat_page_needs_no_glow(self):
+        t = generate.storyboard_instructions("a reel", skeleton="story")
+        self.assertIn("Do NOT add light_field or glass_panel on a flat page", t)
+
     def test_the_old_spine_is_still_selectable(self):
         t = generate.storyboard_instructions("a reel", skeleton="cinematic_glass")
         self.assertIn("THE SPINE", t)
@@ -87,6 +91,17 @@ class InThePrompts(unittest.TestCase):
         self.assertTrue(generate.beat_check(_scene({"id": "t", "type": "text", "content": "x"}), row, "story"))
         self.assertEqual(generate.beat_check(_scene({"id": "i", "type": "ui_input", "text": "x"}), row, "story"), [])
         self.assertEqual(generate.beat_check(_scene({"id": "t", "type": "text"}), row, None), [])
+
+
+class WhichProfileARunUses(unittest.TestCase):
+    def test_the_default_is_unchanged_and_config_can_select_the_story(self):
+        from core import automation
+        self.assertEqual(automation._motion_skeleton("", {}), "cinematic_glass")
+        self.assertEqual(automation._motion_skeleton("", None), "cinematic_glass")
+        self.assertEqual(automation._motion_skeleton("", {"motion_skeleton": "story"}), "story")
+        self.assertEqual(automation._motion_skeleton("brand_launch", {"motion_skeleton": "story"}), "brand_launch",
+                         "a caller's own choice wins")
+        self.assertEqual(automation._motion_skeleton("", {"motion_skeleton": "nonsense"}), "cinematic_glass")
 
 
 if __name__ == "__main__":
