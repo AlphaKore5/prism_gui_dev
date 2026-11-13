@@ -31,6 +31,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from prospector import enrich as E                                  # noqa: E402
 from prospector import exports as X                                 # noqa: E402
+from prospector import gateway as G                                 # noqa: E402
 from prospector import identity as I                                # noqa: E402
 from prospector import importing as IMP                             # noqa: E402
 from prospector import verify as V                                  # noqa: E402
@@ -217,6 +218,96 @@ class TheCompanysDomainIsFoundBeforeTheFindersAsk(unittest.TestCase):
         enriched.assert_not_called()
         checked.assert_called_once_with(lead, {"hunter_api_key": "h"}, {})
         self.assertEqual(done, 1)
+
+
+class EmailsFoundByDomainBeforeThePerPersonAsk(unittest.TestCase):
+    """02-Oct-2026: Hunter's Domain Search is a plain database lookup — confirmed
+    live, the same session this was built: asianpaints.com and tatamotors.com each
+    returned 10 real named people, IDENTICALLY on a repeat call (contrast the
+    Fiber test the same day: 18 of 19 overlapping leads got a DIFFERENT number
+    each run — an agent guessing, not a database). One Domain Search per company
+    can resolve several named leads at once, instead of asking Hunter's ordinary
+    per-person finder once each — same email_find credit either way; this changes
+    what Hunter is asked, never what it costs."""
+
+    def test_one_call_resolves_everyone_already_on_file_at_that_company(self):
+        a = _lead("Asha Rao", "Acme", company_domain="acme.com")
+        b = _lead("Bala Iyer", "Acme Industries", company_domain="acme.com")
+        asked = []
+
+        def get(url, params=None, timeout=None):
+            asked.append(params)
+            return _Http(200, {"data": {"emails": [
+                {"first_name": "Asha", "last_name": "Rao", "value": "asha.rao@acme.com", "type": "personal"},
+                {"first_name": "Bala", "last_name": "Iyer", "value": "bala.iyer@acme.com", "type": "personal"}]}})
+        with mock.patch("requests.get", side_effect=get):
+            V.find_emails_by_domain([a, b], {"hunter_api_key": "h"})
+        self.assertEqual((a.email, a.extra["email_source"]), ("asha.rao@acme.com", "hunter"))
+        self.assertEqual((b.email, b.extra["email_source"]), ("bala.iyer@acme.com", "hunter"))
+        self.assertEqual(len(asked), 1)                       # one call for both, not two
+        self.assertEqual(asked[0]["domain"], "acme.com")
+
+    def test_a_generic_address_is_never_matched_to_a_named_lead(self):
+        a = _lead("Asha Rao", "Acme", company_domain="acme.com")
+        with mock.patch("requests.get", return_value=_Http(200, {"data": {"emails": [
+                {"first_name": "", "last_name": "", "value": "sales@acme.com", "type": "generic"}]}})):
+            V.find_emails_by_domain([a], {"hunter_api_key": "h"})
+        self.assertEqual(a.email, "")
+
+    def test_whoever_it_misses_is_left_untouched_for_find_and_verify(self):
+        a = _lead("Asha Rao", "Acme", company_domain="acme.com")     # not on file there
+        with mock.patch("requests.get", return_value=_Http(200, {"data": {"emails": []}})):
+            V.find_emails_by_domain([a], {"hunter_api_key": "h"})
+        self.assertEqual((a.email, a.extra.get("email_source")), ("", None))
+
+    def test_a_lead_with_no_domain_yet_is_simply_skipped(self):
+        a = _lead("Asha Rao", "Acme")                          # find_domains found nothing
+        called = []
+        with mock.patch("requests.get", side_effect=lambda *a, **k: called.append(1) or _Http(200, {})):
+            V.find_emails_by_domain([a], {"hunter_api_key": "h"})
+        self.assertEqual(called, [])
+
+    def test_someone_who_already_has_an_address_is_not_asked_for_again(self):
+        a = _lead("Asha Rao", "Acme", "asha@sheet.example", company_domain="acme.com")
+        called = []
+        with mock.patch("requests.get", side_effect=lambda *a, **k: called.append(1) or _Http(200, {})):
+            V.find_emails_by_domain([a], {"hunter_api_key": "h"})
+        self.assertEqual(called, [])
+
+    def test_no_hunter_key_is_a_silent_no_op(self):
+        a = _lead("Asha Rao", "Acme", company_domain="acme.com")
+        called = []
+        with mock.patch("requests.get", side_effect=lambda *a, **k: called.append(1) or _Http(200, {})):
+            V.find_emails_by_domain([a], {})
+        self.assertEqual((called, a.email), ([], ""))
+
+    def test_a_broken_call_does_not_crash_and_leaves_the_fallback_its_turn(self):
+        a = _lead("Asha Rao", "Acme", company_domain="acme.com")
+        with mock.patch("requests.get", return_value=_Http(500, {})):
+            V.find_emails_by_domain([a], {"hunter_api_key": "h"})     # must not raise
+        self.assertEqual(a.email, "")
+        with mock.patch("requests.get", side_effect=ConnectionError("down")):
+            V.find_emails_by_domain([a], {"hunter_api_key": "h"})     # must not raise either
+        self.assertEqual(a.email, "")
+
+    def test_a_pooled_call_batches_across_companies_and_applies_results_by_ref(self):
+        a = _lead("Asha Rao", "Acme", company_domain="acme.com")
+        b = _lead("Cy Lund", "Globex", company_domain="globex.com")
+        with mock.patch.object(G, "find_emails", return_value=[
+                {"ref": "p0_0", "email": "asha.rao@acme.com", "provider": "hunter"},
+                {"ref": "p1_0", "email": "cy.lund@globex.com", "provider": "hunter"}]) as find:
+            V.find_emails_by_domain([a, b], {"pool": G.POOL_KEY})
+        self.assertEqual((a.email, b.email), ("asha.rao@acme.com", "cy.lund@globex.com"))
+        [(batch,)] = [c.args for c in find.call_args_list]
+        self.assertEqual({(p["ref"], p["domain"]) for p in batch},
+                         {("p0_0", "acme.com"), ("p1_0", "globex.com")})
+
+    def test_pooled_never_falls_through_to_a_customers_own_key(self):
+        a = _lead("Asha Rao", "Acme", company_domain="acme.com")
+        with mock.patch.object(G, "find_emails", return_value=[]), \
+                mock.patch("requests.get", side_effect=AssertionError("asked Hunter directly, not the pool")):
+            V.find_emails_by_domain([a], {"pool": G.POOL_KEY, "hunter_api_key": "h"})
+        self.assertEqual(a.email, "")
 
 
 class AFinderThatRefusesTheAccountIsAskedOnce(unittest.TestCase):

@@ -63,6 +63,23 @@ _RECORD_SIDES = {
     "lists": (("contact_lists", "People", ""), ("account_lists", "Company", "Company")),
 }
 _CUSTOM_SIDES = (("contact", "Contact"), ("account", "Account"))
+# The Companies page's rail is this same panel over the company-level facets
+# (kind="company"). Apollo's Companies page pins # of employees, Company,
+# Industry and Location and keeps the rest behind More filters; stage, lists
+# and custom fields there are the ACCOUNT's, so each has the one side.
+_COMPANY_PINNED = ("companies", "company_hq", "industries", "headcount")
+_COMPANY_MORE = ("stages", "lists", "keywords", "revenue", "account_imports",
+                 "custom_fields")
+_COMPANY_LABELS = {"companies": "Company", "company_hq": "Location",
+                   "industries": "Industry", "headcount": "# of employees",
+                   "revenue": "Annual revenue", "stages": "Stage", "lists": "Lists",
+                   "keywords": "Keywords", "account_imports": "Account CSV import",
+                   "custom_fields": "Custom fields"}
+_COMPANY_SIDES = {"stages": (("account_stages", "Account", ""),),
+                  "lists": (("account_lists", "Company", ""),)}
+_COMPANY_CUSTOM_SIDES = (("account", "Account"),)
+_COMPANY_CATEGORIES = (("company", "Company"), ("records", "Your records"))
+_COMPANY_OPEN_AT_START = frozenset({"companies", "company_hq"})
 # What a record facet says when there is nothing to pick yet.
 _RECORD_EMPTY = {
     "contact_stages": "",
@@ -936,14 +953,15 @@ class _RecordEditor(_ChipEditor):
     names that exist are offered — a stage or a list nobody has matches
     nobody."""
 
-    def __init__(self, group: str, placeholder: str, parent=None):
+    def __init__(self, group: str, placeholder: str, parent=None, sides=None):
         super().__init__(placeholder, parent)
         self.group = group
-        self.sides = _RECORD_SIDES[group]
+        self.sides = sides or _RECORD_SIDES[group]
         self.facet = self.sides[0][0]               # the side being edited
         frame, self.side_btns = _side_switch([(f, label) for f, label, _p in self.sides],
                                              self.set_facet, self)
         self._col.insertWidget(0, frame)
+        frame.setVisible(len(self.sides) > 1)       # one side: nothing to switch
         self.on_side = None                         # set by the panel: redraw rows
         self._sync_side()
 
@@ -965,16 +983,18 @@ class _CustomEditor(QWidget):
     columns imported sheets brought in, then that column's values, most used
     first, each a toggle — a value checked is kept, OR within the field."""
 
-    def __init__(self, on_value, parent=None):
+    def __init__(self, on_value, parent=None, sides=None):
         super().__init__(parent)
         from PySide6.QtWidgets import QComboBox
         self._on_value = on_value                   # (custom key, value, on)
-        self.scope = _CUSTOM_SIDES[0][0]
+        self._sides = sides or _CUSTOM_SIDES
+        self.scope = self._sides[0][0]
         self.options: dict = {"contact": {}, "account": {}}
         col = QVBoxLayout(self)
         col.setContentsMargins(0, 2, 0, theme.SPACE_3)
         col.setSpacing(theme.SPACE_1 + 2)
-        frame, self.side_btns = _side_switch(_CUSTOM_SIDES, self.set_scope, self)
+        frame, self.side_btns = _side_switch(self._sides, self.set_scope, self)
+        frame.setVisible(len(self._sides) > 1)
         col.addWidget(frame)
         self.field = QComboBox(self)
         self.field.setObjectName("fcustomField")
@@ -999,7 +1019,7 @@ class _CustomEditor(QWidget):
     def set_options(self, options) -> None:
         """{"contact" | "account": {column: [values, most used first]}}."""
         options = options if isinstance(options, dict) else {}
-        self.options = {scope: dict(options.get(scope) or {}) for scope, _l in _CUSTOM_SIDES}
+        self.options = {scope: dict(options.get(scope) or {}) for scope, _l in self._sides}
         self._sync()
 
     def set_scope(self, scope: str) -> None:
@@ -1185,8 +1205,18 @@ class FilterPanel(QWidget):
     saveRequested = Signal()
     pinnedChanged = Signal(list)            # the filters kept in the rail, in its order
 
-    def __init__(self, suggest=None, parent=None, catalog: bool = False):
+    def __init__(self, suggest=None, parent=None, catalog: bool = False,
+                 kind: str = "person"):
         super().__init__(parent)
+        # "person": Find People's rail. "company": the Companies page's — the
+        # same chips, bands and record filters over the company-level facets.
+        self._kind = "company" if kind == "company" else "person"
+        company = self._kind == "company"
+        self._pinned_names = _COMPANY_PINNED if company else _PINNED
+        self._more_names = _COMPANY_MORE if company else _MORE
+        self._order = self._pinned_names + self._more_names
+        self._open_at_start = _COMPANY_OPEN_AT_START if company else _OPEN_AT_START
+        self._similar = self._jobs = self._jobs_box = None   # a person rail only
         self._spec = SearchSpec()
         self._suggest = suggest or static_suggest
         self._sections: dict = {}
@@ -1195,7 +1225,7 @@ class FilterPanel(QWidget):
         # that holds a value. `catalog` is that window's copy of this panel:
         # every filter, narrowed by its search and group, each with a pin.
         self._catalog = bool(catalog)
-        self._pinned = set(_PINNED)
+        self._pinned = set(self._pinned_names)
         self._pin_btns: dict = {}
         self._query = ""
         self._category = ""
@@ -1216,7 +1246,7 @@ class FilterPanel(QWidget):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
         self._build_hidden()
-        for name in _PINNED + _MORE:
+        for name in self._order:
             if name == "changed_jobs_90d":
                 root.addWidget(self._build_jobs())
             else:
@@ -1295,13 +1325,13 @@ class FilterPanel(QWidget):
 
     def pinned(self) -> list:
         """The filters kept in the rail, in the rail's order."""
-        return [n for n in _PINNED + _MORE if n in self._pinned]
+        return [n for n in self._order if n in self._pinned]
 
     def set_pinned(self, names) -> None:
         """Which filters the rail keeps in view (an unknown name is ignored;
         None or nothing known: Apollo's defaults). Emits nothing."""
-        known = [n for n in (names or ()) if n in CATEGORY_OF]
-        self._pinned = set(known) if known else set(_PINNED)
+        known = [n for n in (names or ()) if n in self._order]
+        self._pinned = set(known) if known else set(self._pinned_names)
         for name, btn in self._pin_btns.items():
             btn.setChecked(name in self._pinned)
         self._sync_more()
@@ -1315,7 +1345,7 @@ class FilterPanel(QWidget):
 
     def catalog_names(self) -> list:
         """The filters the window shows now, in order."""
-        return [n for n in _PINNED + _MORE if self._matches(n)]
+        return [n for n in self._order if self._matches(n)]
 
     def open_all_filters(self) -> None:
         """"More filters": the window of every filter (addons/leads/
@@ -1353,7 +1383,13 @@ class FilterPanel(QWidget):
         """The parts the "?" tour can ring, by the key it asks for: a real
         widget already on screen, or (widget, QRect) where the target is a
         region of one. Nothing is built here — a step is drawn around the
-        control the owner is looking at, not a copy of it."""
+        control the owner is looking at, not a copy of it.
+
+        Only the People rail is walked: the Companies page's rail answers the
+        same facet keys, and from a tab that is not showing it would win a key
+        its sibling should answer — the step is then skipped as not drawn."""
+        if self._kind != "person":
+            return {}
         out = {
             # The whole column: Apollo's rail has no title over its facets.
             "filters_head": self,
@@ -1364,7 +1400,8 @@ class FilterPanel(QWidget):
             "facet_changed_jobs": self._jobs,
         }
         for key, facet in _HELP_FACETS.items():
-            out[key] = self._sections[facet]
+            if facet in self._sections:
+                out[key] = self._sections[facet]
         # The badge and Clear all appear only once a filter is set, and the
         # similar-titles box only while Job titles is open.
         return {k: t for k, t in out.items() if _on_screen(t, self)}
@@ -1374,17 +1411,19 @@ class FilterPanel(QWidget):
         scroll the rail to it. Opening a section shows what is already chosen —
         it never edits the spec, and the section is left open afterwards, the
         way it would be if the owner had clicked the header themselves."""
+        if self._kind != "person":
+            return
         facet = _HELP_FACETS.get(key)
         if key == "similar_titles":
             facet = "job_titles"            # the box lives in that facet's editor
-        if facet in _MORE or key == "facet_changed_jobs":
+        if facet in self._more_names or key == "facet_changed_jobs":
             self.set_more_open(True)        # a folded facet can't be pointed at
         section = self._sections.get(facet)
         if section is not None and not section.is_open():
             section.set_open(True)
         # Asked for the whole panel, a scroll area centres it and its top ends
         # up above the rail's edge — so the first facet is what gets scrolled to.
-        target = (self._sections[_PINNED[0]] if key == "filters_head"
+        target = (self._sections[self._order[0]] if key == "filters_head"
                   else self.help_targets().get(key))
         if isinstance(target, QWidget):
             reveal_in_scroll(target)
@@ -1441,6 +1480,23 @@ class FilterPanel(QWidget):
         row.addWidget(self._more_btn, 0, Qt.AlignVCenter)
         return row
 
+    @property
+    def kind(self) -> str:
+        return self._kind
+
+    def categories(self) -> tuple:
+        """The All filters window's groups for this rail."""
+        return _COMPANY_CATEGORIES if self._kind == "company" else CATEGORIES
+
+    def _title(self, name: str) -> str:
+        """What a facet is called on this rail."""
+        if self._kind == "company" and name in _COMPANY_LABELS:
+            return i18n.t(_COMPANY_LABELS[name])
+        return i18n.t(FACET_LABELS.get(name, "Changed jobs in the last 90 days"))
+
+    def _sides(self) -> dict:
+        return _COMPANY_SIDES if self._kind == "company" else _RECORD_SIDES
+
     def _more_widget(self, name: str):
         return self._jobs_box if name == "changed_jobs_90d" else self._sections[name]
 
@@ -1450,7 +1506,7 @@ class FilterPanel(QWidget):
         rail unfolded, all of them. In the All filters window: every filter
         its search and group let through."""
         folded = 0
-        for name in _PINNED + _MORE:
+        for name in self._order:
             if self._catalog:
                 show = self._matches(name)
             else:
@@ -1469,12 +1525,12 @@ class FilterPanel(QWidget):
         if not self._query:
             return True
         title = (i18n.t("Changed jobs in the last 90 days") if name == "changed_jobs_90d"
-                 else i18n.t(FACET_LABELS[name]))
+                 else self._title(name))
         return self._query in title.casefold() or self._query in name.replace("_", " ")
 
     def _build_pins(self) -> None:
         """The All filters window's pins: one beside every filter's header."""
-        for name in _PINNED + _MORE:
+        for name in self._order:
             pin = QToolButton(self)
             pin.setObjectName("fpin")
             pin.setCheckable(True)
@@ -1483,7 +1539,7 @@ class FilterPanel(QWidget):
             pin.setIcon(icons.icon("pin", 14, theme.NEUTRAL[600]))
             pin.setToolTip(i18n.t("Keep this filter in the rail"))
             pin.setAccessibleName(i18n.t("Pin {filter}").format(
-                filter=i18n.t(FACET_LABELS.get(name, "Changed jobs in the last 90 days"))))
+                filter=self._title(name)))
             pin.setChecked(name in self._pinned)
             pin.toggled.connect(lambda on, n=name: self._toggle_pin(n, on))
             if name == "changed_jobs_90d":
@@ -1501,14 +1557,16 @@ class FilterPanel(QWidget):
 
     def _build_section(self, name: str) -> _Section:
         if name == "custom_fields":
-            editor = _CustomEditor(self._custom_value, self)
+            editor = _CustomEditor(self._custom_value, self,
+                                   _COMPANY_CUSTOM_SIDES if self._kind == "company" else None)
             editor.set_options(self._records["custom"])
-            section = _Section(name, i18n.t(FACET_LABELS[name]), editor, False,
+            section = _Section(name, self._title(name), editor, False,
                                self._flip, self._remove, self)
             self._sections[name] = section
             return section
         if name in RECORD_GROUPS:
-            editor = _RecordEditor(name, i18n.t(_PLACEHOLDERS[name]), self)
+            editor = _RecordEditor(name, i18n.t(_PLACEHOLDERS[name]), self,
+                                   self._sides()[name])
             editor.on_side = lambda n=name: self._refresh_rows(n)
             editor.input.textChanged.connect(lambda _t, n=name: self._refresh_rows(n))
             editor.input.returnPressed.connect(lambda n=name: self._enter(n))
@@ -1517,7 +1575,7 @@ class FilterPanel(QWidget):
                     lambda n=name, r=row: self._pick(n, r, "include"))
                 row.excludeRequested.connect(
                     lambda n=name, r=row: self._pick(n, r, "exclude"))
-            section = _Section(name, i18n.t(FACET_LABELS[name]), editor, False,
+            section = _Section(name, self._title(name), editor, False,
                                self._flip, self._remove, self)
             self._sections[name] = section
             return section
@@ -1530,7 +1588,7 @@ class FilterPanel(QWidget):
                 editor = _ImportEditor(_IMPORT_KIND[name],
                                        lambda i, on, n=name: self._toggle_import(n, i, on),
                                        self)
-            section = _Section(name, i18n.t(FACET_LABELS[name]), editor, False,
+            section = _Section(name, self._title(name), editor, False,
                                self._flip, self._remove, self)
             self._sections[name] = section
             return section
@@ -1559,14 +1617,14 @@ class FilterPanel(QWidget):
                 self._similar.clicked.connect(
                     lambda on=False: self._set_flag("similar_titles", on))
                 editor.add_extra(self._similar)
-            if name in GUIDES_ONLY:
+            if name in GUIDES_ONLY and self._kind == "person":
                 # A person row carries no industry and no keywords, so an
                 # include can only steer Exa; an exclude is checked (filters.py).
                 editor.add_extra(C.label(
                     i18n.t("Include guides the search · Exclude is enforced"),
                     level="META", wrap=True))
-        section = _Section(name, i18n.t(FACET_LABELS[name]), editor,
-                           name in _OPEN_AT_START, self._flip, self._remove, self)
+        section = _Section(name, self._title(name), editor,
+                           name in self._open_at_start, self._flip, self._remove, self)
         self._sections[name] = section
         return section
 
@@ -1811,7 +1869,7 @@ class FilterPanel(QWidget):
         for name, section in self._sections.items():
             if name in RECORD_GROUPS:
                 chips = []
-                for facet, _label, prefix in _RECORD_SIDES[name]:
+                for facet, _label, prefix in self._sides()[name]:
                     lead = f"{i18n.t(prefix)}: " if prefix else ""
                     f = spec.facet(facet)
                     chips += [(facet + _SEP + v, lead + v, "include", True) for v in f.include]
@@ -1858,8 +1916,10 @@ class FilterPanel(QWidget):
                                   + [(v, shown(v), "exclude", True) for v in facet.exclude])
                 self._refresh_rows(name)
             section.head.set_count(spec.count(name))
-        self._similar.setChecked(spec.similar_titles)
-        self._jobs.switch.setChecked(spec.changed_jobs_90d)
+        if self._similar is not None:
+            self._similar.setChecked(spec.similar_titles)
+        if self._jobs is not None:
+            self._jobs.switch.setChecked(spec.changed_jobs_90d)
         total = spec.active_count()
         self._badge.setText(str(total))
         self._badge.setVisible(total > 0)

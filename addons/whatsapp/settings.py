@@ -82,6 +82,7 @@ class ConnectionSection(QWidget):
         card, nc = ui.card(i18n.t("WhatsApp numbers"),
                            i18n.t("The numbers your customers message. Connecting one takes a few minutes in Meta's own window — "
                                   "you sign in to Facebook and choose the number."), width=_COLUMN)
+        self._after_list = ""
         self.numbers_col = QVBoxLayout()
         self.numbers_col.setSpacing(theme.SPACE_2)
         nc.addLayout(self.numbers_col)
@@ -94,6 +95,11 @@ class ConnectionSection(QWidget):
         self.connect_co_btn = C.button(i18n.t("Connect and keep using the phone app"), "secondary", on_click=lambda: self._connect(True))
         row.addWidget(self.connect_co_btn)
         row.addWidget(C.button(i18n.t("Refresh"), "secondary", on_click=self.load_numbers))
+        row.addStretch(1)
+        nc.addLayout(row)
+        row = QHBoxLayout()                                             # its own line: three connect buttons and Refresh do not fit the column side by side
+        self.attach_btn = C.button(i18n.t("Connect with an access token"), "secondary", on_click=lambda _checked=False: self._connect_with_token())
+        row.addWidget(self.attach_btn)
         row.addStretch(1)
         nc.addLayout(row)
         self.limits_col = QVBoxLayout()
@@ -236,7 +242,8 @@ class ConnectionSection(QWidget):
         self.say(message, error=True)
 
     def _numbers(self, reply: dict):
-        self.say("")
+        self.say(self._after_list)                  # a line that belongs after the list is shown, such as "Connected" (the list otherwise starts clean)
+        self._after_list = ""
         ui.clear(self.numbers_col)
         rows = list(reply.get("numbers") or [])
         if not rows:
@@ -258,19 +265,47 @@ class ConnectionSection(QWidget):
                                     {"GREEN": "ok", "YELLOW": "warn", "RED": "err"}.get(quality, "quiet")))
             self.numbers_col.addWidget(line)
 
+    def _connect_buttons(self, on: bool):
+        for b in (self.connect_btn, self.connect_co_btn, self.attach_btn):
+            b.setEnabled(on)
+
     def _connect(self, coexistence: bool = False):
-        self.connect_btn.setEnabled(False)
-        self.connect_co_btn.setEnabled(False)
+        self._connect_buttons(False)
         ui.call(self, "onboarding/link", {"coexistence": True} if coexistence is True else {}, done=self._link, failed=self._link_failed)
 
+    def _ask_for_token(self):
+        """The three boxes, or None when cancelled. A method of its own so a test can answer for the window."""
+        from PySide6.QtWidgets import QDialog
+        from addons.whatsapp.attach_dialog import AttachDialog
+        dialog = AttachDialog(self)
+        return dialog.value() if dialog.exec() == QDialog.Accepted else None
+
+    def _connect_with_token(self):
+        values = self._ask_for_token()
+        if values:
+            self._attach(values)
+
+    def _attach(self, values: dict):
+        """Connect a number that is already live, from its ids and an access token. The token goes to the server and nowhere else."""
+        self._connect_buttons(False)
+        self.say(i18n.t("Connecting…"))
+        ui.call(self, "onboarding/attach", values, done=self._attached, failed=self._link_failed)
+
+    def _attached(self, reply: dict):
+        self._connect_buttons(True)
+        if reply.get("subscribed") and reply.get("registered"):
+            self._after_list = i18n.t("Connected. Your number is in the list above.")
+            self.say(self._after_list)
+            self.load_numbers()
+        else:
+            self.say(i18n.t("The number was saved, but Meta did not finish setting it up. Press Connect with an access token to try again."), error=True)
+
     def _link_failed(self, message: str, _detail: dict):
-        self.connect_btn.setEnabled(True)
-        self.connect_co_btn.setEnabled(True)
+        self._connect_buttons(True)
         self.say(message, error=True)
 
     def _link(self, reply: dict):
-        self.connect_btn.setEnabled(True)
-        self.connect_co_btn.setEnabled(True)
+        self._connect_buttons(True)
         url = str(reply.get("url") or "")
         if not url.startswith(("http://", "https://")):
             self.say(i18n.t("The server did not give a link to open. Ask Alphakore to check the WhatsApp service address."), error=True)

@@ -36,6 +36,7 @@ _POOL_FINDERS = ("tomba", "hunter")
 FINDER = "https://api.hunter.io/v2/email-finder"
 VERIFIER = "https://api.hunter.io/v2/email-verifier"
 ACCOUNT = "https://api.hunter.io/v2/account"       # free: the plan and what is left
+DOMAIN_SEARCH = "https://api.hunter.io/v2/domain-search"
 
 # Hunter status -> the Email-check value the leads/hotlist sheets colour-code on.
 _MAP = {"valid": "valid", "invalid": "invalid", "accept_all": "catch-all",
@@ -349,6 +350,112 @@ def find_domains(leads, cfg: dict | None = None) -> None:
         enrich.enrich(leads, key)
 
 
+def _hunter_domain_search(domain: str, key: str, limit: int = 25) -> list:
+    """Every named person Hunter already has on file for one domain — the
+    direct-mode twin of the server's leads_providers.domain_search_hunter,
+    kept in step by this comment and by test. A real database lookup
+    (confirmed 02-Oct-2026: identical rows on a repeat call), not a search for
+    anyone in particular — a cheap FIRST PASS before find_and_verify's
+    per-person ask. [] on anything that is not a clean 200; Hunter's own
+    "type": "generic" rows (info@, sales@) are never somebody's name, so only
+    "personal" entries are kept."""
+    import requests
+    try:
+        r = requests.get(DOMAIN_SEARCH, params={"domain": domain, "api_key": key, "limit": limit},
+                         timeout=30)
+    except Exception:                                   # noqa: BLE001
+        return []
+    if r.status_code != 200:
+        return []
+    try:
+        data = r.json()
+    except ValueError:
+        return []
+    rows = ((data.get("data") or {}).get("emails") or [])
+    if not isinstance(rows, list):
+        return []
+    return [{"first_name": str(e.get("first_name") or ""), "last_name": str(e.get("last_name") or ""),
+            "email": str(e.get("value") or "")}
+           for e in rows if isinstance(e, dict) and e.get("type") == "personal"
+           and e.get("first_name") and e.get("last_name") and e.get("value")]
+
+
+def _domain_groups(leads) -> dict:
+    """{registrable domain: [leads with no address yet and that domain already
+    known]} — unlike the phone finder, Domain Search has no company-NAME
+    fallback, so a lead with no domain yet (find_domains found none, or never
+    ran) is simply left for find_and_verify's ordinary per-person ask."""
+    out: dict = {}
+    for l in leads or ():
+        if (getattr(l, "email", "") or "").strip():
+            continue
+        first, last = _name_parts(getattr(l, "name", "") or "")
+        dom = _registrable(_domain_of(l))
+        if first and last and dom:
+            out.setdefault(dom, []).append(l)
+    return out
+
+
+def find_emails_by_domain(leads, keys: dict | None = None) -> None:
+    """One Hunter Domain Search per company domain — instead of one Email
+    Finder ask per named person — for every lead with no address yet and a
+    domain `find_domains` (or a sheet) already gave it. A company with several
+    named leads is resolved in ONE call instead of one apiece; a lead this
+    pass does not resolve still gets the ordinary find_and_verify pass right
+    after, so coverage never drops, only the number of calls it took.
+
+    Billed exactly like the per-person finder (email_find, pooled) — this
+    changes what Hunter is asked, never what it costs: an efficiency gain for
+    whoever holds the key, not a different product.
+
+    02-Oct-2026, confirmed live: asianpaints.com and tatamotors.com each
+    returned 10 real named people, identically on a repeat call — a real
+    database lookup, not an agent's live guess (contrast prospector/phones.py's
+    Fiber test the same day: 18 of 19 overlapping leads got a DIFFERENT number
+    each run). Writes straight onto matching leads (email + email_source
+    "hunter"), so find_and_verify's own "already sold by this finder" guard
+    sees it and does not ask Hunter again for someone this pass already found.
+
+    Pooled: one gateway.find_emails call per 50 people (gateway.is_pool(keys)).
+    Direct: one Domain Search per domain with the caller's own Hunter key.
+    No Hunter key, pooled or direct, is a silent no-op."""
+    keys = keys or {}
+    groups = _domain_groups(leads)
+    if not groups:
+        return
+    if gateway.is_pool(keys):
+        people, by_ref = [], {}
+        for gi, (dom, group) in enumerate(groups.items()):
+            for li, l in enumerate(group):
+                ref = "p%d_%d" % (gi, li)
+                first, last = _name_parts(l.name)
+                people.append({"ref": ref, "first_name": first, "last_name": last, "domain": dom})
+                by_ref[ref] = l
+        for i in range(0, len(people), 50):
+            rows = gateway.find_emails(people[i:i + 50])
+            for row in rows or []:
+                l = by_ref.get(row.get("ref"))
+                email = str(row.get("email") or "")
+                if l is not None and email:
+                    l.email = email
+                    l.extra["email_source"] = str(row.get("provider") or "hunter")
+        return
+    key = keys.get("hunter_api_key", "")
+    if not key:
+        return
+    for dom, group in groups.items():
+        listing = _hunter_domain_search(dom, key)
+        if not listing:
+            continue
+        by_name = {(e["first_name"].casefold(), e["last_name"].casefold()): e["email"] for e in listing}
+        for l in group:
+            first, last = _name_parts(l.name)
+            hit = by_name.get((first.casefold(), last.casefold()))
+            if hit:
+                l.email = hit
+                l.extra["email_source"] = "hunter"
+
+
 _STATUS_RANK = {"valid": 3, "invalid": 2, "catch-all": 1, "unknown": 0}
 
 
@@ -482,6 +589,7 @@ def verify_reachable(dossiers, keys: dict | None = None, limit: int = 25,
         return 0
     targets = [d for d in dossiers if d.verdict in (HOT, WARM) and d.lead.name][:limit]
     find_domains([d.lead for d in targets], cfg)
+    find_emails_by_domain([d.lead for d in targets], keys)
     refused: dict = {}              # a finder that refused the key is asked once a run
     for i, d in enumerate(targets, 1):
         if gateway.exhausted():

@@ -38,14 +38,18 @@ def spec(html, css=""):
 class TwoTextsPrintedOverEachOther(unittest.TestCase):
 
     def test_scene_root_position_cannot_stack_later_scenes_below_frame(self):
-        project = spec("<p class='t' style='left:150px;top:500px'>First</p>")
+        # Content spans the frame: a lone line leaves most of it bare, which the gap rule (rightly) flags.
+        project = spec("<p class='t' style='left:150px;top:500px'>First</p>"
+                       "<p class='t' style='left:150px;top:1450px'>Footer</p>")
         project["design"]["css"] += ".scene{position:relative}"
         project["scenes"].append({"seconds": 3, "css": ".scene{position:relative}",
-                                  "html": "<p class='t' style='left:150px;top:500px'>Second</p>"})
+                                  "html": "<p class='t' style='left:150px;top:500px'>Second</p>"
+                                          "<p class='t' style='left:150px;top:1450px'>Footer</p>"})
         self.assertEqual(RW.inspect(project), [])
 
     def test_multiple_filled_animations_are_valid(self):
-        project = spec("<p class='t a' style='left:150px;top:500px'>Moving</p>",
+        project = spec("<p class='t a' style='left:150px;top:500px'>Moving</p>"
+                       "<p class='t' style='left:150px;top:1450px'>Footer</p>",
                        ".a{animation:fade 300ms both,rise 400ms both}"
                        "@keyframes fade{from{opacity:0}to{opacity:1}}"
                        "@keyframes rise{from{transform:translateY(10px)}to{transform:translateY(0)}}")

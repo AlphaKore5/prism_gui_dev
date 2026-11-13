@@ -98,6 +98,8 @@ def phone_source_of(lead) -> str:
         day = f", {d.day} {d:%b %Y}"
     except ValueError:
         pass
+    if found.get("scope") == "person":
+        return "Their own mobile — Apollo%s, not called" % day
     return "The company's number — %s%s, not verified" % (
         SOURCE_LABEL.get(found.get("source"), "the web"), day)
 

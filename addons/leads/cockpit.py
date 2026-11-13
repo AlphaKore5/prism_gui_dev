@@ -40,6 +40,7 @@ import i18n
 import paths
 import theme
 from addons.leads import evidence
+from addons.leads import result_rows as RR
 from widgets import controls as C
 from widgets import icons
 from PySide6.QtCore import (
@@ -133,29 +134,6 @@ class _FitItem(QTableWidgetItem):
         return self._v < getattr(other, "_v", 0.0)
 
 
-class _LeadCard(QFrame):
-    """One lead as a card in the gallery view — clickable (opens the drawer),
-    with an accent-lit hover. Carries its dossier index so a click and a tick
-    both name the same lead."""
-
-    clicked = Signal(int)
-
-    def __init__(self, idx: int, parent=None):
-        super().__init__(parent)
-        self._idx = idx
-        self.setObjectName("leadcard")
-        self.setAttribute(Qt.WA_StyledBackground, True)
-        self.setCursor(Qt.PointingHandCursor)
-        self.setStyleSheet(
-            f"QFrame#leadcard{{background:{theme.CARD};border:1px solid "
-            f"{theme.HAIRLINE};border-radius:{theme.R_CARD}px;}}"
-            f"QFrame#leadcard:hover{{border-color:{theme.ACCENT};}}")
-
-    def mousePressEvent(self, event):
-        self.clicked.emit(self._idx)
-        super().mousePressEvent(event)
-
-
 # ── faces and painted cells ─────────────────────────────────────────────────
 # One quiet disc for every lead. The avatar colour used to be picked from a ring
 # that held the OK green and the WARN amber -- the same two colours the Status and
@@ -226,8 +204,8 @@ _HELP_KEYS = frozenset({"import_menu", "views_menu", "hide_filters", "people_sea
                         "table", "select_all", "bulk_bar", "drawer"}
                        | set(_HELP_COLS) | set(_HELP_BULK))
 # The tab strip's own keys, in the order the tabs are built (_TABS).
-_HELP_TABS = ("tab_people", "tab_sessions", "tab_lists", "tab_saved",
-              "tab_sequences", "tab_analytics")
+_HELP_TABS = ("tab_people", "tab_companies", "tab_sessions", "tab_lists", "tab_saved",
+              "tab_sequences", "tab_analytics", "tab_deals", "tab_due", "tab_stats")
 _REVEAL_PAD = 24       # a revealed target is scrolled this clear of the edge
 
 
@@ -1042,7 +1020,7 @@ class LeadsCockpit(QWidget):
         self._sel_keys: set = set()
         self._hidden: set = set()           # dossier indices hidden by the filters
         self._card_cbs: dict = {}           # idx → the gallery card's checkbox
-        self._view = "table"                # "table" (dense) or "cards" (gallery)
+        self._view = "cards"                # "cards" (the row list, the default) or "table" (dense)
         self._rail_pref = _RAIL_W           # the rail's width, to come back to after a fold
         self._drawer_pref = _DRAWER_W       # the docked drawer's width, as last dragged
         self._col_pref = dict(_COL_WIDTH)   # column widths as the user last left them
@@ -1454,7 +1432,7 @@ class LeadsCockpit(QWidget):
         layout = menu.addAction(i18n.t("Layout"))
         layout.setEnabled(False)
         self._layout_acts = {}
-        for view, name in (("table", i18n.t("Table")), ("cards", i18n.t("Cards"))):
+        for view, name in (("table", i18n.t("Table")), ("cards", i18n.t("List"))):
             act = menu.addAction(name)
             act.setCheckable(True)
             act.setChecked(self._view == view)
@@ -1720,13 +1698,13 @@ class LeadsCockpit(QWidget):
         lay.setContentsMargins(2, 2, 2, 2)
         lay.setSpacing(2)
         self._view_table_btn = QPushButton("Table")
-        self._view_cards_btn = QPushButton("Cards")
+        self._view_cards_btn = QPushButton("List")
         for b, v in ((self._view_table_btn, "table"), (self._view_cards_btn, "cards")):
             b.setCheckable(True)
             b.setCursor(Qt.PointingHandCursor)
             b.clicked.connect(lambda _=False, view=v: self._set_view(view))
             lay.addWidget(b)
-        self._view_table_btn.setChecked(True)
+        self._view_cards_btn.setChecked(True)
         return seg
 
     def _set_view(self, view: str) -> None:
@@ -1770,7 +1748,7 @@ class LeadsCockpit(QWidget):
         hl = QVBoxLayout(host)
         hl.setContentsMargins(theme.SPACE_4, theme.SPACE_4, theme.SPACE_4, theme.SPACE_4)
         hl.setSpacing(0)
-        self._grid = C.CardGrid(min_col_width=228)
+        self._grid = RR.ResultList()
         hl.addWidget(self._grid)
         hl.addStretch(1)
         scroll.setWidget(host)
@@ -2852,7 +2830,7 @@ class LeadsCockpit(QWidget):
             "search_settings": self._settings_btn,
             "people_tabs": self._tabs_frame,
             "pager": self._pager,
-            "table": self._table,
+            "table": self._table if self._view == "table" else self._gallery,     # "the results": the list, or the table
             "select_all": (self._head, self._section_rect(_C_TICK)),
             "bulk_bar": self._bulk_bar_w,
             "drawer": self._drawer_panel,
@@ -2994,63 +2972,34 @@ class LeadsCockpit(QWidget):
                             for i in order if i not in self._hidden])
 
     def _card_for(self, idx: int, dos) -> QWidget:
+        """One result as a row (result_rows.ResultRow): who, why they are worth a look, their pills, and what to do with them."""
         lead = dos.lead
         draft = self._draft_by.get(id(dos))
-        card = _LeadCard(idx)
-        card.clicked.connect(self._card_clicked)
-        v = QVBoxLayout(card)
-        v.setContentsMargins(theme.SPACE_4, theme.SPACE_3, theme.SPACE_4, theme.SPACE_3)
-        v.setSpacing(theme.SPACE_2)
-
-        top = QHBoxLayout()
-        top.setContentsMargins(0, 0, 0, 0)
-        top.setSpacing(theme.SPACE_2)
-        cb = QCheckBox()
-        cb.setChecked(idx in self._checked)
-        cb.setStyleSheet("QCheckBox{border:none;background:transparent;}")  # see rail
-        cb.toggled.connect(lambda on, i=idx: self._set_checked(i, on))
-        self._card_cbs[idx] = cb
-        top.addWidget(cb, alignment=Qt.AlignTop)
-        top.addWidget(_avatar(lead.name, 38))
-        top.addStretch(1)
-        top.addWidget(self._fit_badge(getattr(lead, "fit_score", 0) or 0),
-                      alignment=Qt.AlignTop)
-        v.addLayout(top)
-
-        name = QLabel(lead.name or "(no name)")
-        name.setStyleSheet(f"color:{theme.TEXT};font-size:14px;font-weight:600;")
-        name.setWordWrap(True)
-        v.addWidget(name)
-        if lead.company:
-            v.addWidget(_muted(lead.company, 12))
-        focus = lead.title or lead.industry or ""
-        if focus:
-            v.addWidget(_muted(focus, 11))
-
-        chips = QHBoxLayout()
-        chips.setContentsMargins(0, 0, 0, 0)
-        chips.setSpacing(theme.SPACE_1)
+        person = self._people[idx] if self._pooled and idx < len(self._people) else None
+        where = str((lead.extra or {}).get("location") or "")
+        subline = " · ".join(p for p in (lead.title or lead.industry or "", where) if p)
         status = status_of(dos, draft)
-        ink, bg = _TONE.get(status, (theme.NEUTRAL[700], theme.WELL))
-        chips.addWidget(_pill(status, ink, bg))
+        pills = [(status, {"Verified": "ok", "Invalid": "err", "Mailed": "quiet", "Not qualified": "quiet"}.get(status, "warn"))]
+        fit = getattr(lead, "fit_score", 0) or 0
+        if fit:
+            pills.append(("Fit %g" % fit, "ok" if fit >= 75 else ("warn" if fit >= 50 else "quiet")))
         if getattr(dos, "status", "") == UNQUALIFIED:
-            # The table's quiet outline, so the two views say it the same way.
-            chips.addWidget(_outline_pill("Not qualified"))
+            pills.append(("Not qualified", "outline"))        # the table's quiet outline, so the two views say it the same way
         elif getattr(dos, "signal_status", "") == "found":
-            chips.addWidget(_pill("why-now", theme.INFO_INK, theme.INFO_BG))
-        chips.addStretch(1)
-        v.addLayout(chips)
-        return card
-
-    def _fit_badge(self, fit) -> QLabel:
-        ink = theme.OK if fit >= 75 else (theme.WARN if fit >= 50 else theme.NEUTRAL[500])
-        lab = QLabel(f"{fit:g}")
-        lab.setFixedSize(30, 30)
-        lab.setAlignment(Qt.AlignCenter)
-        lab.setStyleSheet(
-            f"QLabel{{color:#fff;background:{ink};border-radius:15px;"
-            f"font-family:'{_MONO}';font-weight:700;font-size:12px;}}")
-        return lab
+            pills.append(("why-now", "info"))
+        if person is not None and person.saved:
+            pills.append((person.stage or "Saved", "ok"))
+        actions = [("Open", True, lambda _=False, i=idx: self._card_clicked(i))]
+        if person is not None and not person.saved:
+            actions.append(("Save", False, lambda _=False, d=dos: self.saveContactsRequested.emit([d])))
+        row = RR.ResultRow(RR.RowSpec(
+            key=idx, name=lead.name or "(no name)", company=lead.company or "", subline=subline, pills=pills,
+            actions=actions, checked=idx in self._checked,
+            tooltip=" — ".join(p for p in (lead.name, lead.company) if p)))
+        row.clicked.connect(self._card_clicked)
+        row.toggled.connect(lambda i, on: self._set_checked(i, on))
+        self._card_cbs[idx] = row.check
+        return row
 
     def _card_clicked(self, idx: int) -> None:
         if 0 <= idx < len(self._dossiers):
@@ -3871,66 +3820,10 @@ class _SavedSearchesTab(QWidget):
 
 
 # ════════════════════════════════════════════════════════════════════════════
-#  Sequences — honest shell: the real 3-touch stop-on-reply model
-# ════════════════════════════════════════════════════════════════════════════
-class _SequencesTab(QWidget):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        root = QVBoxLayout(self)
-        root.setContentsMargins(theme.SPACE_5, theme.SPACE_5, theme.SPACE_5, theme.SPACE_5)
-        root.setSpacing(theme.SPACE_4)
-        root.addWidget(_page_title("Sequences"))
-        root.addWidget(_muted(
-            "A stop-on-reply sequence: a short run of touches that halts the "
-            "moment someone replies. Every message goes one-to-one from your own "
-            "inbox — Prism drafts and paces; it never blasts and never auto-DMs."))
-
-        card, v = _card("Your sequence")
-        for i, (t, when, what) in enumerate((
-                ("First touch", "today",
-                 "the reviewed opener, grounded in the company's own why-now"),
-                ("Follow-up", "+3 days", "a short nudge if there's no reply"),
-                ("Last touch", "+7 days", "a final, easy-to-decline close")), 1):
-            row = QHBoxLayout()
-            row.setSpacing(theme.SPACE_3)
-            mark = QLabel(str(i))
-            mark.setFixedSize(24, 24)
-            mark.setAlignment(Qt.AlignCenter)
-            mark.setStyleSheet(
-                f"color:#fff;background:{theme.ACCENT};border-radius:12px;"
-                f"font-weight:700;font-size:12px;")
-            row.addWidget(mark)
-            txt = QLabel(f"<b>{t}</b> · <span style='color:{theme.NEUTRAL[600]}'>"
-                         f"{when}</span><br><span style='color:{theme.NEUTRAL[600]};"
-                         f"font-size:11px'>{what}</span>")
-            txt.setTextFormat(Qt.RichText)
-            txt.setWordWrap(True)
-            row.addWidget(txt, 1)
-            v.addLayout(row)
-        stop = QLabel("Stops automatically the moment they reply · "
-                      "pauses if bounces cross 2%")
-        stop.setWordWrap(True)
-        stop.setStyleSheet(
-            f"color:{theme.OK_INK};background:{theme.OK_BG};"
-            f"border-radius:{theme.R_CONTROL}px;padding:8px 12px;font-size:11px;")
-        v.addWidget(stop)
-        root.addWidget(card)
-
-        status = QHBoxLayout()
-        status.setSpacing(theme.SPACE_2)
-        status.addWidget(_pill("Touch 1 live", theme.OK_INK, theme.OK_BG))
-        status.addWidget(_muted(
-            "Today: select leads and “Add to sequence” sends the first touch now, "
-            "from your inbox. The scheduler that fires the follow-ups and watches "
-            "for replies is the next build.", 12), 1)
-        root.addLayout(status)
-        root.addStretch(1)
-
-
-# ════════════════════════════════════════════════════════════════════════════
 #  The workspace — the tab strip over the five screens
 # ════════════════════════════════════════════════════════════════════════════
-_TABS = ("People", "Sessions", "Lists", "Saved searches", "Sequences", "Analytics")
+_TABS = ("People", "Companies", "Sessions", "Lists", "Saved searches", "Sequences",
+         "Analytics", "Deals", "Due today", "Stats")
 
 
 class LeadsWorkspace(QWidget):
@@ -3963,6 +3856,9 @@ class LeadsWorkspace(QWidget):
     saveSearchRequested = Signal()
     findPrepareRequested = Signal()
     starterPicked = Signal(str)
+    companiesShown = Signal()               # the Companies tab was opened
+    dueOpenRequested = Signal(object)       # Due today: Open on a row (the lead)
+    dueTaskDoneRequested = Signal(object, str, bool)   # Due today: Done on a task
 
     def __init__(self, leads_folder: str | None = None, sessions_folder: str = "",
                  searches_folder: str = "", parent=None):
@@ -3992,8 +3888,28 @@ class LeadsWorkspace(QWidget):
         self._saved.useRequested.connect(self.useSavedSearchRequested)
         self._saved.deleteRequested.connect(self.deleteSavedSearchRequested)
         self.leads.set_saved_searches(self._saved._records())
-        self._sequences = _SequencesTab()
+        from addons.leads.sequences_page import SequencesPage
+        self._sequences = SequencesPage()   # the editor (sequences_page.py)
+        self._sequences.openRequested.connect(self.dueOpenRequested)
+        self._sequences.changed.connect(lambda: self.set_due_contacts(self._due_contacts))
         self._analytics = _AnalyticsTab()
+        # Apollo's Companies page (companies_page.py) — a view; the workbench
+        # gives it a controller (companies_controller.py). Imported here, not at
+        # the top: that module reads this one's table.
+        from addons.leads.companies_page import CompaniesPage
+        self.companies = CompaniesPage()
+        from addons.leads.due_today import DueTodayPage
+        from addons.leads.deals_page import DealsPage
+        self.deals = DealsPage()            # the pipeline board (deals_page.py)
+        self.due = DueTodayPage()           # the morning list (due_today.py)
+        self._stats_contacts: list = []
+        self._due_contacts: list = []
+        from addons.leads.stats_page import StatsPage
+        self.stats = StatsPage()            # counted from stored history (stats.py)
+        self.due.openRequested.connect(self.dueOpenRequested)
+        self.due.taskDoneRequested.connect(self.dueTaskDoneRequested)
+        self.deals.changed.connect(lambda: self.set_due_contacts(self._due_contacts))     # a moved deal stops being stalled
+        self.due.dealOpenRequested.connect(lambda _deal: self._select(_TABS.index("Deals")))
         self._build()
 
     def _build(self):
@@ -4003,8 +3919,8 @@ class LeadsWorkspace(QWidget):
         root.addWidget(self._tabstrip())
         self._stack = QStackedWidget()
         self._stack.setStyleSheet(f"QStackedWidget{{background:{theme.CANVAS};}}")
-        for w in (self.leads, self._sessions, self._lists, self._saved,
-                  self._sequences, self._analytics):
+        for w in (self.leads, self.companies, self._sessions, self._lists, self._saved,
+                  self._sequences, self._analytics, self.deals, self.due, self.stats):
             self._stack.addWidget(w)
         root.addWidget(self._stack, 1)
         self._select(0)
@@ -4061,7 +3977,9 @@ class LeadsWorkspace(QWidget):
         for k, b in enumerate(self._tabs):
             self._style_tab(b, k == i)
         w = self._stack.widget(i)
-        if w is self._lists:
+        if w is self.companies:
+            self.companiesShown.emit()
+        elif w is self._lists:
             self._lists.refresh()
         elif w is self._sessions:
             self._sessions.refresh()
@@ -4069,6 +3987,10 @@ class LeadsWorkspace(QWidget):
             self._saved.refresh()
         elif w is self._analytics:
             self._analytics.refresh()
+        elif w is self.deals:
+            self.deals.refresh()
+        elif w is self.stats:
+            self.set_stats_contacts(self._stats_contacts)
 
     # ── the guided walkthrough points at these ────────────────────────────────
     def help_targets(self) -> dict:
@@ -4131,6 +4053,47 @@ class LeadsWorkspace(QWidget):
 
     def show_people_tab(self) -> None:
         self._select(0)
+
+    def set_deals_folder(self, folder: str) -> None:
+        if folder != self.deals._folder:
+            self.deals.set_folder(folder)
+            self._sequences.set_folder(folder)
+            self.set_stats_contacts(self._stats_contacts)
+            self.set_due_contacts(self._due_contacts)
+
+    def _touches_due(self) -> list:
+        """The touches that have fallen due in the sequence "Add to sequence" uses: the first one in the Sequences tab."""
+        from addons.leads import sequences as SQ
+        seqs = self._sequences.sequences()
+        return [e for e in SQ.enrolments(self._due_contacts, seqs[0]) if e.is_due()] if seqs else []
+
+    def _deals_now(self) -> list:
+        """Every deal in the folder Deals reads; none when it has no folder yet."""
+        import os
+        from addons.leads import deals as DL
+        folder = self.deals._folder
+        return DL.list_deals(folder) if folder and os.path.isdir(folder) else []
+
+    def set_stats_contacts(self, contacts) -> None:
+        """Hand Stats the saved contacts; it adds the deals from the folder Deals reads, so a figure is never stale."""
+        self._stats_contacts = list(contacts or ())
+        self.stats.set_data(self._stats_contacts, self._deals_now())
+
+    def set_due_contacts(self, contacts) -> None:
+        """Hand Due today the saved contacts; the tab says how many things wait."""
+        self._due_contacts = list(contacts or ())
+        self._sequences.set_contacts(self._due_contacts)
+        self.due.set_contacts(self._due_contacts, deals=self._deals_now(), touches=self._touches_due())
+        self.set_stats_contacts(contacts)
+        n = self.due.count()
+        due_tab = _TABS.index("Due today")
+        self._tabs[due_tab].setText(i18n.t("Due today") + (f"  {n}" if n else ""))
+
+    def open_person(self, person) -> None:
+        """Show the People tab with one person's profile open — a colleague
+        picked in a company's profile."""
+        self._select(0)
+        self.leads._open_person(person)
 
     def set_empty_text(self, title: str = "", body: str = "") -> None:
         self.leads.set_empty_text(title, body)

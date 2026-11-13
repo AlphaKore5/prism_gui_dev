@@ -341,6 +341,11 @@ STEPS = (
      "This screen. Everyone Prism holds — imported, saved or found by a "
      "search — filtered as you click."),
 
+    ("tab_companies", "Companies",
+     "Every company Prism knows — the ones you saved, and the employers of "
+     "everyone it holds — filtered as you click. Save a company to make it an "
+     "account, then open it for its stage, notes, tasks and the people there."),
+
     ("tab_sessions", "Sessions",
      "Every search you have run, with its filters and its results. Open one "
      "to see only its people."),
@@ -359,6 +364,21 @@ STEPS = (
     ("tab_analytics", "Analytics",
      "What the last search actually produced — found, verified, drafted, "
      "sent — counted for that run."),
+
+    ("tab_deals", "Deals",
+     "The pipeline, one column per stage, with each deal's value and next "
+     "step. A deal that has not moved for a week is flagged. Won asks for the "
+     "value and Lost asks why."),
+
+    ("tab_due", "Due today",
+     "The screen to open each morning: tasks that fall due, people who "
+     "replied and are waiting on you, and contacts who have gone quiet. "
+     "Nothing on it sends by itself."),
+
+    ("tab_stats", "Stats",
+     "Reply rate, time to reply, pipeline and win rate for the last 30 days, "
+     "with the funnel and why deals were lost. Every number is counted from "
+     "what Prism stored."),
 )
 
 

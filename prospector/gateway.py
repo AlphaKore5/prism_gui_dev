@@ -383,6 +383,49 @@ def company_phones(companies: list, why: list | None = None) -> list | None:
     return rows
 
 
+def start_mobile(first_name: str, last_name: str, domain: str, why: list | None = None) -> str:
+    """Ask for one person's mobile number (Apollo, through the server) and get back
+    the lookup's id, or "" when it could not start. It takes minutes, so this only
+    starts it and charges nothing; read it with mobile_result(). `why`, when a list,
+    gets the server's own sentence for a failure (pool empty, server too old...)."""
+    try:
+        out = _call("mobile-start", first_name=str(first_name or "")[:60],
+                    last_name=str(last_name or "")[:60], domain=str(domain or "")[:120])
+    except GatewayError as e:
+        if why is not None:
+            why.append(e.message)
+        return ""
+    run_id = out.get("run_id")
+    return run_id if isinstance(run_id, str) else ""
+
+
+def mobile_result(run_id: str, why: list | None = None) -> dict | None:
+    """One read of a lookup start_mobile() began: {"state": "pending" | "done",
+    "phone": "+91...", "kind": "mobile" | ...} (the phone is "" when Apollo had
+    none), or None when the read failed. Charged only when a number comes back,
+    and only once: every read of one lookup carries the same idempotency key, so a
+    number that arrives on a later read is paid for once however often the app
+    asked before it."""
+    body = _auth_body(idem_key="mr" + str(run_id), run_id=str(run_id))
+    with _lock:
+        stopped = _state["exhausted"]
+    if stopped:
+        if why is not None:
+            why.append(stopped)
+        return None
+    try:
+        out = _raw_call("/v1/leads/mobile-result", body)
+    except GatewayError as e:
+        if isinstance(e, OutOfCredits):
+            _note_exhausted(e)
+        if why is not None:
+            why.append(e.message)
+        return None
+    _note(out)
+    res = out.get("result")
+    return res if isinstance(res, dict) and res.get("state") in ("pending", "done") else None
+
+
 def news_rows(company: str, focus: str = "", exclude_domains=(), num_results: int = 5,
               days: int = 180) -> list | None:
     """Dated news rows about one company, or None when the lookup failed."""
@@ -423,3 +466,22 @@ def find_email(first_name: str, last_name: str, domain: str) -> tuple:
     res = out.get("result") or {}
     return (str(res.get("email") or ""), str(res.get("status") or ""),
             str(res.get("provider") or ""))
+
+
+def find_emails(people: list) -> list | None:
+    """Real addresses for up to 50 named people in one call — [{"ref","first_name",
+    "last_name","domain"}], a domain already known for each. The server tries a
+    Hunter Domain Search per company FIRST (one call can resolve several people
+    at once) before asking its ordinary finder for whoever that missed — same
+    email_find credit either way (verify.find_emails_by_domain). Returns
+    [{"ref","email","provider"}] for the ones found, a list (maybe empty) when
+    the call answered, None when it failed."""
+    try:
+        out = _call("find-emails", people=[
+            {"ref": str(p.get("ref") or "")[:20], "first_name": str(p.get("first_name") or "")[:60],
+             "last_name": str(p.get("last_name") or "")[:60], "domain": str(p.get("domain") or "")[:120]}
+            for p in people[:50]])
+    except GatewayError:
+        return None
+    rows = (out.get("result") or {}).get("results")
+    return rows if isinstance(rows, list) else None

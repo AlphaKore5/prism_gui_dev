@@ -38,9 +38,9 @@ class AllFiltersDialog(PrismDialog):
         super().__init__(i18n.t("All filters"),
                          i18n.t("Search them, pin the ones you use to keep them in the "
                                 "rail, then Apply."), parent=parent)
-        from addons.leads.filter_panel import CATEGORIES, FilterPanel
+        from addons.leads.filter_panel import FilterPanel
         self.setMinimumSize(760, 600)
-        self.panel = FilterPanel(suggest=source._suggest, catalog=True)
+        self.panel = FilterPanel(suggest=source._suggest, catalog=True, kind=source.kind)
         imports = source._imports
         self.panel.set_imports(imports.get("contact_imports", ()),
                                imports.get("account_imports", ()))
@@ -56,7 +56,7 @@ class AllFiltersDialog(PrismDialog):
         groups.setContentsMargins(0, 0, 0, 0)
         groups.setSpacing(2)
         self.group_btns: dict = {}
-        for key, name in (("", "All filters"),) + tuple(CATEGORIES):
+        for key, name in (("", "All filters"),) + tuple(source.categories()):
             b = QPushButton(i18n.t(name))
             b.setObjectName("fgroupBtn")
             b.setCheckable(True)

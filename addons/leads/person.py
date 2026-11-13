@@ -62,6 +62,10 @@ TABS = (("prospect", "Prospect"), ("activities", "Activities"),
 _ACTIVITY_FILTERS = (("all", "All"), ("emails", "Emails"), ("calls", "Calls"),
                      ("meetings", "Meetings"))
 _EMAILS = frozenset({"sent", "email", "message"})
+# The round icon in front of each line of the timeline (the mockup's "dot"), by what the line says happened.
+_TIMELINE_ICON = {"saved": "user", "stage": "arrow-right", "list": "list-plus", "sent": "send", "email": "mail", "message": "mail",
+                  "edited": "pencil", "note": "file-text", "task": "check-square", "found": "search", "qualified": "check",
+                  "call": "phone", "meeting": "calendar"}
 # What can be logged by hand (contacts.LOGGED), as the Log activity menu says it.
 _LOG_KINDS = (("call", "Call"), ("meeting", "Meeting"), ("email", "E-mail"),
               ("message", "Message"), ("other", "Other"))
@@ -92,6 +96,7 @@ class PersonView:
     colleagues: list = field(default_factory=list)  # pool.Person at their company
     more_colleagues: int = 0                       # beyond those
     found_by: list = field(default_factory=list)   # [(when, what the search asked)]
+    deals: list = field(default_factory=list)      # deals.Deal linked to them, newest first
 
     @property
     def lead(self):
@@ -411,6 +416,7 @@ class PersonPanel(QWidget):
     deleteRequested = Signal(object)               # lead
     listRequested = Signal(object)                 # the row — Add to list
     sequenceRequested = Signal(object)             # the row — Add to sequence
+    dealRequested = Signal(object)                 # the lead — Create deal
     enrichRequested = Signal(object, list)         # the row, ["email", "company", "qualify"]
     personPicked = Signal(object)                  # a pool.Person at their company
 
@@ -508,9 +514,13 @@ class PersonPanel(QWidget):
         self._linkedin.setFixedSize(26, 26)
         name_row.addWidget(self._linkedin, 0, Qt.AlignVCenter)
         name_row.addStretch(1)
+        self._stage_pill = _pill("", theme.NEUTRAL[700], theme.NEUTRAL[200])
+        name_row.addWidget(self._stage_pill, 0, Qt.AlignVCenter)
         who.addLayout(name_row)
         self.role = _label("", "pRole", wrap=True, select=True)
         who.addWidget(self.role)
+        self.reach = _label("", "pMuted", wrap=True, select=True)       # their e-mail and phone, so no tab is needed to see how to reach them
+        who.addWidget(self.reach)
         top.addLayout(who, 1)
         self._expand_btn = C.icon_button("maximize", i18n.t("Expand"),
                                          on_click=self._toggle_expand)
@@ -672,6 +682,14 @@ class PersonPanel(QWidget):
         self.role.setText(" · ".join(p for p in (at, where) if p))
         self._linkedin.setVisible(bool(evidence.safe_url(self._url(_extra(lead, "linkedin")))))
         saved = view.contact is not None
+        stage = str(getattr(view.contact, "stage", "") or "") if saved else ""
+        ink, bg = (theme.OK_INK, theme.OK_BG) if stage else (theme.NEUTRAL[700], theme.NEUTRAL[200])
+        self._stage_pill.setText(stage or (i18n.t("Saved") if saved else i18n.t("Not saved")))
+        self._stage_pill.setStyleSheet(f"QLabel{{color:{ink};background:{bg};border-radius:{theme.R_CHIP}px;"
+                                       f"padding:2px 8px;font-size:11px;font-weight:600;}}")
+        reach = " · ".join(p for p in (_text(lead.email), _text(lead.phone)) if p)
+        self.reach.setText(reach)
+        self.reach.setVisible(bool(reach))
         self._mail_btn.setEnabled(bool(_text(lead.email)))
         self._call_btn.setEnabled(bool(_text(lead.phone)))
         self._save_btn.setVisible(not saved)
@@ -717,7 +735,7 @@ class PersonPanel(QWidget):
             self.find_email = _link(i18n.t("Find their e-mail…"),
                                     lambda: self.enrichRequested.emit(self.view.row, ["email"]))
             col.addWidget(self.find_email)
-        from prospector import phones
+        from prospector import mobiles, phones
         found = phones.entry_for(lead)      # a number Find phones found, with where it came from
         phone_row = QHBoxLayout()
         phone_row.setSpacing(theme.SPACE_2)
@@ -734,7 +752,8 @@ class PersonPanel(QWidget):
         if found:
             # What the number IS, said every time it is shown: the company's own
             # published number, never rung, never checked against a do-not-call list.
-            line = phones.SOURCE_LINE.get(found.get("source"), phones.SOURCE_LINE["other"])
+            line = (phones.PERSON_LINE if found.get("scope") == "person"
+                    else phones.SOURCE_LINE.get(found.get("source"), phones.SOURCE_LINE["other"]))
             self.phone_source = _label(
                 i18n.t(line).format(when=evidence.when(found.get("found_at") or "")
                                     or i18n.t("recently")), "pMuted")
@@ -746,6 +765,29 @@ class PersonPanel(QWidget):
             self.find_phone = _link(i18n.t("Find their phone…"),
                                     lambda: self.enrichRequested.emit(self.view.row, ["phone"]))
             col.addWidget(self.find_phone)
+        # Their OWN mobile (Apollo, through Prism's credits). When it could not become the
+        # lead's phone — a number they came with stays — it is shown here, never hidden.
+        mobile = mobiles.entry_of(lead)
+        if mobile:
+            if mobile.get("number") != _text(lead.phone):
+                mobile_row = QHBoxLayout()
+                mobile_row.setSpacing(theme.SPACE_2)
+                mobile_row.addWidget(self._icon("phone"))
+                mobile_row.addWidget(_label(phones.display(mobile.get("number") or "", "mobile"),
+                                            "pVal", select=True), 1)
+                mobile_row.addWidget(_pill(i18n.t(phones.KIND_LABEL["mobile"]),
+                                           theme.NEUTRAL[700], theme.NEUTRAL[200]),
+                                     0, Qt.AlignVCenter)
+                col.addLayout(mobile_row)
+                self.mobile_source = _label(
+                    i18n.t(phones.PERSON_LINE).format(
+                        when=evidence.when(mobile.get("found_at") or "") or i18n.t("recently")),
+                    "pMuted")
+                col.addWidget(self.mobile_source)
+        elif mobiles.needs_mobile(lead):
+            self.find_mobile = _link(i18n.t("Find their mobile…"),
+                                     lambda: self.enrichRequested.emit(self.view.row, ["mobile"]))
+            col.addWidget(self.find_mobile)
         # LinkedIn only when it is LinkedIn; the page a search found them on
         # (an Exa people page) is its own link (identity.move_profile_link).
         for key, icon_name, text in (("linkedin", "linkedin", "LinkedIn profile"),
@@ -804,6 +846,22 @@ class PersonPanel(QWidget):
         grid.setColumnStretch(1, 1)
         col.addLayout(grid)
         col.addWidget(_link(i18n.t("See all fields"), lambda: self.set_tab("fields")))
+        lay.addWidget(box)
+
+        box, col = _widget(i18n.t("Deal"))
+        self.deal_lines: list = []
+        for deal in view.deals[:_LIST_MAX]:
+            value = self._deal_value(deal)
+            line = _label(f"{deal.title} · {deal.stage}" + (f" · {value}" if value else ""), "pVal")
+            self.deal_lines.append(line)
+            col.addWidget(line)
+            if deal.next_step:
+                col.addWidget(_label(deal.next_step, "pMuted"))
+        if not view.deals:
+            col.addWidget(_label(i18n.t("None yet"), "pMuted"))
+        self.deal_btn = C.button(i18n.t("Create deal"), small=True,
+                                 on_click=lambda: self.dealRequested.emit(self.view.lead))
+        col.addWidget(self.deal_btn, 0, Qt.AlignLeft)
         lay.addWidget(box)
 
         box, col = _widget(i18n.t("Tasks"), (i18n.t("Add a task"),
@@ -889,6 +947,11 @@ class PersonPanel(QWidget):
             col.addWidget(_label(note.get("text", ""), select=True))
         lay.addWidget(box)
         lay.addStretch(1)
+
+    @staticmethod
+    def _deal_value(deal) -> str:
+        from addons.leads import deals as DL
+        return DL.inr(deal.value) if deal.value else ""
 
     def _icon(self, name: str) -> QLabel:
         lab = QLabel()
@@ -1045,9 +1108,18 @@ class PersonPanel(QWidget):
         for a in shown:
             line = QHBoxLayout()
             line.setSpacing(theme.SPACE_3)
-            line.addWidget(_label(evidence.when(a["at"]) or "—", "pKey", wrap=False), 0,
-                           Qt.AlignTop)
-            line.addWidget(_label(a["text"], select=True), 1)
+            dot = QLabel()
+            dot.setFixedSize(28, 28)
+            dot.setAlignment(Qt.AlignCenter)
+            dot.setPixmap(icons.pixmap(_TIMELINE_ICON.get(a["kind"], "clock"), 15, theme.NEUTRAL[700]))
+            dot.setStyleSheet(f"QLabel{{background:{theme.NEUTRAL[200]};border-radius:14px;}}")
+            line.addWidget(dot, 0, Qt.AlignTop)
+            words = QVBoxLayout()
+            words.setContentsMargins(0, 0, 0, 0)
+            words.setSpacing(0)
+            words.addWidget(_label(a["text"], select=True))
+            words.addWidget(_label(evidence.when(a["at"]) or "—", "pKey", wrap=False))
+            line.addLayout(words, 1)
             self.activity_list.addLayout(line)
 
     def _filter_activities(self, key: str) -> None:
@@ -1110,13 +1182,15 @@ class PersonPanel(QWidget):
                                     "that costs a credit asks first."), "pMuted"))
         from addons.leads.cockpit import needs_email
         self.enrich_boxes = {}
-        from prospector import phones
+        from prospector import mobiles, phones
         choices = (
             ("email", i18n.t("E-mail — look it up and check it (free verifiers first, "
                              "then a finder credit)"), needs_email(view.row)),
             ("phone", i18n.t("Phone — the number their company publishes (one Exa "
                              "lookup; a credit only for a number found)"),
              phones.needs_phone(lead)),
+            ("mobile", i18n.t("Mobile — their own mobile number (Apollo; takes a few minutes; "
+                              "a credit only for a number found)"), mobiles.needs_mobile(lead)),
             ("company", i18n.t("Company — website, size, revenue and HQ (one Exa search)"),
              bool(_text(lead.company) or _extra(lead, "website"))),
             ("qualify", i18n.t("Qualify — research, score and draft an opener (Groq and "

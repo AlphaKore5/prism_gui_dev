@@ -206,6 +206,8 @@ def handle(route: str, data: dict) -> dict:
         return {"numbers": list(p.setdefault("numbers", [{"id": "n1", "display": "+91 98765 43210", "status": "CONNECTED", "quality": "GREEN"}]))}
     if route == "onboarding/link":
         return {"state": "demo", "path": "/onboarding?state=demo", "url": "https://example.com/onboarding?state=demo"}
+    if route == "onboarding/attach":
+        return {"waba_id": str(data.get("waba_id") or ""), "phone_number_id": str(data.get("phone_number_id") or ""), "registered": True, "subscribed": True, "errors": []}
     from addons.whatsapp import demo_automation, demo_flows     # the chatbot builder first, then the team inbox, stores, keys, ads, AI agents, repeats
     answer = demo_flows.handle(route, data, p, s)
     if answer is not None:
