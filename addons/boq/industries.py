@@ -112,6 +112,34 @@ def scales(industry: str) -> dict:
     return {}
 
 
+def suggest_role(industry: str, name: str | None) -> str | None:
+    """item 76: a layer's own real CAD name (scan_layers()'s "name"
+    field, item 74) read for the role it plainly describes -- "Supply
+    Air Duct" pre-fills "supply" instead of leaving every one of a real
+    drawing's layers on "ignore" for a person to click through by hand.
+    None (not "ignore") when nothing in the name says so, or for a
+    colour-only layer with no real name at all, or any industry but
+    HVAC -- the caller (addons/boq/takeoff.py) only overrides its
+    dropdown's own default when this returns something, same restraint
+    saved_layer_roles() already uses for its own cross-tender memory."""
+    if industry == HVAC and name:
+        return _hvac().suggest_role_from_name(name)
+    return None
+
+
+def suggest_role_from_memory(industry: str, layer: dict, saved_roles: dict) -> str | None:
+    """item 80: the role a real named layer should start on when its own
+    name says nothing, read from colours the owner already mapped on an
+    earlier drawing (scan_layers()'s "color_keys" for that layer, against
+    saved_layer_roles()). Found live: return duct fell from 16.5 ft to
+    4.9 ft on the same drawing because the geometry one remembered colour
+    used to pick up now sat inside a named layer nothing mapped. None for
+    a colour-only row, an industry with no rule-set, or no match."""
+    if industry == HVAC and layer.get("name"):
+        return _hvac().suggest_role_from_colours(layer.get("color_keys"), saved_roles)
+    return None
+
+
 def writeup_note(industry: str) -> str:
     """`industry`'s own write-up rules, handed straight to
     core.boq.formatting_prompt()'s `industry_note` parameter -- the write-up
@@ -170,7 +198,41 @@ def writeup_note(industry: str) -> str:
             "document just because it is the only one available. A reading "
             "that already states its own \"type not read\"/\"not identified\" "
             "wording is doing this for you — use it, don't override it with "
-            "something more specific-sounding."
+            "something more specific-sounding.\n"
+            "  (h) SHEET-METAL AND INSULATION AREA ARE PER DUCT SIZE, NEVER ONE "
+            "BLENDED TOTAL — found live comparing two real runs on the same "
+            "drawing: one write-up broke supply and return duct into their own "
+            "line per measured size (e.g. \"18in x ? , 140.4ft\" became its own "
+            "row with its own perimeter, gauge and insulation area), the other "
+            "collapsed every duct system into a single \"length x one assumed "
+            "average perimeter\" figure — correct-looking, but useless for "
+            "pricing or ordering sheet by size. The measured data already gives "
+            "you each system's duct broken out by exact size and length (e.g. "
+            "\"supply 18x? 140.4ft (21 runs)\") — use that breakdown. For EACH "
+            "such line: state the duct's width (as measured) and height (as "
+            "measured if both were read, otherwise one explicit assumed height "
+            "stated once as an input and reused — never a different silent "
+            "guess per line), compute that line's OWN perimeter, sheet-metal "
+            "area (perimeter x length) and insulation area, and give it its own "
+            "row. Do this separately for EACH duct system (supply, return, "
+            "exhaust, toilet-exhaust, condensate, any other named system) — "
+            "never merge systems into one combined area figure. A single "
+            "blended total across every system, in place of this per-size, "
+            "per-system breakdown, is not acceptable. Under each system's "
+            "rows give that system's own subtotal for length, sheet-metal "
+            "area and insulation area, and after the last system one line "
+            "each for total sheet-metal area and total insulation area "
+            "(the sum of those subtotals). Insulation area is always given "
+            "as a figure this way -- never left blank, and never moved to a "
+            "provisional 'not shown on drawing' line, when the duct area it "
+            "comes from has been worked out.\n"
+            "  (i) VAV BOX QUANTITY COMES FROM THE SHAPE COUNT WHEN THERE IS "
+            "ONE — the measured data may give two VAV figures: 'VAV BOXES "
+            "COUNTED BY SHAPE' (drawn blocks on the drawing's own VAV layer) "
+            "and a count of VAV tags read as text. When the shape count is "
+            "present, it is the VAV box quantity; state the tag count beside "
+            "it as a cross-check only. Never add the two, and never bill the "
+            "lower tag count in place of the shape count."
         )
     return ""
 

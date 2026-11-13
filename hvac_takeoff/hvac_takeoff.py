@@ -16,6 +16,14 @@ from collections import defaultdict
 from datetime import datetime
 
 import pdfplumber
+# pdfplumber already hard-depends on pdfminer.six for everything above --
+# these four are only used by tagged_page_objects()/_OcgPage (item 74,
+# real CAD layer names), never at import time otherwise.
+from pdfminer.converter import PDFPageAggregator
+from pdfminer.layout import LAParams, LTCurve, LTLine, LTRect
+from pdfminer.pdfinterp import PDFPageInterpreter, PDFResourceManager
+from pdfminer.pdfpage import PDFPage
+from pdfminer.pdftypes import resolve1
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 MAP_FILE = os.path.join(APP_DIR, "layer_map.json")   # remembers colour -> role between tenders
@@ -40,6 +48,9 @@ ROLES = [
     # reference the way a DXF INSERT does; every occurrence is literal,
     # flattened geometry, so this counts rectangles, not named blocks.
     "diffuser", "flex_connector", "volume_damper",
+    # item 80 (13 Nov 2026): a VAV box counted as one whole drawn block on
+    # its own real layer (count_symbol_clusters) -- see CLUSTER_ROLES.
+    "vav_box",
 ]
 _PIPE_ROLES = {"chw_supply", "chw_return", "condenser_water", "refrigerant_liquid",
                "refrigerant_suction", "condensate", "hot_water", "makeup_water"}
@@ -50,7 +61,165 @@ _PIPE_ROLES = {"chw_supply", "chw_return", "condenser_water", "refrigerant_liqui
 # excludes the rest. Per-role because a diffuser/connector square is a
 # different real size than a damper's.
 SYMBOL_ROLES = {"diffuser", "flex_connector", "volume_damper"}
-_SYMBOL_MAX_PT = {"diffuser": 20.0, "flex_connector": 20.0, "volume_damper": 12.0}
+# item 79 (13 Nov 2026): volume_damper's cap was tuned against a small
+# SQUARE icon (`#ff0000@1.08:rect`, the old colour-keyed mapping) that
+# this role's real named layer, on the client's second sample file, never
+# uses. There the real mark is a long rect -- one side a steady ~6pt, the
+# other 15-77pt -- and _SYMBOL_MIN_PT excludes the ~2pt corner-tick noise
+# sharing the same layer. Raised to admit that real mark's own full range
+# (max 76.8pt observed); still far short of a page border, the one thing
+# the original cap was built to keep out.
+_SYMBOL_MAX_PT = {"diffuser": 20.0, "flex_connector": 20.0, "volume_damper": 80.0}
+_SYMBOL_MIN_PT = {"volume_damper": 4.0}
+# item 74/75 (12 Nov 2026), found live mapping a real named layer
+# ("ACME-HVAC-SA REC DIFF.") straight to "diffuser": count_symbol_curves()
+# was built, tested and tuned for exactly ONE real symbol -- the manual
+# volume-control damper's own bowtie mark (item 29d) -- and nothing before
+# this item ever ran it against a diffuser/flex_connector layer's real
+# geometry, because the OLD colour-keyed mapping for those roles happened
+# to isolate a narrow stroke colour the hatch/direction-arrow marks inside
+# a diffuser icon never shared. A real named layer carries ALL of that
+# icon's geometry, hatch marks and 4 direction-arrow ticks included, and
+# count_symbol_curves() -- which only checked a MAXIMUM extent -- counted
+# dozens of those marks as separate symbols (264 "diffusers" on a first
+# look). Shelved curve-detection for diffuser entirely rather than guess
+# a filter.
+#
+# item 79 (13 Nov 2026): the real fix, found on the client's own second
+# sample file. A diffuser icon (round or square) is always bbox-square;
+# every noise shape sharing its real layer is either far smaller (hatch
+# fragments, 2.5-4.7pt) or clearly not square (direction-arrow ticks,
+# ~5x14pt). A floor plus a near-square check on THAT layer gives ~82
+# icons -- the drawing's own printed diffuser schedule lists 83 (35 @
+# 545mm + 22 @ 640mm + 20 @ 445mm + 6 square), not the "~14-18" eyeballed
+# on a first look at the rendered preview. The damper's bowtie mark is
+# never square (its own tested fixture is 4.4 x 36pt, ~8:1) so it keeps
+# its own, separate floor with no aspect check -- confirmed this doesn't
+# reintroduce item 75's problem: the noisiest diffuser-mapped layer
+# (1800 raw curves) has zero near-square shapes above the floor.
+_CURVE_SYMBOL_ROLES = {"volume_damper", "diffuser"}
+_CURVE_SYMBOL_SQUARE_ROLES = {"diffuser"}
+_CURVE_SYMBOL_MIN_PT = {"diffuser": 6.0, "volume_damper": 2.0}
+# item 80 (13 Nov 2026), found on the client's second real sample file:
+# the VAV count had only ever come from READING each box's tag text (OCR
+# plus an AI re-check) -- 42, 38 and 34 tags on three runs of the same
+# drawing with the same code, against 48 real boxes. The drawing's own
+# real layer "ACME-HVAC-VAV" carries every box as its own drawn block:
+# grouping that layer's geometry into touching clusters gives 49 (48 real
+# boxes plus, most likely, one legend instance) -- the same count every
+# run, no text reading involved. A role in this set is counted that way:
+# one item per cluster of touching geometry, never paired as duct walls.
+CLUSTER_ROLES = {"vav_box"}
+_CLUSTER_GAP_PT = 3.0
+_CLUSTER_MIN_PT = 6.0
+_CLUSTER_MAX_PT = 150.0
+
+# item 76 (13 Nov 2026): "we have to manually do it" -- the owner's own
+# reaction to item 74's real layer names landing in the mapping screen
+# still sitting on "ignore" by default, every one of them, the same as a
+# bare colour code always has. A colour genuinely needs a person to look
+# and decide; a real CAD layer name is usually just ENGLISH already --
+# "ACME-HVAC-Supply Air Duct" does not need guessing, it needs reading.
+# This is a SUGGESTION, pre-filling the dropdown a person still sees and
+# can change (addons/boq/takeoff.py's own combo.setCurrentText) -- never
+# a silent auto-apply, the same "a gap is shown as a gap, never papered
+# over" rule every other guess in this tool already keeps. Ordered most-
+# specific role first, since a name can match more than one keyword (e.g.
+# "Supply Air Diffuser" contains both "supply" and "diffuser" -- the
+# diffuser is the real, narrower answer).
+_ROLE_NAME_EXCLUDE = ("text", "dropper", "cfm", "note", "tag", "schedule", "fan",
+                      # item 80, all three real layers on the same real file:
+                      # "M HVAC VAV LOOPING CABLE-1" and "M HVAC VAV POWER
+                      # POINT" are wiring, not VAV boxes; "...FAS-Smoke
+                      # Detector..." is a fire-alarm device layer that
+                      # "smoke" alone had been suggesting as smoke-extract
+                      # DUCT.
+                      "cable", "power", "detector")
+# item 78 (13 Nov 2026), found live testing this against made-up layer
+# names from a totally different, imagined drawing (the owner's own "i
+# dont want to make this thing just for the sake of this drawing"):
+# "Chilled Water Supply Pipe" suggested the generic "supply" instead of
+# the real, narrower "chw_supply", because only the abbreviation ("CHW")
+# was ever matched, not the spelled-out phrase -- inconsistent with
+# "Hot Water"/"Condenser Water"/"Makeup Water" a few rows below, which
+# were already spelled out. Each entry below is now a LIST of alternative
+# phrasings for the same role (abbreviation and spelled-out both, where a
+# real engineering convention commonly uses either) -- matching ANY ONE
+# alternative is enough; this is what made that same test afterward come
+# back "chw_supply", not a one-off patch for this specific phrase alone.
+_ROLE_NAME_HINTS = [
+    ("vav_box", [("vav",)]),
+    ("diffuser", [("diffuser",)]),
+    ("volume_damper", [("damper",)]),
+    ("flex_connector", [("flex",)]),
+    ("toilet_exhaust", [("toilet", "exhaust")]),
+    ("kitchen_exhaust", [("kitchen", "exhaust")]),
+    ("smoke_extract", [("smoke",)]),
+    ("stair_pressurization", [("pressuriz",)]),   # pressurization / pressurisation
+    ("fresh_air", [("fresh air",)]),
+    ("exhaust", [("exhaust",)]),
+    ("condenser_water", [("condenser water",), ("cw supply",), ("cw return",)]),
+    ("condensate", [("condensate",)]),
+    ("chw_supply", [("chw supply",), ("chilled water supply",)]),
+    ("chw_return", [("chw return",), ("chilled water return",)]),
+    ("refrigerant_liquid", [("refrigerant", "liquid")]),
+    ("refrigerant_suction", [("refrigerant", "suction")]),
+    ("hot_water", [("hot water",)]),
+    ("makeup_water", [("makeup water",), ("make-up water",), ("make up water",)]),
+    ("transfer", [("transfer air",)]),
+    ("supply", [("supply",)]),
+    ("return", [("return",)]),
+]
+
+
+def suggest_role_from_name(name):
+    """A real CAD layer name (item 74's "ocg_name") -> the ROLES entry
+    its own words most plainly describe, or None when nothing in it says
+    so -- never a guess dressed up as one. A name carrying "text"/
+    "dropper"/"cfm"/"note"/"tag"/"schedule"/"fan" is excluded outright: a
+    label/annotation/equipment-point layer, not duct-wall or symbol
+    geometry, however much its own words might otherwise match (found
+    live: "ACME-HVAC-Exhaust Air Duct Text" and "...Suppil air cfm" --
+    a typo'd "Supply", still correctly excluded by "cfm" alone -- both
+    real layers on the same real file this item was built against).
+    Colour@weight:kind keys (no real name at all) always return None
+    here -- this function is never consulted for one."""
+    if not name:
+        return None
+    low = name.lower()
+    if any(bad in low for bad in _ROLE_NAME_EXCLUDE):
+        return None
+    for role, alternatives in _ROLE_NAME_HINTS:
+        if any(all(word in low for word in needed) for needed in alternatives):
+            return role
+    return None
+
+
+def suggest_role_from_colours(color_keys, saved_map):
+    """item 80 (13 Nov 2026): the role a real named layer should START on
+    when its own name says nothing, read from colours the owner already
+    mapped on an earlier drawing. Found live: a week earlier this same
+    file measured return duct from one remembered colour key
+    ("#ff0000@1.08:line" -> return). Once rows became real layer names
+    (item 74) that geometry sat inside "ACME-HVAC-Z Piece" -- a name no
+    hint matches -- so the row started on "ignore" and return duct fell
+    from 16.5 ft to 4.9 ft with nothing on screen to say why.
+
+    `color_keys`: scan_layers()'s own {colour@weight:kind: length_pt} for
+    one named layer. Returns the remembered non-"ignore" role carrying
+    the most length on that layer, or None. A suggestion only, like
+    suggest_role_from_name() -- the row still shows it and a person can
+    change it."""
+    by_role = defaultdict(float)
+    for key, length in (color_keys or {}).items():
+        role = (saved_map or {}).get(key)
+        if role and role != "ignore":
+            by_role[role] += length
+    if not by_role:
+        return None
+    return max(by_role.items(), key=lambda kv: kv[1])[0]
+
+
 SCALES = {  # label -> points on paper per real foot
     '1/8" = 1\'-0"': 0.125 * 72, '3/16" = 1\'-0"': 0.1875 * 72, '1/4" = 1\'-0"': 0.25 * 72,
     '3/32" = 1\'-0"': 0.09375 * 72, '1:50': 12 / 50 * 72, '1:100': 12 / 100 * 72, '1:200': 12 / 200 * 72,
@@ -82,11 +251,254 @@ def iter_segments(page):
         for (xa, ya), (xb, yb) in zip(pts, pts[1:]):
             yield c, "poly", (xa, ya, xb, yb)
 
+
+# ------------------------------------------------- real CAD layer names (item 74)
+# Found live, 12 Nov 2026, on a real client file: this tool has always
+# grouped drawing geometry by (colour, line weight) -- a lossy proxy for
+# what the CAD drawing actually calls a layer, and the whole reason
+# identifying a layer has ever needed trial-and-error colour-matching and
+# a "preview this layer" render to confirm a guess (item 33). The SAME
+# file carries its own real, human-readable layer names -- "ACME-HVAC-
+# Exhaust Air Duct", "...Return Air Duct", "...Grille", "...DAMPER",
+# "...VAV" -- as PDF Optional Content Groups (OCGs): AutoCAD/ArchiCAD
+# write these whenever a drawing is exported "with layers" (the normal
+# option for a tender set meant to be reopened and marked up), and they
+# were sitting in the file the whole time, unused.
+#
+# _OCGAggregator reads them by watching the SAME begin_tag/end_tag calls
+# pdfminer already makes for every BDC/EMC "layer on/off" pair in the
+# content stream -- it does not reimplement coordinate transforms or
+# path decomposition at all; `super().paint_path()` does that exactly as
+# pdfminer.converter.PDFPageAggregator already does for pdfplumber's own
+# internal use, which is what makes this safe to add: the geometry
+# itself (lengths, positions) is provably unchanged, verified directly
+# against this tool's own existing scan_layers() output on a real file --
+# every colour/weight group with a non-zero line weight (the only ones
+# any real layer_map entry has ever used) matched segment-for-segment and
+# point-for-point. _OcgPage then wraps a pdfplumber Page so every
+# existing caller (iter_segments(), count_symbol_rects(), count_symbol_
+# curves()) keeps reading page.lines/page.rects/page.curves exactly as
+# before -- each dict just carries one new "ocg_name" key, None for any
+# PDF that never had layer data in the first place (a flattened export,
+# most CAD-to-PDF tools without "export with layers" turned on), which
+# is the existing colour-signature behaviour, completely unchanged.
+def _decode_ocg_name(name):
+    if name is None:
+        return None
+    if isinstance(name, bytes):
+        return name.decode("utf-8", errors="replace")
+    return str(name)
+
+
+def _page_ocg_prop_names(pdfminer_page):
+    """pdfminer PDFPage -> {Properties key: decoded OCG /Name or None}.
+    Empty dict, never an exception, for a page with no /Properties at
+    all -- the ordinary case for a PDF that never carried layer data."""
+    try:
+        resources = resolve1(pdfminer_page.resources) or {}
+        props = resolve1(resources.get("Properties")) or {}
+    except Exception:                                        # noqa: BLE001
+        return {}
+    out = {}
+    for key, ref in (props.items() if hasattr(props, "items") else []):
+        try:
+            ocg = resolve1(ref)
+            out[key] = _decode_ocg_name(ocg.get("Name") if hasattr(ocg, "get") else None)
+        except Exception:                                     # noqa: BLE001
+            out[key] = None
+    return out
+
+
+class _OCGAggregator(PDFPageAggregator):
+    """pdfminer's own PDFPageAggregator -- the exact class pdfplumber
+    uses internally for this -- with one addition: every painted object
+    is tagged with the real layer name active when it was drawn, read
+    off the same begin_tag()/end_tag() calls pdfminer already makes for
+    every BDC/EMC "layer on/off" pair in the content stream.
+    super().paint_path() does the real coordinate transform and path
+    decomposition exactly as pdfminer always has; this only watches
+    which object(s) that call adds to the page and labels them after."""
+
+    def __init__(self, rsrcmgr, pageno=1, laparams=None):
+        super().__init__(rsrcmgr, pageno=pageno, laparams=laparams)
+        self._ocg_stack = []
+        self._prop_names = {}
+        self.tagged = []
+
+    def set_prop_names(self, mapping):
+        self._prop_names = mapping
+
+    def begin_tag(self, tag, props=None):
+        name = None
+        if getattr(tag, "name", None) == "OC" and props is not None:
+            key = getattr(props, "name", None)
+            name = self._prop_names.get(key)
+        self._ocg_stack.append(name)
+
+    def end_tag(self):
+        if self._ocg_stack:
+            self._ocg_stack.pop()
+
+    def paint_path(self, gstate, stroke, fill, evenodd, path):
+        before = len(self.cur_item._objs)
+        super().paint_path(gstate, stroke, fill, evenodd, path)
+        active = next((x for x in reversed(self._ocg_stack) if x), None)
+        for obj in self.cur_item._objs[before:]:
+            self.tagged.append((active, obj))
+
+
+def tagged_page_objects(pdf_path, page_index):
+    """Every drawn line/rect/curve on one page, as pdfplumber's own dict
+    shape (x0/top/x1/bottom/stroking_color/non_stroking_color/stroke/
+    fill/linewidth[/pts]) plus "ocg_name" -- the real CAD layer name, or
+    None. Coordinates are flipped from pdfminer's native bottom-up y to
+    pdfplumber's top-down "top"/"bottom" convention (top = page_height -
+    y1, bottom = page_height - y0) -- confirmed against pdfplumber's own
+    source for that exact formula -- since OCR label positions and every
+    other coordinate this tool already carries are in that convention;
+    mixing the two would silently misalign a duct run against its own
+    size label.
+
+    Returns ([], [], []) -- never raises -- for a PDF this can't parse
+    (encrypted content stream, a malformed page); callers fall back to
+    pdfplumber's own page.lines/page.rects/page.curves in that case, see
+    _OcgPage."""
+    lines, rects, curves = [], [], []
+    try:
+        with open(pdf_path, "rb") as f:
+            rsrcmgr = PDFResourceManager()
+            device = _OCGAggregator(rsrcmgr, laparams=LAParams())
+            interp = PDFPageInterpreter(rsrcmgr, device)
+            target = None
+            for pi, pdfminer_page in enumerate(PDFPage.get_pages(f)):
+                if pi != page_index:
+                    continue
+                target = pdfminer_page
+                device.set_prop_names(_page_ocg_prop_names(pdfminer_page))
+                interp.process_page(pdfminer_page)
+                break
+            if target is None:
+                return [], [], []
+            mb = target.mediabox
+            page_height = mb[3] - mb[1]
+
+        for ocg_name, obj in device.tagged:
+            base = {
+                "stroke": bool(getattr(obj, "stroke", True)),
+                "fill": bool(getattr(obj, "fill", False)),
+                "stroking_color": getattr(obj, "stroking_color", None),
+                "non_stroking_color": getattr(obj, "non_stroking_color", None),
+                "linewidth": getattr(obj, "linewidth", 0) or 0,
+                "ocg_name": ocg_name,
+            }
+            if isinstance(obj, LTLine):
+                base.update(x0=obj.x0, x1=obj.x1,
+                           top=page_height - obj.y1, bottom=page_height - obj.y0)
+                lines.append(base)
+            elif isinstance(obj, LTRect):
+                base.update(x0=obj.x0, x1=obj.x1,
+                           top=page_height - obj.y1, bottom=page_height - obj.y0)
+                rects.append(base)
+            elif isinstance(obj, LTCurve):
+                base["pts"] = [(x, page_height - y) for x, y in obj.pts]
+                base.update(x0=obj.x0, x1=obj.x1,
+                           top=page_height - obj.y1, bottom=page_height - obj.y0)
+                curves.append(base)
+    except Exception:                                          # noqa: BLE001
+        return [], [], []
+    return lines, rects, curves
+
+
+class _OcgPage:
+    """Wraps a pdfplumber Page so .lines/.rects/.curves carry each
+    object's real CAD layer name (see tagged_page_objects() above),
+    falling back to the page's own unmodified lines/rects/curves if
+    tagged_page_objects() ever returns nothing (an older/flattened PDF,
+    or any parse failure) -- every other attribute (width, height, ...)
+    passes straight through to the wrapped page, unchanged."""
+
+    def __init__(self, page, pdf_path, page_index):
+        self._page = page
+        self._pdf_path = pdf_path
+        self._page_index = page_index
+        self._cache = None
+
+    def _tagged(self):
+        if self._cache is None:
+            lines, rects, curves = tagged_page_objects(self._pdf_path, self._page_index)
+            if not (lines or rects or curves):
+                lines, rects, curves = self._page.lines, self._page.rects, self._page.curves
+            self._cache = (lines, rects, curves)
+        return self._cache
+
+    @property
+    def lines(self):
+        return self._tagged()[0]
+
+    @property
+    def rects(self):
+        return self._tagged()[1]
+
+    @property
+    def curves(self):
+        return self._tagged()[2]
+
+    def __getattr__(self, name):
+        return getattr(self._page, name)
+
+
 def layer_key(obj, kind):
     """colour@weight:kind - kind separates plain lines, rectangle sides and polylines,
-    because CAD plots ducts, grilles and wide polylines as different object types."""
+    because CAD plots ducts, grilles and wide polylines as different object types.
+
+    Deliberately UNCHANGED by item 74 (real CAD layer names): an object's
+    "ocg_name" (see _OcgPage) is never folded in here, only in
+    layer_display_key() and resolve_role() below. A saved layer_map.json
+    from before this item is keyed entirely on this function's own
+    colour-signature output -- if this function started returning a
+    name-based key instead for any PDF that happens to carry OCG data,
+    every one of those existing, already-correct mappings would silently
+    stop matching and fall through to "ignore" the next time that exact
+    file was opened. Found thinking it through before shipping it, not
+    live -- the fix is to let a name-based key win as a NEW, ADDITIONAL
+    way to resolve a role (resolve_role()), never to replace what a role
+    was already being looked up by."""
     col = obj.get("stroking_color") if obj.get("stroke", True) and obj.get("stroking_color") is not None else obj.get("non_stroking_color")
     return f"{color_hex(col)}@{round(obj.get('linewidth') or 0, 2)}:{kind}"
+
+
+def layer_display_key(obj, kind):
+    """[Real Layer Name] when the drawing's own CAD layer name is known
+    for this object (item 74 -- an AutoCAD/ArchiCAD PDF export "with
+    layers" preserves this as a PDF Optional Content Group), the same
+    real name a person opening this file in AutoCAD would see -- falls
+    back to layer_key()'s own colour@weight:kind signature otherwise.
+    Used ONLY for showing/discovering layers (scan_layers(), the mapping
+    UI) -- never for resolving a role during extract() itself; see
+    resolve_role() and layer_key()'s own docstring for why those stay
+    separate."""
+    name = obj.get("ocg_name")
+    return f"[{name}]" if name else layer_key(obj, kind)
+
+
+def resolve_role(obj, kind, layer_map):
+    """The role layer_map assigns this object: a name-based mapping
+    ("[Real Layer Name]" -> role) if the layer_map has one AND this
+    object carries that name, else the ordinary colour@weight:kind
+    mapping layer_map has always been keyed by. Name wins when both
+    exist, on the same reasoning a more specific rule always should.
+    This -- not a plain `layer_map.get(layer_key(obj, kind), "ignore")`
+    -- is what every real caller (extract()'s own duct-wall loop, count_
+    symbol_rects(), count_symbol_curves()) uses from item 74 on, so a
+    layer_map built against real names (once scan_layers() can show
+    them) is honoured without disturbing a single existing colour-keyed
+    layer_map.json already in use."""
+    name = obj.get("ocg_name")
+    if name:
+        role = layer_map.get(f"[{name}]")
+        if role is not None:
+            return role
+    return layer_map.get(layer_key(obj, kind), "ignore")
 
 def seg_dist(px, py, x1, y1, x2, y2):
     dx, dy = x2 - x1, y2 - y1
@@ -96,24 +508,49 @@ def seg_dist(px, py, x1, y1, x2, y2):
 
 # ---------------------------------------------------------------- step 1: layers
 def scan_layers(pdf_path):
-    """Group every straight edge (lines, rectangle sides, polyline segments) by (colour, line weight)."""
-    groups = defaultdict(lambda: {"segments": 0, "length_pt": 0.0, "pages": set()})
+    """Group every straight edge (lines, rectangle sides, polyline segments)
+    by (colour, line weight) -- or by the drawing's own real layer name,
+    wherever the PDF carries one (see layer_display_key()/_OcgPage, item
+    74) -- for DISCOVERY/display only; a role is still resolved against
+    whichever key an actual layer_map was built with, via resolve_role()."""
+    groups = defaultdict(lambda: {"segments": 0, "length_pt": 0.0, "pages": set(),
+                                  "color_keys": defaultdict(float)})
     with pdfplumber.open(pdf_path) as pdf:
         for pi, page in enumerate(pdf.pages):
+            page = _OcgPage(page, pdf_path, pi)
             for obj, kind, (x0, y0, x1, y1) in iter_segments(page):
-                g = groups[layer_key(obj, kind)]
+                g = groups[layer_display_key(obj, kind)]
+                length = math.hypot(x1 - x0, y1 - y0)
                 g["segments"] += 1
-                g["length_pt"] += math.hypot(x1 - x0, y1 - y0)
+                g["length_pt"] += length
                 g["pages"].add(pi)
-    out = [{"key": k, "color": k.split("@")[0], "linewidth": float(k.split("@")[1].split(":")[0]), "kind": k.split(":")[1],
-            "segments": v["segments"], "length_pt": v["length_pt"], "pages": sorted(v["pages"])}
-           for k, v in groups.items()]
+                # item 80: which colours a named layer is drawn in, for
+                # suggest_role_from_colours().
+                g["color_keys"][layer_key(obj, kind)] += length
+    out = []
+    for k, v in groups.items():
+        # item 74: a name-based key ("[Real Layer Name]", from layer_key()
+        # when the PDF carries one) has no "@weight:kind" suffix at all --
+        # color/linewidth/kind stay None rather than raising on a split()
+        # that assumed every key was the old colour-signature shape.
+        if k.startswith("[") and k.endswith("]"):
+            out.append({"key": k, "color": None, "linewidth": None, "kind": None,
+                        "name": k[1:-1], "segments": v["segments"],
+                        "length_pt": v["length_pt"], "pages": sorted(v["pages"]),
+                        "color_keys": dict(v["color_keys"])})
+        else:
+            out.append({"key": k, "color": k.split("@")[0],
+                        "linewidth": float(k.split("@")[1].split(":")[0]),
+                        "kind": k.split(":")[1], "name": None,
+                        "segments": v["segments"], "length_pt": v["length_pt"],
+                        "pages": sorted(v["pages"])})
     return sorted(out, key=lambda d: -d["length_pt"])
 
 def layer_lines(pdf_path, key, page_index):
     with pdfplumber.open(pdf_path) as pdf:
-        p = pdf.pages[page_index]
-        return [seg for obj, kind, seg in iter_segments(p) if layer_key(obj, kind) == key], (p.width, p.height)
+        p = _OcgPage(pdf.pages[page_index], pdf_path, page_index)
+        return [seg for obj, kind, seg in iter_segments(p)
+               if layer_display_key(obj, kind) == key], (p.width, p.height)
 
 def layer_preview_png(pdf_path, key, page_index=0, dpi=100):
     """What a Layer-mapping row's colour swatch/segment-count actually
@@ -161,12 +598,15 @@ def count_symbol_rects(page, layer_map: dict, role: str) -> list:
     colour/weight that draws the symbol can also carry something else
     entirely that happens to share it (a page border, in the real file)."""
     cap = _SYMBOL_MAX_PT.get(role, 20.0)
+    floor = _SYMBOL_MIN_PT.get(role, 0.0)
     cands = []
     for r in page.rects:
-        if layer_map.get(layer_key(r, "rect"), "ignore") != role:
+        if resolve_role(r, "rect", layer_map) != role:
             continue
         w, h = abs(r["x1"] - r["x0"]), abs(r["bottom"] - r["top"])
         if w > cap or h > cap:
+            continue
+        if max(w, h) < floor:
             continue
         cands.append(((r["x0"] + r["x1"]) / 2, (r["top"] + r["bottom"]) / 2, w, h))
     out = []
@@ -194,10 +634,19 @@ def count_symbol_curves(page, layer_map: dict, role: str, max_extent_pt: float =
     (9-20pt): this symbol's own bounding box runs the damper's drawn
     length along the duct (36-44pt / ~4-5ft on the real file), not a
     small fixed icon size -- a plain, generous ceiling, not tuned against
-    a labelled set."""
+    a labelled set.
+
+    item 79: `_CURVE_SYMBOL_MIN_PT` drops hatch fragments too small to be
+    any role's real symbol (its floor is always well under that role's
+    own tested fixture). `_CURVE_SYMBOL_SQUARE_ROLES` additionally
+    requires a near-square bounding box for a role whose real icon is
+    round or square (diffuser) -- never applied to a role like
+    volume_damper whose own real mark is long and thin."""
+    floor = _CURVE_SYMBOL_MIN_PT.get(role, 0.0)
+    square_only = role in _CURVE_SYMBOL_SQUARE_ROLES
     out = []
     for c in page.curves:
-        if layer_map.get(layer_key(c, "poly"), "ignore") != role:
+        if resolve_role(c, "poly", layer_map) != role:
             continue
         pts = c.get("pts") or []
         if not pts:
@@ -207,10 +656,73 @@ def count_symbol_curves(page, layer_map: dict, role: str, max_extent_pt: float =
         w, h = max(xs) - min(xs), max(ys) - min(ys)
         if max(w, h) > max_extent_pt:
             continue
+        if min(w, h) < floor:
+            continue
+        if square_only and max(w, h) / min(w, h) > 1.15:
+            continue
         cx, cy = sum(xs) / len(xs), sum(ys) / len(ys)
         if not any(math.hypot(cx - o[0], cy - o[1]) < 2.0 for o in out):
             out.append((cx, cy, w, h))
     return out
+
+def count_symbol_clusters(page, layer_map: dict, role: str) -> list:
+    """One (cx, cy, w_pt, h_pt) per cluster of touching geometry on a
+    layer mapped to `role` -- every line, rect and curve on that layer,
+    grouped when their bounding boxes sit within _CLUSTER_GAP_PT of each
+    other. For an item drawn as its own block on its own real layer (a
+    VAV box): the block's outline, hatching and inner marks all land in
+    one cluster, so the count is blocks, not primitives. A cluster outside
+    _CLUSTER_MIN_PT.._CLUSTER_MAX_PT on its longer side is dropped -- a
+    stray tick, or a leader/cable run sharing the layer, is not a box."""
+    boxes = []
+    for l in page.lines:
+        if resolve_role(l, "line", layer_map) == role:
+            boxes.append((min(l["x0"], l["x1"]), min(l["top"], l["bottom"]),
+                          max(l["x0"], l["x1"]), max(l["top"], l["bottom"])))
+    for r in page.rects:
+        if resolve_role(r, "rect", layer_map) == role:
+            boxes.append((min(r["x0"], r["x1"]), min(r["top"], r["bottom"]),
+                          max(r["x0"], r["x1"]), max(r["top"], r["bottom"])))
+    for c in page.curves:
+        pts = c.get("pts") or []
+        if pts and resolve_role(c, "poly", layer_map) == role:
+            xs = [p[0] for p in pts]; ys = [p[1] for p in pts]
+            boxes.append((min(xs), min(ys), max(xs), max(ys)))
+    n = len(boxes)
+    parent = list(range(n))
+
+    def find(a):
+        while parent[a] != a:
+            parent[a] = parent[parent[a]]
+            a = parent[a]
+        return a
+
+    order = sorted(range(n), key=lambda i: boxes[i][0])
+    gap = _CLUSTER_GAP_PT
+    for pos, i in enumerate(order):
+        x0, y0, x1, y1 = boxes[i]
+        for j in order[pos + 1:]:
+            if boxes[j][0] > x1 + gap:
+                break
+            if boxes[j][1] <= y1 + gap and boxes[j][3] >= y0 - gap:
+                parent[find(i)] = find(j)
+    clusters = {}
+    for i in range(n):
+        root = find(i)
+        b = boxes[i]
+        c = clusters.get(root)
+        if c is None:
+            clusters[root] = list(b)
+        else:
+            c[0] = min(c[0], b[0]); c[1] = min(c[1], b[1])
+            c[2] = max(c[2], b[2]); c[3] = max(c[3], b[3])
+    out = []
+    for x0, y0, x1, y1 in clusters.values():
+        w, h = x1 - x0, y1 - y0
+        if not (_CLUSTER_MIN_PT <= max(w, h) <= _CLUSTER_MAX_PT):
+            continue
+        out.append(((x0 + x1) / 2, (y0 + y1) / 2, w, h))
+    return sorted(out)
 
 # ---------------------------------------------------------------- step 2: duct runs
 def _merge(segs):
@@ -711,7 +1223,7 @@ def ocr_page(pdf_path, pi, dpi=250, log=print):
 
 
 def vision_vav_recount(pdf_path, pi, tag_reader, dpi=250, max_dim=2400,
-                       overlap=0.08, log=print):
+                       overlap=0.08, log=print, stats=None):
     """A second, independent VAV tag read, alongside RapidOCR (never
     instead of it -- `extract()` still runs ocr_page() exactly as before;
     this only ADDS to the same `labels` list).
@@ -763,10 +1275,23 @@ def vision_vav_recount(pdf_path, pi, tag_reader, dpi=250, max_dim=2400,
         crop = img.crop((x0, y0, x1, y1))
         buf = _io.BytesIO()
         crop.save(buf, format="PNG")
-        try:
-            text = tag_reader(buf.getvalue())
-        except Exception as e:                           # noqa: BLE001
-            log(f"    tile {i + 1}/{len(tiles)}: AI tag read failed ({e})")
+        # item 80: a tile whose read fails used to be skipped without a
+        # trace -- every tag on it silently missing from the count, one
+        # plain reason the same drawing read 42, then 38, then 34 tags.
+        # Tried twice now; a tile that still fails is counted in `stats`
+        # so extract() can say so in the result's own warnings.
+        text = None
+        for attempt in (1, 2):
+            try:
+                text = tag_reader(buf.getvalue())
+                break
+            except Exception as e:                       # noqa: BLE001
+                log(f"    tile {i + 1}/{len(tiles)}: AI tag read failed, try {attempt} ({e})")
+        if stats is not None:
+            stats["tiles"] = stats.get("tiles", 0) + 1
+        if text is None:
+            if stats is not None:
+                stats["failed"] = stats.get("failed", 0) + 1
             continue
         for l in parse_label(text or "", 0.0, 0.0, "vision", conf=0.7):
             if l["kind"] == "vav":
@@ -936,21 +1461,29 @@ def extract(pdf_path, layer_map, pt_per_ft, use_ocr=True, dpi=250, match_ft=8, l
               # tables, multi-sheet links are still genuinely untouched).
               "equipment": [], "duct_fittings": [], "accessories": [],
               "terminals": [], "legend": [], "schedules": [], "links": [],
-              "unresolved_duct_labels": []}
+              "unresolved_duct_labels": [],
+              # item 80: one entry per VAV box counted as a drawn block on
+              # a layer mapped to "vav_box" -- empty when no layer is.
+              "vav_boxes": []}
+    vision_stats = {"tiles": 0, "failed": 0}
     with pdfplumber.open(pdf_path) as pdf:
         md = pdf.metadata or {}
         result["source"].update({"pages": len(pdf.pages), "creator": md.get("Creator"), "created": md.get("CreationDate"),
                                  "page_size_pt": [round(pdf.pages[0].width), round(pdf.pages[0].height)]})
         for pi, page in enumerate(pdf.pages):
+            # item 74: real CAD layer names when the PDF carries them --
+            # every other page method/attribute (text, width, height, ...)
+            # passes straight through to the real pdfplumber page.
+            page = _OcgPage(page, pdf_path, pi)
             log(f"Page {pi + 1}: duct walls ...")
             by_role = defaultdict(list)
             for obj, kind, seg in iter_segments(page):
-                role = layer_map.get(layer_key(obj, kind), "ignore")
+                role = resolve_role(obj, kind, layer_map)
                 # A symbol role (diffuser/flex_connector/volume_damper) is
                 # counted below, from page.rects directly -- never paired
                 # as a duct wall here, which is what raw rect EDGE segments
                 # would otherwise look like to pair_runs().
-                if role != "ignore" and role not in SYMBOL_ROLES:
+                if role != "ignore" and role not in SYMBOL_ROLES and role not in CLUSTER_ROLES:
                     by_role[role].append(seg)
             log("  symbols (diffusers, flex connectors, dampers) ...")
             for role in SYMBOL_ROLES:
@@ -962,12 +1495,19 @@ def extract(pdf_path, layer_map, pt_per_ft, use_ocr=True, dpi=250, match_ft=8, l
                 # rect and a curve symbol that happened to land on the
                 # same spot (none do on the real file -- a safety net for
                 # the next one, not a fix for something seen).
+                #
+                # item 75/79: curve-checking is scoped to _CURVE_SYMBOL_ROLES
+                # -- see that constant's own comment for which roles and
+                # why. flex_connector stays out of it: nothing has yet
+                # reverse-engineered a safe way to tell its icon's own
+                # curves apart from the hatching/ticks sharing its layer.
                 rect_found = [(cx, cy, w, h, "rect")
                              for cx, cy, w, h in count_symbol_rects(page, layer_map, role)]
                 curve_found = []
-                for cx, cy, w, h in count_symbol_curves(page, layer_map, role):
-                    if not any(math.hypot(cx - o[0], cy - o[1]) < 2.0 for o in rect_found):
-                        curve_found.append((cx, cy, w, h, "curve"))
+                if role in _CURVE_SYMBOL_ROLES:
+                    for cx, cy, w, h in count_symbol_curves(page, layer_map, role):
+                        if not any(math.hypot(cx - o[0], cy - o[1]) < 2.0 for o in rect_found):
+                            curve_found.append((cx, cy, w, h, "curve"))
                 for cx, cy, w_pt, h_pt, shape in rect_found + curve_found:
                     entry = {"page": pi, "x_pt": cx, "y_pt": cy, "source": "geometry", "conf": 1.0}
                     # item 27 rule 3: some trades bill a damper by area
@@ -1003,6 +1543,13 @@ def extract(pdf_path, layer_map, pt_per_ft, use_ocr=True, dpi=250, match_ft=8, l
                                      "width_in": width_in, "height_in": height_in,
                                      "area_sqft": area_sqft, "qty": 1})
                         result["accessories"].append(entry)
+            # item 80: VAV boxes counted as drawn blocks (CLUSTER_ROLES).
+            for cx, cy, w_pt, h_pt in count_symbol_clusters(page, layer_map, "vav_box"):
+                result["vav_boxes"].append({
+                    "page": pi, "x_ft": round(cx / pt_per_ft, 2), "y_ft": round(cy / pt_per_ft, 2),
+                    "width_in": round(w_pt / pt_per_ft * 12, 1),
+                    "height_in": round(h_pt / pt_per_ft * 12, 1),
+                    "source": "geometry", "conf": 1.0})
             runs = []
             for role, lines in by_role.items():
                 for r in pair_runs(lines, pt_per_ft):
@@ -1019,7 +1566,8 @@ def extract(pdf_path, layer_map, pt_per_ft, use_ocr=True, dpi=250, match_ft=8, l
             labels, rooms, notes = text_layer(page, pi)
             if use_ocr: labels += ocr_page(pdf_path, pi, dpi, log)
             if use_ocr and vision_tag_reader:
-                labels += vision_vav_recount(pdf_path, pi, vision_tag_reader, dpi, log=log)
+                labels += vision_vav_recount(pdf_path, pi, vision_tag_reader, dpi, log=log,
+                                             stats=vision_stats)
             _classify_duct_label_colors(pdf_path, pi, labels)
             for l in labels:
                 l["page"] = pi
@@ -1105,6 +1653,15 @@ def extract(pdf_path, layer_map, pt_per_ft, use_ocr=True, dpi=250, match_ft=8, l
     # distinct physical boxes, not of how many times a tag was read (the
     # dedup pass above already collapsed repeat reads of the same tag).
     result["vav_tags"] = sorted({l["tag"] for l in result["labels"] if l["kind"] == "vav"})
+    # item 80: an AI tag-read tile that failed twice is tags missing from
+    # the count above -- said here, never left to look like a clean run.
+    result["settings"]["ai_tag_tiles"] = dict(vision_stats)
+    if vision_stats.get("failed"):
+        result["warnings"].append(
+            f'AI VAV-tag re-check: {vision_stats["failed"]} of {vision_stats["tiles"]} drawing '
+            "tile(s) could not be read (network or service error, tried twice) -- every VAV tag "
+            "on those tiles is missing from the tag count. Run the takeoff again before trusting "
+            "the tag count.")
     # AHUs with their own airflow printed right beside the tag -- see
     # AHU_CFM_RE's own comment: an AHU tag with no match here was found on
     # the drawing (as a plain note, in `notes`) but did not have its CFM
@@ -1317,6 +1874,16 @@ def summary_text(res):
                          f'one is used here)')
             else:
                 s.append(f'  {a["tag"]}: {a["cfm"]} CFM')
+    if res.get("vav_boxes"):
+        # item 80: the count of drawn VAV blocks on the drawing's own VAV
+        # layer -- the figure to bill from; the tag read below is a
+        # cross-check on it, not a second count to add.
+        s += ["", f'VAV BOXES COUNTED BY SHAPE: {len(res["vav_boxes"])} (one per drawn VAV block '
+                  f'on the layer mapped as "vav_box" -- geometry, the same on every run, not a '
+                  f'text read). USE THIS AS THE VAV BOX QUANTITY. It may include a legend/key '
+                  f'instance of the symbol -- say so beside the figure. The tag count below is '
+                  f'a separate cross-check and is expected to be LOWER (a tag that does not read '
+                  f'cleanly is not counted); never add the two together.']
     if res.get("vav_tags"):
         # item 1 (4 Nov 2026): the real client-side comparison on this exact
         # drawing found 15 tags read against 48 real VAV boxes (31%) -- not

@@ -44,6 +44,60 @@ from addons.boq.workers import OpenRouterWriteWorker
 from widgets.output_panel import short_duration
 
 
+# item 67 (11 Nov 2026), found live on a real pharma-client job: an SS
+# rack drawn as 8 visually separate compartments (a middle divider between
+# upper/lower, a line between each of the 4 columns) came back with the
+# frame (posts/rails) and the outer panels/doors in the BOM, but no
+# partition or middle-shelf line at all -- not because the model never saw
+# the drawing (it correctly cited page-2-only text elsewhere in the same
+# answer), but because nothing in the file ever NAMES a divider as its own
+# part, only the frame members are named, so a plain "use only what's
+# stated" reading leaves the compartment boundaries uncosted. Every one of
+# the three prompts below that asks the model to read a file's drawing
+# directly shares this same risk, so the fix is one shared note, not a
+# one-off sentence in just the prompt that happened to catch it this time.
+_COMPARTMENT_DIVIDER_NOTE = (
+    " If the file shows an object divided into separate sections or "
+    "compartments -- by colour, a label, or a drawn boundary -- each "
+    "boundary between two of them needs its own enclosing panel (a "
+    "divider, shelf or partition) as its own BOM line, unless the file "
+    "states or clearly shows that a frame member alone is what separates "
+    "them. A drawn boundary is not automatically covered by the frame.")
+
+# item 68 (11 Nov 2026), found live reviewing four more real client files
+# before testing: a hand-scanned sketch (0 extractable text -- a photo of a
+# handwritten sheet) stated its own +100mm sheet allowance ONLY by hand, in
+# the margin, as a brace grouping five named parts together ("Top, Bottom,
+# Sides, H. Partition, V. Partition") -- with "Doors" and "Legs" listed
+# OUTSIDE that brace, i.e. deliberately NOT covered by the same rule. A
+# reading pass that only looks for printed or typed instructions misses a
+# real, client-stated rule entirely; one that reads it but applies it
+# everywhere misapplies it to parts the client's own note excluded.
+_HANDWRITTEN_NOTE = (
+    " Read every annotation on every page, not only printed or typed text "
+    "-- a handwritten note, a margin scribble, or a brace grouping several "
+    "part names together is exactly as real a source as anything printed, "
+    "and often states a rule (an allowance, a material choice) that "
+    "applies ONLY to the parts it is grouped with, not to the whole "
+    "object. Don't skip something because it's handwritten, and don't "
+    "apply a rule found next to one list of parts to a part that isn't in "
+    "that list.")
+
+# item 68, same review: a single PDF held ten completely different,
+# separately-named products (a trolley, a storage cabinet, a table, ...),
+# not ten views of one object -- two of its own pages carried no product
+# name at all. Nothing before this said a file could BE a catalogue rather
+# than one job, so a reading pass had no reason not to blend one item's own
+# dimension into a neighbouring, similar-looking item's section.
+_MULTI_ITEM_NOTE = (
+    " If the file describes more than one separate, distinctly-named item "
+    "-- not just multiple views or pages of the same one object -- give "
+    "each item its own BOM section under its own heading, and never carry "
+    "a dimension, count or material note from one item into another "
+    "item's section, even where two items look similar. An unlabelled "
+    "page still belongs to whichever single item its own content "
+    "describes, never to more than one.")
+
 # item 44 (3 Nov 2026): every prompt below used to say "the attached
 # drawing" / "labelled on the drawing" throughout. cad_render.prepare_for_ai
 # already sends a .pdf whole, every page, unchanged (its own docstring: "A
@@ -69,7 +123,7 @@ VERIFY_PROMPT = (
     "that does not match what the file actually says, state the file's own "
     "value and the measured value. Then remake the whole BOQ in the same "
     "format as the previous answer with the corrected figures, and list what "
-    "changed.")
+    "changed." + _COMPARTMENT_DIVIDER_NOTE + _HANDWRITTEN_NOTE + _MULTI_ITEM_NOTE)
 
 # "Make with drawing" pressed before any BOQ exists yet -- there is no
 # previous answer to remake, so this does NOT reuse VERIFY_PROMPT's "remake
@@ -84,7 +138,7 @@ MAKE_WITH_DRAWING_PROMPT = (
     "page as real and a written one as background. The measured figures were "
     "computed locally from the same file -- use them as a cross-check, and "
     "where your own reading disagrees with a measured figure, say so and use "
-    "what the file itself says.")
+    "what the file itself says." + _COMPARTMENT_DIVIDER_NOTE + _HANDWRITTEN_NOTE + _MULTI_ITEM_NOTE)
 
 # item 38: a PDF attachment has no vector geometry Prism can measure itself --
 # unlike MAKE_WITH_DRAWING_PROMPT above, there is no "measured figures"
@@ -102,7 +156,7 @@ MAKE_WITH_DRAWING_NO_MEASUREMENT_PROMPT = (
     "the two disagree). Use only dimensions, quantities, materials and notes "
     "actually stated somewhere in the file. Where something needed is not "
     "stated anywhere or is unclear, say so as a question or a TO CONFIRM "
-    "line rather than inventing a figure.")
+    "line rather than inventing a figure." + _COMPARTMENT_DIVIDER_NOTE + _HANDWRITTEN_NOTE + _MULTI_ITEM_NOTE)
 
 
 class InputMeasurementsDialog(QDialog):
@@ -220,6 +274,13 @@ class BoqDialog(PrismDialog):
         # always come from self.boq (they are mode-independent).
         self._pm = CB.bom if self.mode == "bom" else self.boq
 
+        # item 70: summed across every Prism-Agent (API) call this job
+        # makes -- format, recheck, any follow-up -- never a browser
+        # agent's own turn, since there is no token count to read off one
+        # of those at all. Zero for a job that only ever used a browser
+        # agent, which is the honest figure, not a missing one.
+        self._tokens_used = {"prompt_tokens": 0, "completion_tokens": 0,
+                             "total_tokens": 0}
         self.cad_path = ""
         self.templates: list[dict] = []
         self.images: list[dict] = []
@@ -584,6 +645,17 @@ class BoqDialog(PrismDialog):
                                     on_click=self._open_link)
         self.open_btn.setEnabled(False)
         self.footer.add_utility(self.open_btn)
+        # item 66: fill the CLIENT'S OWN template (their logo, letterhead,
+        # column widths) with this result's line items, instead of handing
+        # them Prism's own generic docx and leaving them to copy the
+        # numbers across by hand. Enabled once there is a result to fill a
+        # template WITH -- _show_result is the one place every write/
+        # recheck/follow-up path already funnels through.
+        self.fill_template_btn = self.button(
+            i18n.t("Fill into template…"), "secondary", icon_name="paperclip",
+            small=True, on_click=self._fill_template)
+        self.fill_template_btn.setEnabled(False)
+        self.footer.add_utility(self.fill_template_btn)
         # Same job "Verify and remake" (the follow-up window's quick action)
         # already does -- read the drawing itself, not just the measured
         # figures -- so one button now covers both: pressed before any BOQ
@@ -901,6 +973,35 @@ class BoqDialog(PrismDialog):
                                  "starts the moment it's done…")
             return
 
+        # item 71 (12 Nov 2026), found live: a real run pressed "Make my
+        # BOQ" on a PDF with no vector geometry (self.q stays None forever
+        # for one of these -- only a .dwg/.dxf ever auto-measures). "Make
+        # my BOQ"/_write() never shows the AI the file itself, by design,
+        # the same rule Gerber and STEP keep -- it only ever shows measured
+        # text, and there was none. Nothing stopped the run; the AI filled
+        # the gap with a plausible-sounding, completely fabricated generic
+        # design, built off the one-line typed request alone, with no
+        # resemblance to the real file at all. The pdf_drawing_hint label
+        # already said "press Make with drawing" at attach time, but a
+        # passive hint a person has long since scrolled past is not a
+        # stop -- this is. Any cad_path that reached _run() with no
+        # measurement (a PDF/scan, or a DWG/DXF whose measurement came
+        # back empty) means the same thing: there is nothing for "Make my
+        # BOQ" to work from, so it must not run blind.
+        if self.cad_path and self.q is None:
+            QMessageBox.warning(self, "BOQ", i18n.t(
+                "{name} hasn't been measured -- Prism has no vector "
+                "geometry to read from it automatically (a PDF or scan "
+                "never auto-measures; only a .dwg/.dxf does). Press "
+                "\"Make with drawing\" instead, so the AI actually reads "
+                "the file itself. \"Make my {noun}\" only ever writes "
+                "from measured figures or your own typed request -- with "
+                "neither here, it would make up a {noun} with no "
+                "connection to what's actually in the file.").replace(
+                    "{name}", os.path.basename(self.cad_path)).replace(
+                    "{noun}", self._noun))
+            return
+
         # The agent pickers are the source of truth now. This also removes
         # the old "no writing agent set up yet" dead end — the picker
         # always offers the registry's tools.
@@ -1088,7 +1189,25 @@ class BoqDialog(PrismDialog):
                 "quantity). NEVER give one column a header naming more than "
                 "one kind of quantity (e.g. never 'Qty/Length/Area/Weight') -- "
                 "split every distinct measure into its own column, always, "
-                "even when that makes the table wider. Finish with its own "
+                "even when that makes the table wider. "
+                # item 69 (12 Nov 2026), found live on a real 40-off locker
+                # job: with an order quantity above 1, "Total Wt" alone is
+                # ambiguous between "this part's own weight for the ONE
+                # unit it belongs to" and "this part's weight across the
+                # WHOLE order" -- a real run picked the whole-order meaning
+                # and never showed the one-unit figure at all, so getting
+                # it back meant multiplying two separated columns (Wt/Pc
+                # and Qty) by hand. Split it into two named columns instead
+                # whenever this applies, so neither figure is ever a mental
+                # multiplication away.
+                "If the order itself is for more than one unit (a quantity "
+                "above 1 is stated anywhere), split 'Total Wt' into two "
+                "columns rather than one: 'Total Wt per unit (kg)' (that "
+                "part's own quantity-per-unit times Wt/Pc) and 'Total Wt, "
+                "all units (kg)' (that figure times the number of units "
+                "ordered). A reader should never have to multiply two "
+                "separated columns themselves to reach either number. "
+                "Finish with its own "
                 "'## RAW MATERIAL REQUIREMENT' section: one row per distinct "
                 "raw material (e.g. 'SS304 sheet 1.5 mm', 'SS304 square pipe "
                 "38.1 mm'), each with its net weight (sum of that material's "
@@ -1225,6 +1344,57 @@ class BoqDialog(PrismDialog):
         it was shown already had it mangled by the inbetween render."""
         self.result.setMarkdown(text)
         self._raw_result = text
+        self.fill_template_btn.setEnabled(True)
+
+    def _fill_template(self):
+        """item 66: open a copy of the CLIENT'S OWN BOQ template -- their
+        logo, letterhead, column widths, everything already in that file
+        -- and fill its line-item tables with this run's own result, in
+        place. Never the drawing (same rule every AI stage in this dialog
+        already keeps) and never an AI call at all: the column match is
+        deterministic (openrouter_writer._map_columns), so there is
+        nothing here that needs a key or a network round-trip."""
+        text = getattr(self, "_raw_result", "").strip()
+        if not text:
+            QMessageBox.information(self, "BOQ", i18n.t(
+                "Make the {noun} first — there is nothing yet to fill a "
+                "template with.").replace("{noun}", self._noun))
+            return
+        template_path, _ = QFileDialog.getOpenFileName(
+            self, i18n.t("Pick the client's own BOQ template"), "",
+            "Word documents (*.docx)")
+        if not template_path:
+            return
+        try:
+            os.makedirs(CB.config.RUNS_DIR, exist_ok=True)
+            out_path = os.path.join(
+                CB.config.RUNS_DIR, f"boq_filled_{int(time.time())}.docx")
+            report = openrouter_writer.fill_template_docx(
+                text, template_path, out_path)
+        except Exception as e:                                   # noqa: BLE001
+            QMessageBox.warning(self, "BOQ", i18n.t(
+                "Could not fill that template: {error}").replace(
+                    "{error}", str(e)))
+            return
+        task = getattr(self, "_task_name", "") or self._doc
+        saved = CB.config.save_artifact(
+            report["path"], task, kind="template_fill", task=task,
+            name=os.path.basename(template_path))
+        self._deliverable_path = saved or report["path"]
+        lines = [i18n.t("Filled {n} section(s) into the template.").replace(
+            "{n}", str(report["matched"]))]
+        if report["unmatched_template"]:
+            lines.append(i18n.t(
+                "{n} table(s) in the template found no matching section "
+                "and were left untouched.").replace(
+                    "{n}", str(report["unmatched_template"])))
+        if report["unmatched_drafted"]:
+            lines.append(i18n.t(
+                "No matching place in the template for: {list} — "
+                "appended at the end instead.").replace(
+                    "{list}", ", ".join(report["unmatched_drafted"])))
+        QMessageBox.information(self, "BOQ",
+                               "\n".join(lines) + f"\n\n{self._deliverable_path}")
 
     def _on_written(self, responses: dict, links: dict):
         self._set_busy(False, "")
@@ -1271,6 +1441,7 @@ class BoqDialog(PrismDialog):
             "artifacts": getattr(self, "_artifacts_dir", "") or CB.config.current_run_dir(),
             "deliverable_path": getattr(self, "_deliverable_path", ""),
             "boq": {"quantities_csv": self.csv_path, "source": self.cad_path},
+            "tokens": dict(self._tokens_used),
         })
         if texts:
             self._offer_followup()
@@ -1835,6 +2006,19 @@ class BoqDialog(PrismDialog):
 
     def _on_prism_agent_done(self, stage: str, agent: str, text: str, on_success):
         self._set_busy(False, "")
+        # item 70: the ONE place real token figures exist at all -- a
+        # browser-driven stage never reaches here, so this stays
+        # (correctly) at zero for a job that never used a Prism Agent.
+        # isinstance-checked, not just truthy -- a mocked worker in a test
+        # auto-creates a `.usage` attribute of its own (a Mock, not a
+        # dict), which `or {}` alone does not catch.
+        usage = getattr(self._worker, "usage", None)
+        if not isinstance(usage, dict):
+            usage = {}
+        for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+            value = usage.get(key)
+            if isinstance(value, int):
+                self._tokens_used[key] += value
         made_files: list = []
         # "standards"/"interpret" are text-only stages (a research brief, a
         # read of an attached sample) — only a document-producing stage
@@ -2054,6 +2238,7 @@ class BoqDialog(PrismDialog):
             "artifacts": getattr(self, "_artifacts_dir", "") or CB.config.current_run_dir(),
             "deliverable_path": getattr(self, "_deliverable_path", ""),
             "boq": {"quantities_csv": self.csv_path, "source": self.cad_path},
+            "tokens": dict(self._tokens_used),
         }, path=run_path)
         self._offer_followup()
 

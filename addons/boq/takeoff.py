@@ -548,12 +548,20 @@ class IndustryTakeoffDialog(QDialog):
             row = QHBoxLayout()
             swatch = QLabel()
             swatch.setFixedSize(16, 16)
+            # item 74: a name-based layer (scan_layers()'s "name" field)
+            # carries no colour at all -- layer["color"] is None, which
+            # Qt's stylesheet parser silently drops rather than crash on,
+            # but a neutral grey reads better than the swatch going
+            # invisible for every one of a real drawing's named layers.
             swatch.setStyleSheet(
-                f"background: {layer['color']}; border-radius: 3px;")
+                f"background: {layer['color'] or '#9ca3af'}; border-radius: 3px;")
             row.addWidget(swatch)
             ft = layer["length_pt"] / 72  # a plain visual cue, not a measurement
-            row.addWidget(QLabel(
-                f'{layer["color"]}  {layer["kind"]}  {layer["segments"]} segs  ~{ft:.0f} pt'))
+            if layer.get("name"):
+                label_text = f'{layer["name"]}  ·  {layer["segments"]} segs  ~{ft:.0f} pt'
+            else:
+                label_text = f'{layer["color"]}  {layer["kind"]}  {layer["segments"]} segs  ~{ft:.0f} pt'
+            row.addWidget(QLabel(label_text))
             row.addWidget(C.icon_button(
                 "eye", i18n.t("Preview this layer on the drawing"),
                 on_click=lambda _=False, l=layer: self._preview_layer(l)))
@@ -562,8 +570,43 @@ class IndustryTakeoffDialog(QDialog):
             # A key already learned from an earlier drawing starts there,
             # not back at "ignore" -- this is the cross-tender memory the
             # standalone hvac_takeoff.py tool already gave its own users.
+            # Failing that, item 76: the layer's own real name, read for
+            # the role it plainly describes ("Supply Air Duct" -> supply)
+            # -- still just this combo's own starting value, visible and
+            # changeable, never applied without a person seeing it here.
+            #
+            # item 77 (13 Nov 2026), found live: _on_extract() (below)
+            # saves EVERY combo's current value the moment Extract is
+            # clicked, "ignore" included -- so a drawing run even once
+            # before item 76 existed left every one of its own layers
+            # "remembered" as ignore, which this exact `if saved and
+            # saved in role_opts` check then treated as a real, deliberate
+            # choice outranking the new suggestion -- the owner's own "i
+            # dont find any layer that is mapped" was this, on the real
+            # file, not a setup problem. A remembered "ignore" never beat
+            # a real suggestion before now, either: it just means nobody
+            # had anything better to go on YET. Only a remembered role
+            # that is not "ignore" is a choice worth outranking a
+            # suggestion; "ignore" falls through to it like anything
+            # else unremembered, with plain "ignore" (role_opts' own
+            # default) staying the last resort when neither exists.
+            #
+            # item 80 (13 Nov 2026): a named layer whose own name says
+            # nothing can still be drawn in a colour the owner already
+            # mapped on an earlier drawing -- that remembered role is the
+            # third thing tried, before giving up on "ignore". Found
+            # live: return duct fell from 16.5 ft to 4.9 ft on the same
+            # drawing because its geometry sat in "ACME-HVAC-Z Piece".
             saved = saved_roles.get(layer["key"])
-            if saved and saved in role_opts:
+            suggested = industries.suggest_role(self.industry, layer.get("name"))
+            remembered = industries.suggest_role_from_memory(self.industry, layer, saved_roles)
+            if saved and saved != "ignore" and saved in role_opts:
+                combo.setCurrentText(saved)
+            elif suggested and suggested in role_opts:
+                combo.setCurrentText(suggested)
+            elif remembered and remembered in role_opts:
+                combo.setCurrentText(remembered)
+            elif saved and saved in role_opts:
                 combo.setCurrentText(saved)
             row.addWidget(combo)
             row.addStretch(1)

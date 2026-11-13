@@ -49,8 +49,8 @@ import theme
 from dialogs.base import PrismDialog
 from workers import AutomationWorker
 from addons.step.workers import (StepApplyWorker, StepAskWorker,
-                                 StepMeasureWorker, StepPlanWorker,
-                                 image_attachment)
+                                 StepCatalogExplainWorker, StepMeasureWorker,
+                                 StepPlanWorker, image_attachment)
 from addons.step import sessions as SES
 from addons.step import workbench as WB
 from widgets.loader import Loader
@@ -499,6 +499,56 @@ class StepDialog(PrismDialog):
         self.ai_draft_cb.setChecked(bool(self.cfg.get("step_ai_draft")))
         step2_v.addWidget(self.ai_draft_cb)
 
+        # Material/mould lookup: the shop's own reference sheet (CSV/XLSX
+        # of Sr Nos), attached once and left attached in cfg — a shop
+        # reuses the same catalog on every inquiry, so asking for it again
+        # on every run would be friction for no reason; it stays until the
+        # person presses Remove. Draft-only: Ask/Edit have no use for a
+        # Sr No, and the ID/OD here come from the INQUIRY, never measured
+        # off the file — the file only supplies the catalog to look them
+        # up in.
+        self.catalog_box = QFrame()
+        catalog_v = QVBoxLayout(self.catalog_box)
+        catalog_v.setContentsMargins(0, 0, 0, 0)
+        catalog_v.setSpacing(theme.SPACE_1)
+        catalog_label = QLabel(i18n.t("Material/mould catalog (optional):"))
+        catalog_label.setStyleSheet(
+            f"color: {theme.NEUTRAL[700]}; font-size: 12.5px; border: none;")
+        catalog_v.addWidget(catalog_label)
+        catalog_row = QHBoxLayout()
+        self.catalog_name_label = QLabel("")
+        self.catalog_name_label.setWordWrap(True)
+        self.catalog_name_label.setStyleSheet(
+            f"color: {theme.NEUTRAL[600]}; font-size: 12px; border: none;")
+        catalog_row.addWidget(self.catalog_name_label, 1)
+        self.catalog_attach_btn = self.button(
+            i18n.t("Attach…"), "secondary", small=True,
+            on_click=self._pick_catalog)
+        catalog_row.addWidget(self.catalog_attach_btn)
+        self.catalog_remove_btn = self.button(
+            i18n.t("Remove"), "secondary", small=True,
+            on_click=self._remove_catalog)
+        catalog_row.addWidget(self.catalog_remove_btn)
+        catalog_v.addLayout(catalog_row)
+        inquiry_row = QHBoxLayout()
+        self.inquiry_id_edit = QLineEdit()
+        self.inquiry_id_edit.setPlaceholderText(i18n.t("Inquiry ID mm"))
+        self.inquiry_od_edit = QLineEdit()
+        self.inquiry_od_edit.setPlaceholderText(i18n.t("Inquiry OD mm"))
+        inquiry_row.addWidget(self.inquiry_id_edit)
+        inquiry_row.addWidget(self.inquiry_od_edit)
+        catalog_v.addLayout(inquiry_row)
+        catalog_hint = QLabel(i18n.t(
+            "From the inquiry, not measured off the file — Draft looks "
+            "these up in the catalog above and reports the Material and "
+            "Mould Sr No to use."))
+        catalog_hint.setWordWrap(True)
+        catalog_hint.setStyleSheet(
+            f"color: {theme.NEUTRAL[600]}; font-size: 12px; border: none;")
+        catalog_v.addWidget(catalog_hint)
+        step2_v.addWidget(self.catalog_box)
+        self._refresh_catalog_label()
+
         run_row = QHBoxLayout()
         run_row.addStretch(1)
         draft_label, draft_icon = ACTION_BUTTON["draft"]
@@ -722,6 +772,7 @@ class StepDialog(PrismDialog):
         self.model_label.setText(i18n.t("Suggest the change with:")
                                  if action == "edit" else i18n.t("Answer with:"))
         self.ai_draft_cb.setVisible(action == "draft")
+        self.catalog_box.setVisible(action == "draft")
         if hasattr(self, "composer"):
             self._sync_composer()
         lay = self.step2.layout()
@@ -1603,6 +1654,109 @@ class StepDialog(PrismDialog):
     def _chosen_model(self) -> str:
         return self.model_combo.currentData() or DEFAULT_MODEL
 
+    # ── material/mould catalog ──────────────────────────────────────────
+
+    def _catalog_path(self) -> str:
+        path = self.cfg.get("step_catalog_path") or ""
+        return path if path and os.path.exists(path) else ""
+
+    def _refresh_catalog_label(self):
+        path = self._catalog_path()
+        has_one = bool(path)
+        self.catalog_name_label.setText(
+            os.path.basename(path) if has_one
+            else i18n.t("No catalog attached — Sr No lookup is skipped."))
+        self.catalog_remove_btn.setEnabled(has_one)
+
+    def _pick_catalog(self):
+        import paths
+        start = self._catalog_path() or paths.picker_start_dir()
+        path, _ = QFileDialog.getOpenFileName(
+            self, i18n.t("Material/mould catalog"), start,
+            i18n.t("Catalog files (*.csv *.xlsx *.xlsm);;All files (*)"))
+        if not path:
+            return
+        self.cfg["step_catalog_path"] = path
+        try:
+            CB.config.save(self.cfg)
+        except Exception:                               # noqa: BLE001
+            pass
+        self._refresh_catalog_label()
+
+    def _remove_catalog(self):
+        self.cfg["step_catalog_path"] = ""
+        try:
+            CB.config.save(self.cfg)
+        except Exception:                               # noqa: BLE001
+            pass
+        self._refresh_catalog_label()
+
+    def _inquiry_id_od(self) -> tuple[float, float] | None:
+        """Both boxes, or neither — an inquiry with only one of ID/OD typed
+        in is not enough to match a seal size, so the lookup is skipped
+        rather than guessing which figure is missing."""
+        id_text = self.inquiry_id_edit.text().strip()
+        od_text = self.inquiry_od_edit.text().strip()
+        if not id_text or not od_text:
+            return None
+        try:
+            return float(id_text), float(od_text)
+        except ValueError:
+            return None
+
+    def _catalog_lookup_note(self) -> str:
+        """One line for Draft's output, or "" when there is nothing to
+        look up (no catalog attached, or no ID/OD typed for this
+        inquiry) — silent in that case, not an error, since the lookup is
+        optional. Caches the match/miss on self so _maybe_explain_catalog_
+        miss doesn't re-read and re-parse the same catalog file a second
+        time right after this one did."""
+        self._catalog_ids = None
+        self._catalog_nearest_miss = None
+        path = self._catalog_path()
+        ids = self._inquiry_id_od()
+        if not path or ids is None:
+            return ""
+        try:
+            rows = self.sf.load_catalog(path)
+        except Exception as e:                          # noqa: BLE001
+            return f"Material/mould catalog: {e}"
+        match, nearest = self.sf.match_catalog(rows, *ids)
+        self._catalog_ids = ids
+        if match is None and nearest is not None:
+            self._catalog_nearest_miss = nearest
+        return self.sf.catalog_match_text(*ids, match, nearest)
+
+    def _maybe_explain_catalog_miss(self):
+        """A short AI read of WHY an inquiry's ID/OD missed every row in
+        the shop's own catalog within tolerance — numbers only (the
+        inquiry's ID/OD and the nearest row's own figures and Sr Nos),
+        never the catalog file or the STEP file, and never on a confident
+        match: that case already has a plain, correct answer and needs no
+        second opinion. Silent on any failure — this is a bonus read, not
+        part of the deterministic result above it."""
+        if self._catalog_ids is None or self._catalog_nearest_miss is None:
+            return
+        if not self.cfg.get("openrouter_api_key"):
+            return
+        model = MODEL_IDS[self._chosen_model()]
+        prompt = self.sf.catalog_explain_prompt(
+            *self._catalog_ids, self._catalog_nearest_miss)
+        self._catalog_explain_worker = StepCatalogExplainWorker(
+            self.cfg, prompt, model=model)
+        self._catalog_explain_worker.done.connect(self._on_catalog_explained)
+        self._catalog_explain_worker.failed.connect(lambda _e: None)
+        self._catalog_explain_worker.start()
+
+    def _on_catalog_explained(self, text: str):
+        text = text.strip()
+        if not text:
+            return
+        note = f"Material/mould catalog — Prism AI's read on the miss: {text}"
+        self._notes.append(note)
+        self.meas_view.setPlainText(
+            self.meas_view.toPlainText() + "\n\n" + note)
+
     def _k_factor(self) -> float:
         """0.0 means "use Prism's default" — a blank box, or anything
         that doesn't parse as a plausible K-factor (0 to 1; it is a
@@ -1710,6 +1864,12 @@ class StepDialog(PrismDialog):
                                                 task=report["file"])
                     except Exception:                   # noqa: BLE001
                         pass
+        catalog_note = (self._catalog_lookup_note()
+                       if self._action() == "draft" else "")
+        if catalog_note:
+            blocks.append(catalog_note)
+            self._notes.append(catalog_note)
+            self._maybe_explain_catalog_miss()
         self.meas_view.setPlainText("\n\n".join(blocks))
         self.files_label.setText(
             i18n.t("Saved so every number can be checked → ")

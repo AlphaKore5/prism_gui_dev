@@ -480,6 +480,85 @@ class LayerMappingPreFillsFromAnEarlierTendersOwnRoles(unittest.TestCase):
         self.assertEqual(d._role_combos[0][1].currentText(), "ignore")
 
 
+class LayerMappingPreFillsFromTheLayersOwnRealNameItem76(unittest.TestCase):
+    """item 76: "we have to manually do it" -- the owner's own reaction
+    to a real-named layer (item 74) still starting every combo on
+    "ignore". A name industries.suggest_role() can read pre-fills the
+    combo the same way a previously-learned key already does -- learned
+    history still wins when both exist (saved_layer_roles is checked
+    first, unchanged from before this item)."""
+
+    def _named_layer(self, key="[ACME-HVAC-Supply Air Duct]", name="ACME-HVAC-Supply Air Duct"):
+        return {"key": key, "color": None, "linewidth": None, "kind": None,
+               "name": name, "segments": 5, "length_pt": 100.0, "pages": [0]}
+
+    def test_a_layer_whose_name_industries_can_read_starts_on_that_suggestion(self):
+        d = T.IndustryTakeoffDialog("HVAC")
+        d.show()
+        with mock.patch.object(T.industries, "saved_layer_roles", return_value={}):
+            d._fill_mapping([self._named_layer()])
+        self.assertEqual(d._role_combos[0][1].currentText(), "supply")
+
+    def test_a_previously_learned_key_still_wins_over_the_name_suggestion(self):
+        with mock.patch.object(T.industries, "saved_layer_roles",
+                               return_value={"[ACME-HVAC-Supply Air Duct]": "return"}):
+            d = T.IndustryTakeoffDialog("HVAC")
+            d.show()
+            d._fill_mapping([self._named_layer()])
+        self.assertEqual(d._role_combos[0][1].currentText(), "return")
+
+    def test_a_colour_only_layer_with_no_name_is_unaffected(self):
+        """The pre-existing path (item 74's own colour-keyed layers,
+        "name": None) must still start on "ignore" exactly as before --
+        suggest_role() is never even asked for one of these."""
+        layer = {"key": "#000000@1.56:line", "color": "#000000", "linewidth": 1.56,
+                "kind": "line", "name": None, "segments": 5, "length_pt": 100.0, "pages": [0]}
+        d = T.IndustryTakeoffDialog("HVAC")
+        d.show()
+        with mock.patch.object(T.industries, "saved_layer_roles", return_value={}):
+            d._fill_mapping([layer])
+        self.assertEqual(d._role_combos[0][1].currentText(), "ignore")
+
+    def test_a_name_with_no_recognisable_role_starts_on_ignore(self):
+        d = T.IndustryTakeoffDialog("HVAC")
+        d.show()
+        with mock.patch.object(T.industries, "saved_layer_roles", return_value={}):
+            # item 80: this used "ACME-HVAC-VAV", which now suggests
+            # "vav_box" on purpose; a grille layer still says nothing.
+            d._fill_mapping([self._named_layer(key="[ACME-HVAC-Grille]", name="ACME-HVAC-Grille")])
+        self.assertEqual(d._role_combos[0][1].currentText(), "ignore")
+
+    def test_a_named_layer_drawn_in_a_remembered_colour_starts_on_that_role(self):
+        """item 80, found live: return duct fell from 16.5 ft to 4.9 ft
+        because "ACME-HVAC-Z Piece" -- a name nothing reads -- held the
+        geometry one remembered colour used to pick up."""
+        layer = self._named_layer(key="[ACME-HVAC-Z Piece]", name="ACME-HVAC-Z Piece")
+        layer["color_keys"] = {"#ff0000@1.08:line": 870.0, "#808080@0.72:line": 3000.0}
+        saved = {"#ff0000@1.08:line": "return", "#808080@0.72:line": "ignore",
+                 "[ACME-HVAC-Z Piece]": "ignore"}
+        d = T.IndustryTakeoffDialog("HVAC")
+        d.show()
+        with mock.patch.object(T.industries, "saved_layer_roles", return_value=saved):
+            d._fill_mapping([layer])
+        self.assertEqual(d._role_combos[0][1].currentText(), "return")
+
+    def test_a_remembered_plain_ignore_never_outranks_a_real_suggestion(self):
+        """item 77, found live: the owner's own real file had every one
+        of its layers saved as "ignore" from a run before item 76 ever
+        existed -- _on_extract() remembers whatever every combo currently
+        shows, "ignore" included, so a drawing run even once before this
+        item left exactly this state behind. A remembered "ignore" is
+        indistinguishable from "nobody ever looked at this one" and must
+        never block a real suggestion the same way a remembered real
+        role correctly still does (see the test above)."""
+        with mock.patch.object(T.industries, "saved_layer_roles",
+                               return_value={"[ACME-HVAC-Supply Air Duct]": "ignore"}):
+            d = T.IndustryTakeoffDialog("HVAC")
+            d.show()
+            d._fill_mapping([self._named_layer()])
+        self.assertEqual(d._role_combos[0][1].currentText(), "supply")
+
+
 class ExtractingRemembersTheChosenRolesForTheNextDrawing(unittest.TestCase):
     """The other half of the fix above: Step 1's choices must reach
     `industries.remember_layer_roles` so the NEXT drawing starts

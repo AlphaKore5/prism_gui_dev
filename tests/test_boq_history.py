@@ -86,6 +86,76 @@ class ListBoqRunsFindsOnlyBoqTaggedRecordsNewestFirst(unittest.TestCase):
             self.assertEqual(H.list_boq_runs(), [])
 
 
+class CountsByPeriodSumsBoqsAndTokensNestedByPeriod(unittest.TestCase):
+    """item 70: a small counter, read off the same run files History
+    already reads."""
+
+    def test_a_run_today_counts_toward_day_month_and_year(self):
+        with _TempRunsDir() as d:
+            now = time.time()
+            _write_run(d, "run_1.json",
+                      {"addon": "boq", "tokens": {"total_tokens": 500}}, now)
+            out = H.counts_by_period()
+        self.assertEqual(out["day"], {"boqs": 1, "tokens": 500})
+        self.assertEqual(out["month"], {"boqs": 1, "tokens": 500})
+        self.assertEqual(out["year"], {"boqs": 1, "tokens": 500})
+
+    def test_a_run_from_last_year_counts_nowhere(self):
+        with _TempRunsDir() as d:
+            a_year_ago = time.time() - 366 * 86400
+            _write_run(d, "run_1.json",
+                      {"addon": "boq", "tokens": {"total_tokens": 999}}, a_year_ago)
+            out = H.counts_by_period()
+        self.assertEqual(out["year"], {"boqs": 0, "tokens": 0})
+
+    def test_a_run_with_no_tokens_field_counts_as_zero_tokens_not_a_crash(self):
+        """A browser-driven agent's own run -- no OpenRouter usage to
+        read at all. Zero is the honest figure, never guessed."""
+        with _TempRunsDir() as d:
+            _write_run(d, "run_1.json", {"addon": "boq"}, time.time())
+            out = H.counts_by_period()
+        self.assertEqual(out["day"], {"boqs": 1, "tokens": 0})
+
+    def test_a_non_boq_run_is_excluded_the_same_as_list_boq_runs(self):
+        with _TempRunsDir() as d:
+            _write_run(d, "run_1.json", {"addon": "gerber"}, time.time())
+            out = H.counts_by_period()
+        self.assertEqual(out["day"], {"boqs": 0, "tokens": 0})
+
+
+class ResetCounterMovesTheBaselineWithoutTouchingAnyRunFile(unittest.TestCase):
+    """item 73: "start the BOQ count from 0... so i can see how i am
+    spending on each of the BOQ" -- a run from before reset_counter()'s
+    own moment must stop counting toward counts_by_period(), while
+    remaining exactly where it was for History and everything else that
+    reads list_boq_runs() directly."""
+
+    def test_a_run_from_before_the_reset_is_no_longer_counted(self):
+        with _TempRunsDir() as d:
+            _write_run(d, "run_old.json",
+                      {"addon": "boq", "tokens": {"total_tokens": 500}},
+                      time.time() - 10)
+            H.reset_counter()
+            out = H.counts_by_period()
+        self.assertEqual(out["day"], {"boqs": 0, "tokens": 0})
+
+    def test_the_old_run_still_appears_in_list_boq_runs(self):
+        with _TempRunsDir() as d:
+            _write_run(d, "run_old.json", {"addon": "boq", "query": "kept"},
+                      time.time() - 10)
+            H.reset_counter()
+            out = H.list_boq_runs()
+        self.assertEqual([r["query"] for r in out], ["kept"])
+
+    def test_a_run_made_after_the_reset_is_counted_normally(self):
+        with _TempRunsDir() as d:
+            H.reset_counter()
+            _write_run(d, "run_new.json",
+                      {"addon": "boq", "tokens": {"total_tokens": 10}}, time.time())
+            out = H.counts_by_period()
+        self.assertEqual(out["day"], {"boqs": 1, "tokens": 10})
+
+
 class BoqHistoryDialogShowsAndPicksARun(unittest.TestCase):
     def test_a_boq_run_appears_with_its_request_text(self):
         with _TempRunsDir() as d:

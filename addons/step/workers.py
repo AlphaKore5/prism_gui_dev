@@ -152,6 +152,31 @@ class StepPlanWorker(_Worker):
             self.failed.emit(str(e))
 
 
+class StepCatalogExplainWorker(_Worker):
+    """One OpenRouter call, numbers only: why an inquiry's ID/OD missed
+    every row in the shop's own material/mould catalog within tolerance.
+    Fired only on a miss (dialog.py) -- a confident deterministic match
+    needs no second opinion. The prompt (core.stepfile.
+    catalog_explain_prompt) carries four numbers, two Sr Nos and nothing
+    else: never the catalog file, never the STEP file."""
+    done = Signal(str)
+    failed = Signal(str)
+
+    def __init__(self, cfg: dict, prompt: str,
+                 model: str = "anthropic/claude-haiku-5.5"):
+        super().__init__()
+        self.cfg, self.prompt, self.model = cfg, prompt, model
+
+    def run(self):
+        try:
+            text = CB.openrouter.openrouter_chat(
+                self.cfg.get("openrouter_api_key", ""), self.model,
+                self.prompt, temperature=0.3, timeout=60).strip()
+            self.done.emit(text)
+        except Exception as e:
+            self.failed.emit(str(e))
+
+
 class StepApplyWorker(_Worker):
     """Apply a validated plan to a COPY of the model, re-measure the copy,
     and rewrite the review page with the real After column. The original
