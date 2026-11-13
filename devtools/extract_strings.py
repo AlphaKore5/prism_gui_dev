@@ -207,6 +207,8 @@ COPY_TABLES = {
     # …and Find phones: the kind of number a found phone looks like, and what the
     # person panel says under it about where it was published (prospector/phones.py).
     "KIND_LABEL", "SOURCE_LINE",
+    # …and Find mobiles: what the panel says under a person's own mobile.
+    "PERSON_LINE",
 }
 
 # Strings that reach the UI from somewhere this scan cannot see: the engine's

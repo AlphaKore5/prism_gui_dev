@@ -606,6 +606,246 @@ class ThePictureLeavesOnlyWithConsentAskedOnce(unittest.TestCase):
         q.assert_not_called()
 
 
+class TheMaterialMouldCatalogStaysAttachedUntilRemoved(unittest.TestCase):
+    """Draft-only: a shop's own Sr No sheet (CSV/XLSX), attached once via
+    cfg["step_catalog_path"] and left there across runs and dialog
+    sessions until the person presses Remove -- never re-asked for on
+    every Generate the way a one-shot attachment would be."""
+
+    def _catalog_file(self, tmp) -> str:
+        path = os.path.join(tmp, "catalog.csv")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("Product ID mm,Product OD mm,Material Sr No,Mould Sr No\n"
+                    "20,32,MAT-202,MLD-103\n")
+        return path
+
+    def test_a_fresh_dialog_with_nothing_attached_says_so(self):
+        dlg = _dialog()
+        self.assertEqual(dlg._catalog_path(), "")
+        self.assertIn("No catalog attached", dlg.catalog_name_label.text())
+        self.assertFalse(dlg.catalog_remove_btn.isEnabled())
+
+    def test_attaching_a_file_saves_its_path_and_shows_the_name(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._catalog_file(tmp)
+            dlg = _dialog()
+            with mock.patch.object(SD.QFileDialog, "getOpenFileName",
+                                   return_value=(path, "")):
+                dlg._pick_catalog()
+            self.assertEqual(dlg.cfg["step_catalog_path"], path)
+            self.assertEqual(dlg.catalog_name_label.text(),
+                             os.path.basename(path))
+            self.assertTrue(dlg.catalog_remove_btn.isEnabled())
+
+    def test_a_new_dialog_still_shows_a_path_saved_by_an_earlier_one(self):
+        """The whole point: it survives past the dialog that attached it,
+        the same way step_ai_draft and step_ask_model already do."""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._catalog_file(tmp)
+            cfg = {"agents": {"visual": "ChatGPT", "brains": "Claude"},
+                  "openrouter_api_key": "sk-or-test",
+                  "step_out_dir": tmp, "step_catalog_path": path}
+            dlg = StepDialog(cfg, [], None)
+            dlg._vision_consent = False
+            self.assertEqual(dlg._catalog_path(), path)
+            self.assertEqual(dlg.catalog_name_label.text(),
+                             os.path.basename(path))
+
+    def test_cancelling_the_file_picker_changes_nothing(self):
+        dlg = _dialog()
+        with mock.patch.object(SD.QFileDialog, "getOpenFileName",
+                              return_value=("", "")):
+            dlg._pick_catalog()
+        self.assertEqual(dlg._catalog_path(), "")
+
+    def test_remove_clears_it_and_it_stays_cleared(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._catalog_file(tmp)
+            cfg = {"agents": {"visual": "ChatGPT", "brains": "Claude"},
+                  "openrouter_api_key": "sk-or-test",
+                  "step_out_dir": tmp, "step_catalog_path": path}
+            dlg = StepDialog(cfg, [], None)
+            dlg._vision_consent = False
+            dlg._remove_catalog()
+            self.assertEqual(dlg._catalog_path(), "")
+            self.assertIn("No catalog attached", dlg.catalog_name_label.text())
+            self.assertFalse(dlg.catalog_remove_btn.isEnabled())
+
+    def test_a_catalog_that_no_longer_exists_on_disk_reads_as_none(self):
+        """cfg can outlive the file (moved, deleted, a synced folder gone
+        offline) -- the dialog must not claim an attachment it can't read,
+        and must not crash trying to use it."""
+        dlg = _dialog(cfg={"agents": {"visual": "ChatGPT", "brains": "Claude"},
+                           "openrouter_api_key": "sk-or-test",
+                           "step_catalog_path": "/no/such/catalog.csv"})
+        self.assertEqual(dlg._catalog_path(), "")
+        self.assertEqual(dlg._catalog_lookup_note(), "")
+
+
+class TheMaterialMouldLookupRunsOnlyForDraft(unittest.TestCase):
+    """The ID/OD boxes are the INQUIRY's figures, never measured off the
+    file; the lookup itself is Draft-only (Ask/Edit have no use for a
+    Sr No) and silently does nothing when either input is missing --
+    it is an optional extra, not a thing that can fail the run."""
+
+    def _attached_dialog(self, tmp):
+        path = os.path.join(tmp, "catalog.csv")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("Product ID mm,Product OD mm,Material Sr No,Mould Sr No\n"
+                    "20,32,MAT-202,MLD-103\n")
+        dlg = _dialog(root=tmp)
+        dlg.cfg["step_catalog_path"] = path
+        return dlg
+
+    def test_no_catalog_and_no_ids_gives_an_empty_note(self):
+        dlg = _dialog()
+        self.assertEqual(dlg._catalog_lookup_note(), "")
+
+    def test_a_catalog_with_no_ids_typed_gives_an_empty_note(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dlg = self._attached_dialog(tmp)
+            self.assertEqual(dlg._catalog_lookup_note(), "")
+
+    def test_only_one_of_id_or_od_typed_gives_an_empty_note(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dlg = self._attached_dialog(tmp)
+            dlg.inquiry_id_edit.setText("20")
+            self.assertEqual(dlg._catalog_lookup_note(), "")
+
+    def test_both_ids_typed_with_a_catalog_reports_the_match(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dlg = self._attached_dialog(tmp)
+            dlg.inquiry_id_edit.setText("20.05")
+            dlg.inquiry_od_edit.setText("31.9")
+            note = dlg._catalog_lookup_note()
+        self.assertIn("MAT-202", note)
+        self.assertIn("MLD-103", note)
+
+    def test_on_measured_appends_the_lookup_note_for_draft(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dlg = self._attached_dialog(tmp)
+            dlg._action_buttons["draft"].setChecked(True)
+            dlg.inquiry_id_edit.setText("20")
+            dlg.inquiry_od_edit.setText("32")
+            m = _fake_measured(dlg, out_dir=tmp)
+            with mock.patch.object(SD.CB.config, "save_artifact"), \
+                mock.patch.object(dlg, "_next"):
+                dlg._on_measured([m])
+        self.assertTrue(any("MAT-202" in n for n in dlg._notes))
+        self.assertIn("MAT-202", dlg.meas_view.toPlainText())
+
+    def test_on_measured_skips_the_lookup_for_ask(self):
+        """Switching to Ask/Edit must not surface a Sr No note even if the
+        ID/OD boxes still hold values from an earlier Draft run."""
+        with tempfile.TemporaryDirectory() as tmp:
+            dlg = self._attached_dialog(tmp)
+            dlg._action_buttons["ask"].setChecked(True)
+            dlg.inquiry_id_edit.setText("20")
+            dlg.inquiry_od_edit.setText("32")
+            m = _fake_measured(dlg, out_dir=tmp)
+            with mock.patch.object(SD.CB.config, "save_artifact"), \
+                mock.patch.object(dlg, "_next"):
+                dlg._on_measured([m])
+        self.assertFalse(any("MAT-202" in n for n in dlg._notes))
+        self.assertNotIn("MAT-202", dlg.meas_view.toPlainText())
+
+    def test_a_catalog_file_that_cannot_be_understood_reports_why(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = os.path.join(tmp, "bad.csv")
+            with open(bad, "w", encoding="utf-8") as f:
+                f.write("Name,Price\nWidget,10\n")
+            dlg = _dialog(root=tmp)
+            dlg.cfg["step_catalog_path"] = bad
+            dlg.inquiry_id_edit.setText("20")
+            dlg.inquiry_od_edit.setText("32")
+            note = dlg._catalog_lookup_note()
+        self.assertIn("Material/mould catalog", note)
+
+
+class TheCatalogMissExplainerFiresOnlyOnAMiss(unittest.TestCase):
+    """A second opinion only for the one ambiguous case -- a confident
+    deterministic match never calls an AI at all, and no OpenRouter key
+    means no call either. The worker itself is never let run for real
+    here: SD.StepCatalogExplainWorker is replaced with a stand-in that
+    records its prompt and never starts a thread."""
+
+    class _FakeExplainWorker:
+        instances: list = []
+
+        def __init__(self, cfg, prompt, model="anthropic/claude-haiku-5.5"):
+            self.cfg, self.prompt, self.model = cfg, prompt, model
+            self.done = _Sig()
+            self.failed = _Sig()
+            self.started = False
+            type(self).instances.append(self)
+
+        def start(self):
+            self.started = True
+
+    def setUp(self):
+        self._FakeExplainWorker.instances = []
+
+    def _attached_dialog(self, tmp, id_mm="20", od_mm="32"):
+        path = os.path.join(tmp, "catalog.csv")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("Product ID mm,Product OD mm,Material Sr No,Mould Sr No\n"
+                    "20,32,MAT-202,MLD-103\n")
+        dlg = _dialog(root=tmp)
+        dlg.cfg["step_catalog_path"] = path
+        dlg.inquiry_id_edit.setText(id_mm)
+        dlg.inquiry_od_edit.setText(od_mm)
+        return dlg
+
+    def test_a_confident_match_never_calls_the_explainer(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dlg = self._attached_dialog(tmp, "20", "32")   # exact match
+            with mock.patch.object(SD, "StepCatalogExplainWorker",
+                                   self._FakeExplainWorker):
+                dlg._catalog_lookup_note()
+                dlg._maybe_explain_catalog_miss()
+        self.assertEqual(self._FakeExplainWorker.instances, [])
+
+    def test_a_miss_with_no_openrouter_key_is_silent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dlg = self._attached_dialog(tmp, "99", "99")   # miss
+            dlg.cfg["openrouter_api_key"] = ""
+            with mock.patch.object(SD, "StepCatalogExplainWorker",
+                                   self._FakeExplainWorker):
+                dlg._catalog_lookup_note()
+                dlg._maybe_explain_catalog_miss()
+        self.assertEqual(self._FakeExplainWorker.instances, [])
+
+    def test_a_miss_with_a_key_fires_one_worker_with_the_engines_prompt(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dlg = self._attached_dialog(tmp, "99", "99")   # miss
+            dlg.cfg["openrouter_api_key"] = "sk-or-test"
+            with mock.patch.object(SD, "StepCatalogExplainWorker",
+                                   self._FakeExplainWorker):
+                dlg._catalog_lookup_note()
+                dlg._maybe_explain_catalog_miss()
+        self.assertEqual(len(self._FakeExplainWorker.instances), 1)
+        worker = self._FakeExplainWorker.instances[0]
+        self.assertTrue(worker.started)
+        self.assertIn("MAT-202", worker.prompt)
+        self.assertNotIn(".csv", worker.prompt)
+
+    def test_the_answer_is_appended_once_it_comes_back(self):
+        dlg = _dialog()
+        dlg.meas_view.setPlainText("measured so far")
+        dlg._on_catalog_explained("check the drawing's tolerance class.")
+        self.assertIn("check the drawing's tolerance class.",
+                      dlg.meas_view.toPlainText())
+        self.assertTrue(any("Prism AI's read on the miss" in n
+                            for n in dlg._notes))
+
+    def test_an_empty_answer_changes_nothing(self):
+        dlg = _dialog()
+        dlg.meas_view.setPlainText("measured so far")
+        dlg._on_catalog_explained("   ")
+        self.assertEqual(dlg.meas_view.toPlainText(), "measured so far")
+        self.assertEqual(dlg._notes, [])
+
+
 class TheFinishedRunCarriesWhatTheFollowUpNeeds(unittest.TestCase):
     """main_window offers the ordinary post-completion follow-up (the one
     every routed run gets) by reading _task_name/_responses/

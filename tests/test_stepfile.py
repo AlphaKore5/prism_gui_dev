@@ -1285,5 +1285,144 @@ class TheImageStageGetsItsBudget(unittest.TestCase):
         self.assertIn("not busy", body)
 
 
+class TheMaterialMouldCatalogIsPlainArithmeticNotAI(unittest.TestCase):
+    """load_catalog/match_catalog -- a shop's own Sr No sheet (CSV/XLSX),
+    read offline and matched against an inquiry's ID/OD by |difference|
+    against tolerance. No cadquery needed: this is just a spreadsheet and
+    arithmetic, so it runs even where HAVE (cadquery) is False."""
+
+    _CSV = (
+        "Sr No,Product ID mm,Product OD mm,ID Tolerance mm,OD Tolerance mm,"
+        "Material Sr No,Mould Sr No,Seal Size (IDxODxW),Compound\n"
+        "1,12,22,0.15,0.2,MAT-201,MLD-101,12x22x7,NBR\n"
+        "2,20,32,0.15,0.2,MAT-202,MLD-103,20x32x7,FKM\n"
+    )
+
+    def _csv_path(self, tmp, text: str = "") -> str:
+        path = os.path.join(tmp, "catalog.csv")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(text or self._CSV)
+        return path
+
+    def test_a_real_file_loads_both_rows_with_their_sr_nos(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            rows = SF.load_catalog(self._csv_path(tmp))
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0].material_sr_no, "MAT-201")
+        self.assertEqual(rows[1].mould_sr_no, "MLD-103")
+
+    def test_an_inquiry_inside_tolerance_matches_the_right_row(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            rows = SF.load_catalog(self._csv_path(tmp))
+        match, nearest = SF.match_catalog(rows, 20.05, 31.9)
+        self.assertIsNotNone(match)
+        self.assertEqual(match.material_sr_no, "MAT-202")
+        self.assertEqual(match.mould_sr_no, "MLD-103")
+        text = SF.catalog_match_text(20.05, 31.9, match, nearest)
+        self.assertIn("MATCH", text)
+        self.assertIn("MAT-202", text)
+        self.assertIn("MLD-103", text)
+
+    def test_an_inquiry_outside_every_rows_tolerance_is_reported_as_a_miss(self):
+        """A close-looking row is never reported as a hit just because it
+        is the nearest one -- `nearest` still comes back, flagged as a
+        miss to check by hand, not silently promoted to a match."""
+        with tempfile.TemporaryDirectory() as tmp:
+            rows = SF.load_catalog(self._csv_path(tmp))
+        match, nearest = SF.match_catalog(rows, 20.9, 33.0)
+        self.assertIsNone(match)
+        self.assertIsNotNone(nearest)
+        self.assertEqual(nearest.material_sr_no, "MAT-202")
+        text = SF.catalog_match_text(20.9, 33.0, match, nearest)
+        self.assertIn("no catalog row within tolerance", text)
+        self.assertIn("check this one by hand", text)
+
+    def test_a_row_with_no_tolerance_column_falls_back_to_the_default(self):
+        csv_text = (
+            "Product ID mm,Product OD mm,Material Sr No,Mould Sr No\n"
+            "20,32,MAT-202,MLD-103\n")
+        with tempfile.TemporaryDirectory() as tmp:
+            rows = SF.load_catalog(self._csv_path(tmp, csv_text))
+        self.assertAlmostEqual(rows[0].id_tolerance_mm,
+                               SF._DEFAULT_CATALOG_TOLERANCE_MM)
+        match, _ = SF.match_catalog(rows, 20.2, 32.2)
+        self.assertIsNotNone(match)
+
+    def test_a_missing_file_is_a_clear_error_not_a_crash(self):
+        with self.assertRaises(SF.CatalogError):
+            SF.load_catalog("/no/such/catalog.csv")
+
+    def test_a_file_with_no_id_od_columns_is_a_clear_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._csv_path(tmp, "Name,Price\nWidget,10\n")
+            with self.assertRaises(SF.CatalogError):
+                SF.load_catalog(path)
+
+    def test_a_file_with_headings_but_no_numeric_rows_is_a_clear_error(self):
+        csv_text = ("Product ID mm,Product OD mm,Material Sr No,Mould Sr No\n"
+                   "n/a,n/a,MAT-201,MLD-101\n")
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._csv_path(tmp, csv_text)
+            with self.assertRaises(SF.CatalogError):
+                SF.load_catalog(path)
+
+    def test_an_empty_catalog_matches_nothing_without_crashing(self):
+        match, nearest = SF.match_catalog([], 20.0, 32.0)
+        self.assertIsNone(match)
+        self.assertIsNone(nearest)
+
+    @unittest.skipUnless(SF.HAVE_XLSX, "openpyxl not installed")
+    def test_the_generated_demo_xlsx_matches_the_same_as_its_csv_twin(self):
+        """The real demo fixture shipped for this feature (step_file_demo/
+        material_mould_catalog_demo.{csv,xlsx}) -- both formats of the same
+        catalog must answer an inquiry identically."""
+        demo_dir = sample_jobs.path("step_file_demo")
+        csv_path = os.path.join(demo_dir, "material_mould_catalog_demo.csv")
+        xlsx_path = os.path.join(demo_dir, "material_mould_catalog_demo.xlsx")
+        if not (os.path.exists(csv_path) and os.path.exists(xlsx_path)):
+            self.skipTest("demo catalog fixtures not present on this machine")
+        csv_rows = SF.load_catalog(csv_path)
+        xlsx_rows = SF.load_catalog(xlsx_path)
+        self.assertEqual(len(csv_rows), len(xlsx_rows))
+        csv_match, _ = SF.match_catalog(csv_rows, 25.0, 40.0)
+        xlsx_match, _ = SF.match_catalog(xlsx_rows, 25.0, 40.0)
+        self.assertEqual(csv_match.material_sr_no, xlsx_match.material_sr_no)
+        self.assertEqual(csv_match.mould_sr_no, xlsx_match.mould_sr_no)
+
+
+class TheCatalogMissExplainerPromptCarriesNumbersOnly(unittest.TestCase):
+    """catalog_explain_prompt is the one thing that leaves this machine for
+    the near-miss case -- it must carry the inquiry's ID/OD, the nearest
+    row's own figures and Sr Nos, and nothing else: never a file path,
+    never the catalog's other rows, never the STEP file."""
+
+    def _nearest(self):
+        return SF.CatalogRow(
+            id_mm=20.0, od_mm=32.0, id_tolerance_mm=0.15, od_tolerance_mm=0.2,
+            material_sr_no="MAT-202", mould_sr_no="MLD-103",
+            raw={"Seal Size (IDxODxW)": "20x32x7", "Compound": "FKM"})
+
+    def test_the_prompt_carries_both_sets_of_numbers_and_both_sr_nos(self):
+        prompt = SF.catalog_explain_prompt(20.9, 33.0, self._nearest())
+        self.assertIn("20.90", prompt)
+        self.assertIn("33.00", prompt)
+        self.assertIn("20.00", prompt)
+        self.assertIn("32.00", prompt)
+        self.assertIn("MAT-202", prompt)
+        self.assertIn("MLD-103", prompt)
+        self.assertIn("not a confirmed match", prompt)
+
+    def test_the_prompt_never_names_a_file_or_path(self):
+        prompt = SF.catalog_explain_prompt(20.9, 33.0, self._nearest())
+        self.assertNotIn(".csv", prompt)
+        self.assertNotIn(".xlsx", prompt)
+        self.assertNotIn(".step", prompt.lower())
+
+    def test_asks_for_a_short_plain_answer_not_a_report(self):
+        prompt = SF.catalog_explain_prompt(20.9, 33.0, self._nearest())
+        self.assertIn("ONE or TWO short", prompt)
+        self.assertIn("no bullet points", prompt)
+
+
 if __name__ == "__main__":
     unittest.main()

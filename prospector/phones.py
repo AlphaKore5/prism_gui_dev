@@ -146,6 +146,9 @@ SOURCE_LINE = {
     "directory": "The company's number, published in a business directory · found {when} · not verified",
     "other": "The company's number, published on the web · found {when} · not verified",
 }
+# A PERSON's own mobile (prospector/mobiles.py) is not a company's published number, and the
+# panel must not say it is: it comes from Apollo, and nobody has rung it.
+PERSON_LINE = "Their own mobile number, from Apollo · found {when} · not called, format checked only"
 # The same source in a few words, for the spreadsheet's Phone source column.
 SOURCE_LABEL = {"own_website": "their website", "directory": "a business directory",
                 "other": "the web"}
