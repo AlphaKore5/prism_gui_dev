@@ -250,8 +250,8 @@ def _sheet() -> str:
         f"QLabel#fkick{{color:{t.NEUTRAL[600]};{heading}font-size:11px;}}",
         f"QLabel#fgroup{{color:{t.NEUTRAL[500]};{heading}font-size:10px;}}",
         f"QLabel#fcount{{background:{t.ACCENT};color:#ffffff;{badge}}}",
-        f"QLabel#ffacetCount{{background:{t.INFO_BG};color:{t.INFO_INK};{badge}}}",
-        f"QLabel#fheadText{{color:{t.TEXT};font-size:13px;font-weight:600;}}",
+        f"QLabel#ffacetCount{{background:#EFEEEA;color:{t.TEXT};{badge}}}",
+        f"QLabel#fheadText{{color:{t.INK};font-size:13px;font-weight:500;}}",
         f"QLabel#fchipText{{font-size:12px;font-weight:600;}}",
         f"QLabel#fsugText{{color:{t.TEXT};font-size:13px;font-weight:400;}}",
         f"QLabel#fhint{{color:{t.NEUTRAL[600]};font-size:12px;font-weight:500;}}",
@@ -440,7 +440,7 @@ class _Head(_Pressable):
     def __init__(self, title: str, parent=None):
         super().__init__(parent)
         self.setAccessibleName(title)
-        self.setMinimumHeight(C.MIN_TARGET + 4)
+        self.setMinimumHeight(38)
         row = QHBoxLayout(self)
         row.setContentsMargins(0, 6, 2, 6)
         row.setSpacing(theme.SPACE_2 - 2)

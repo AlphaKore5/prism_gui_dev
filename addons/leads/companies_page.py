@@ -216,7 +216,7 @@ class CompaniesPage(QWidget):
         lay.setSpacing(theme.SPACE_3)
         title = QLabel(i18n.t("Companies"))
         title.setObjectName("companiesTitleText")
-        title.setStyleSheet(theme.type_css("SECTION", theme.TEXT))
+        title.setStyleSheet(f"color:{theme.INK};font-size:20px;font-weight:400;")
         lay.addWidget(title, 0, Qt.AlignVCenter)
         lay.addStretch(1)
         self._import_btn = self._menu_button(i18n.t("Import"), "companiesImportBtn")
@@ -236,13 +236,8 @@ class CompaniesPage(QWidget):
         b.setCursor(Qt.PointingHandCursor)
         b.setMenu(QMenu(b))
         b.setStyleSheet(
-            f"QToolButton#{name}{{background:{theme.CARD};color:{theme.NEUTRAL[800]};"
-            f"border:1px solid {theme.BORDER};border-radius:{theme.R_CONTROL}px;"
-            f"padding:5px 26px 5px 10px;min-height:20px;font-size:12px;"
-            f"font-weight:600;}}"
-            f"QToolButton#{name}:hover{{background:{theme.WELL};"
-            f"border-color:{theme.NEUTRAL[300]};}}"
-            f"QToolButton#{name}::menu-indicator{{image:url({K._asset('caret-down.svg')});"
+            K._chip_css(f"QToolButton#{name}", "padding-right:24px;")
+            + f"QToolButton#{name}::menu-indicator{{image:url({K._asset('caret-down.svg')});"
             f"subcontrol-position:right center;subcontrol-origin:padding;"
             f"right:8px;width:12px;height:12px;}}")
         return b
@@ -263,13 +258,7 @@ class CompaniesPage(QWidget):
         b.setObjectName("companiesFiltersToggle")
         b.setCursor(Qt.PointingHandCursor)
         icons.button_icon(b, "list", 15, theme.NEUTRAL[700])
-        b.setStyleSheet(
-            f"QPushButton#companiesFiltersToggle{{background:{theme.CARD};"
-            f"color:{theme.NEUTRAL[800]};border:1px solid {theme.BORDER};"
-            f"border-radius:{theme.R_CONTROL}px;padding:5px 12px 5px 10px;min-height:20px;"
-            f"font-size:12px;font-weight:600;}}"
-            f"QPushButton#companiesFiltersToggle:hover{{background:{theme.WELL};"
-            f"border-color:{theme.NEUTRAL[300]};}}")
+        b.setStyleSheet(K._chip_css("QPushButton#companiesFiltersToggle"))
         b.clicked.connect(lambda: self.set_filters_shown(self._rail.isHidden()))
         self._filters_btn = b
         lay.addWidget(b)
@@ -279,6 +268,7 @@ class CompaniesPage(QWidget):
         self._search.setClearButtonEnabled(True)
         self._search.setMinimumWidth(150)
         self._search.setMaximumWidth(280)
+        self._search.setStyleSheet("QLineEdit#companiesSearch{min-height:31px;max-height:31px;}")
         self._search.addAction(icons.icon("search", 15, theme.NEUTRAL[500]),
                                QLineEdit.LeadingPosition)
         # Debounced: every keystroke would otherwise re-filter the whole pool.
@@ -346,14 +336,13 @@ class CompaniesPage(QWidget):
         seg.setObjectName("companyTabs")
         seg.setAttribute(Qt.WA_StyledBackground, True)
         seg.setStyleSheet(
-            f"QFrame#companyTabs{{background:{theme.WELL};border:1px solid "
-            f"{theme.HAIRLINE};border-radius:{theme.R_CONTROL}px;}}"
+            f"QFrame#companyTabs{{background:#EFEEEA;border:none;border-radius:12px;}}"
             f"QFrame#companyTabs QPushButton{{background:transparent;border:none;"
-            f"border-radius:{theme.R_CHIP}px;color:{theme.NEUTRAL[600]};"
-            f"padding:5px 4px;font-size:12px;font-weight:600;text-align:center;}}"
-            f"QFrame#companyTabs QPushButton:hover{{color:{theme.TEXT};}}"
+            f"border-radius:9px;color:{theme.MUTE};"
+            f"padding:5px 4px;font-size:12px;font-weight:400;text-align:center;}}"
+            f"QFrame#companyTabs QPushButton:hover{{color:{theme.INK};}}"
             f"QFrame#companyTabs QPushButton:checked{{background:{theme.CARD};"
-            f"color:{theme.TEXT};}}")
+            f"color:{theme.INK};border:1px solid {theme.HAIRLINE};}}")
         lay = QHBoxLayout(seg)
         lay.setContentsMargins(2, 2, 2, 2)
         lay.setSpacing(2)
@@ -780,7 +769,7 @@ class CompaniesPage(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setStyleSheet(f"QScrollArea{{background:{theme.CANVAS};border:none;}}")
+        scroll.setStyleSheet(f"QScrollArea{{background:{theme.CARD};border:none;}}")
         scroll.verticalScrollBar().setSingleStep(K._STEP)
         host = QWidget()
         hl = QVBoxLayout(host)
