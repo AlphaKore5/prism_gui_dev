@@ -1936,18 +1936,25 @@ class FileItem(QFrame):
     activated = Signal()
 
     def __init__(self, name: str, detail: str = "", icon: str = "file",
-                 actions: list = None, parent=None, leading: QWidget = None):
+                 actions: list = None, parent=None, leading: QWidget = None,
+                 flat: bool = False):
         super().__init__(parent)
-        self.setObjectName("listRow")
+        # `flat`: a band inside a Card (hairline between rows), like History's
+        # runs, instead of the boxed row the rail and output cards use.
+        self.setObjectName("rowFlat" if flat else "listRow")
         self.setAttribute(Qt.WA_StyledBackground, True)
-        self.setMinimumHeight(MIN_TARGET + 14)
+        self.setMinimumHeight(MIN_TARGET + (22 if flat else 14))
         self.setFocusPolicy(Qt.TabFocus)
         self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
 
         row = QHBoxLayout(self)
-        row.setContentsMargins(theme.SPACE_3, theme.SPACE_2,
-                               theme.SPACE_2, theme.SPACE_2)
-        row.setSpacing(theme.SPACE_3)
+        if flat:
+            row.setContentsMargins(17, 10, 15, 10)
+            row.setSpacing(15)
+        else:
+            row.setContentsMargins(theme.SPACE_3, theme.SPACE_2,
+                                   theme.SPACE_2, theme.SPACE_2)
+            row.setSpacing(theme.SPACE_3)
         # `leading` lets a caller show the file's own content (e.g. a real
         # image thumbnail) instead of a generic glyph — everything else about
         # the row stays identical, so Artifacts can look like a gallery
@@ -1964,6 +1971,9 @@ class FileItem(QFrame):
         col.addWidget(self.name)
         self.detail = QLabel(detail, self)
         self.detail.setObjectName("meta")
+        if flat:
+            self.detail.setStyleSheet(
+                f"font-size: 12px; font-weight: 400; color: {theme.MUTE};")
         self.detail.setVisible(bool(detail))
         col.addWidget(self.detail)
         row.addLayout(col, stretch=1)
