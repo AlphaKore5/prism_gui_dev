@@ -35,7 +35,7 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import (
     QAction, QPainter, QPen, QFont, QFontMetrics, QBrush, QColor, QPainterPath,
-    QLinearGradient, QRadialGradient, QPixmap,
+    QLinearGradient, QRadialGradient, QPixmap, QIcon,
 )
 from PySide6.QtWidgets import (
     QAbstractButton, QButtonGroup, QFrame, QGraphicsDropShadowEffect,
@@ -85,9 +85,47 @@ def track(widget, em: float):
     return widget
 
 
+def has_wallpaper(widget) -> bool:
+    """Whether the person picked a wallpaper (Settings > Appearance). Only then
+    do cards stay frosted glass over it; by default they are flat AlphaKore
+    cards: solid white, one hairline."""
+    central = widget.window().findChild(QWidget, "central")
+    pix = getattr(central, "_bg_orig", None)
+    return bool(pix is not None and not pix.isNull())
+
+
+def paint_flat_card(widget, painter, rect: QRectF, radius: float) -> bool:
+    """Paint the flat card and return True, or return False when a wallpaper is
+    set and the caller should paint its glass instead."""
+    if has_wallpaper(widget):
+        return False
+    painter.setPen(QPen(QColor(theme.HAIRLINE), 1))
+    painter.setBrush(QColor(theme.CARD))
+    painter.drawRoundedRect(rect.adjusted(0.5, 0.5, -0.5, -0.5), radius, radius)
+    return True
+
+
+class _Kicker(QLabel):
+    """Uppercase mono label led by the AlphaKore red square (.kick)."""
+
+    _SQ = 6                     # square edge
+    _GAP = 6                    # square to text
+
+    def __init__(self, text: str, parent=None):
+        super().__init__(text, parent)
+        self.setContentsMargins(self._SQ + self._GAP, 0, 0, 0)
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        p = QPainter(self)
+        p.fillRect(0, (self.height() - self._SQ) // 2, self._SQ, self._SQ,
+                   QColor(theme.BRAND_RED))
+        p.end()
+
+
 def kicker(text: str, muted: bool = False) -> QLabel:
-    """Condensed, tracked, uppercase section label (.kick)."""
-    lbl = QLabel(text.upper())
+    """Mono, tracked, uppercase section label with a red square (.kick)."""
+    lbl = _Kicker(text.upper())
     lbl.setObjectName("kickMuted" if muted else "kick")
     return track(lbl, 0.12)
 
@@ -353,6 +391,12 @@ class Card(QFrame):
 
         r = QRectF(self.rect())
         radius = float(self._radius)
+        if paint_flat_card(self, painter, r, radius):
+            if self._stripe:
+                painter.setPen(Qt.NoPen)
+                painter.setBrush(QColor(theme.INK))
+                painter.drawRect(QRectF(r.left() + radius, r.top(), r.width() - 2 * radius, 3))
+            return
 
         # ── Clip all painting to the rounded rect ──────────────────────────
         clip = QPainterPath()
@@ -848,6 +892,30 @@ _VARIANTS = {
 }
 
 
+def brand_dot_icon(size: int = 22, glyph: str = "arrow") -> QIcon:
+    """The AlphaKore primary-button mark: a red dot carrying a pixel arrow
+    (glyph="arrow") or a pixel plus (glyph="plus")."""
+    ratio = 2
+    pm = QPixmap(size * ratio, size * ratio)
+    pm.setDevicePixelRatio(ratio)
+    pm.fill(Qt.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing, True)
+    p.setPen(Qt.NoPen)
+    p.setBrush(QColor(theme.BRAND_RED))
+    p.drawEllipse(QRectF(0, 0, size, size))
+    p.setRenderHint(QPainter.Antialiasing, False)
+    p.setBrush(QColor("#FFFFFF"))
+    u = max(2.0, size / 11)                       # one "pixel" of the arrow
+    cx, cy = size / 2, size / 2
+    cells = (((-1.5, 0), (0, 0), (1.5, 0), (0, -1.5), (0, 1.5)) if glyph == "plus"
+             else ((-2.5, 0), (-1.0, 0), (0.5, 0), (2.0, 0), (0.5, -1.5), (0.5, 1.5)))
+    for dx, dy in cells:
+        p.drawRect(QRectF(cx + dx * u - u / 2, cy + dy * u - u / 2, u, u))
+    p.end()
+    return QIcon(pm)
+
+
 def button(text: str, variant: str = "secondary", icon_name: str = "",
            small: bool = False, on_click=None) -> QPushButton:
     """One button, in one of the four variants.
@@ -875,7 +943,13 @@ def button(text: str, variant: str = "secondary", icon_name: str = "",
     # Even the small step clears the minimum target: 28px is the floor for
     # anything you can click, not a suggestion that shrinks with the label.
     btn.setMinimumHeight(MIN_TARGET)
-    if icon_name:
+    if variant == "primary":
+        # Every primary wears the brand's red dot, whatever icon the call site
+        # asked for: the preview has one primary look, not a tick here and a
+        # plus there.
+        btn.setIcon(brand_dot_icon(22))
+        btn.setIconSize(QSize(22, 22))
+    elif icon_name:
         ink = {"primary": theme.CARD, "destructive": theme.ERR_INK}.get(
             variant, theme.ACCENT_RAMP[700] if variant in ("tertiary", "link")
             else theme.NEUTRAL[800])
@@ -1010,7 +1084,17 @@ class _StatusDot(QWidget):
             mid = self.SIZE / 2
             painter.drawLine(QRectF(2, mid, 0, 0).topLeft(),
                              QRectF(self.SIZE - 2, mid, 0, 0).topLeft())
-        else:                                   # check / cross
+        elif kind in ("check", "cross"):
+            # The AlphaKore preview marks done and failed with the same small
+            # square as its other labels, not a tick or cross in a disc; the
+            # word beside it says which. (The tick/cross painting below is
+            # kept for any caller that asks for the old look.)
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(ink)
+            side = 6.0
+            painter.drawRect(QRectF((self.SIZE - side) / 2, (self.SIZE - side) / 2,
+                                    side, side))
+        else:                                   # legacy tick / cross in a disc
             painter.setPen(Qt.NoPen)
             painter.setBrush(ink)
             painter.drawEllipse(box)
@@ -1099,8 +1183,8 @@ class StatusBadge(QFrame):
         self._detail.setStyleSheet(theme.type_css("META", theme.c(ink).name())
                                    + " background: transparent;")
         self.setStyleSheet(
-            f"#statusBadge {{ background: {bg}; border: 2px solid {bg};"
-            f" border-radius: {theme.R_PILL}px; }}"
+            f"#statusBadge {{ background: {bg}; border: 2px solid transparent;"
+            f" border-radius: 4px; }}"
             f"#statusBadge:focus {{ border-color: {ink}; }}")
         # What a screen reader says. The visual is a coloured dot; without
         # this, that is all it is.
@@ -1124,6 +1208,10 @@ class PageHeader(QFrame):
     and one or two secondary ones. Exactly one primary per surface.
     """
 
+    _INSET = 14          # the preview's phead sits wider than the cards under it
+    _INSET_TOP = 12
+    _INSET_BOTTOM = 4
+
     def __init__(self, title: str, subtitle: str = "", actions: list = None,
                  parent=None):
         super().__init__(parent)
@@ -1132,8 +1220,11 @@ class PageHeader(QFrame):
         self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
 
         row = QHBoxLayout(self)
-        row.setContentsMargins(theme.PAGE_PAD, theme.SPACE_4,
-                               theme.PAGE_PAD, theme.SPACE_4)
+        # The band is a white rounded card floating on the stone page (the
+        # AlphaKore preview's .phead): inset so the card edge clears the page
+        # sides, with the text padded inside it.
+        row.setContentsMargins(self._INSET + 24, self._INSET_TOP + theme.SPACE_4,
+                               self._INSET + 16, self._INSET_BOTTOM + theme.SPACE_4)
         row.setSpacing(theme.SPACE_4)
 
         col = QVBoxLayout()
@@ -1172,6 +1263,14 @@ class PageHeader(QFrame):
         painter.setRenderHint(QPainter.Antialiasing, True)
         painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
         r = QRectF(self.rect())
+
+        if not has_wallpaper(self):
+            card = r.adjusted(self._INSET, self._INSET_TOP, -self._INSET,
+                              -self._INSET_BOTTOM)
+            painter.setBrush(QColor(theme.CARD))
+            painter.setPen(QPen(QColor(theme.HAIRLINE), 1))
+            painter.drawRoundedRect(card.adjusted(0.5, 0.5, -0.5, -0.5), 16, 16)
+            return
 
         central = self.window().findChild(QWidget, "central")
         if central and hasattr(central, "get_blurred_pixmap"):
@@ -1530,14 +1629,25 @@ class FilterChips(QWidget):
 
     def __init__(self, options: list, current: str = "", parent=None):
         super().__init__(parent)
+        # One white pill holding the chips, the selected one dark inside it
+        # (the preview's segmented filter), not a row of separate outlines.
+        self.setObjectName("filterChips")
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Preferred)
         # A FlowLayout, not a QHBoxLayout: AI tools feeds this eleven
         # categories, and a one-line row reports their whole width (742 px) as
         # its minimum, which forced the page's scroll content wider than the
         # viewport and clipped the right-hand column of cards at the app's
         # default width (seen in the real window, 1 Oct 2026). Chips now step
         # down a line instead.
-        row = FlowLayout(self, margin=0, h_space=theme.SPACE_2 - 2,
-                         v_space=theme.SPACE_2 - 2)
+        if len(options) <= 6:
+            # A short row is one segmented pill that hugs its chips.
+            row = QHBoxLayout(self)
+            row.setContentsMargins(3, 3, 3, 3)
+            row.setSpacing(2)
+        else:
+            self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
+            row = FlowLayout(self, margin=3, h_space=2, v_space=2)
         self._group = QButtonGroup(self)
         self._group.setExclusive(True)
         self._buttons: dict[str, QPushButton] = {}

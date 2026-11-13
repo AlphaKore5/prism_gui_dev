@@ -281,7 +281,7 @@ class DashboardCentral(QWidget):
             grad.setColorAt(1.0, QColor(255, 255, 255, 30))
             painter.fillRect(self.rect(), grad)
         else:
-            painter.fillRect(self.rect(), QColor("#ffffff"))  # the default: plain white
+            painter.fillRect(self.rect(), QColor(theme.STONE))  # the default: AlphaKore stone
 
     def set_background(self, path: str):
         if path and os.path.exists(path):
@@ -317,6 +317,10 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Prism")
         self._fit_to_screen()
+        # The family line at the right of the status bar, as in the preview.
+        _by = QLabel(f"Prism {app_meta.VERSION}  ·  by AlphaKore")
+        _by.setObjectName("statusBy")
+        self.statusBar().addPermanentWidget(_by)
 
         self.cfg = CB.config.load()
         try:

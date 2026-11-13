@@ -268,7 +268,7 @@ class AddonRow(QPushButton):
     it: an add-on is a product, and it gets to look like one.
     """
 
-    CHIP = 24
+    CHIP = 26
 
     def __init__(self, label: str, icon_name: str, hue: str, parent=None):
         # No _amp() here, deliberately, even though this IS a QPushButton:
@@ -370,11 +370,14 @@ class AddonRow(QPushButton):
             self._chip.setPixmap(icons.pixmap(self._icon_name, 18, glyph))
             self._chip.setStyleSheet("background: transparent;")
             return
-        chip_bg = (theme.tint(self._hue, "2e") if live
-                   else theme.tint("#ffffff", "16"))
-        self._chip.setPixmap(icons.pixmap(self._icon_name, 14, hue))
+        # The preview's tile: a soft stone square with a dark glyph for a live
+        # add-on, the same square with a muted glyph for a locked one. The
+        # add-on's own hue is no longer painted on the rail.
+        chip_bg = "#EFEEEA"
+        glyph = theme.INK if live else theme.NEUTRAL[400]
+        self._chip.setPixmap(icons.pixmap(self._icon_name, 14, glyph))
         self._chip.setStyleSheet(
-            f"background: {chip_bg}; border-radius: {theme.R_CHIP + 1}px;")
+            f"background: {chip_bg}; border-radius: 8px;")
         ink = theme.over(INK_CURRENT if self._current
                          else INK_PRIMARY if live else INK_ITEM)
         self._label.setStyleSheet(
@@ -458,6 +461,9 @@ class Sidebar(QFrame):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        # No scrollbar line down the rail (the preview has none); the wheel
+        # and the keyboard still scroll it.
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll.setFrameShape(QScrollArea.NoFrame)
         scroll.setStyleSheet("""
             QScrollArea { background: transparent; border: none; }
@@ -529,7 +535,8 @@ class Sidebar(QFrame):
         self.new_task_btn.setMinimumHeight(C.MIN_TARGET + 6)
         self.new_task_btn.setAccessibleName(i18n.t("New task"))
         self.new_task_btn.setToolTip(i18n.t("Describe something you want done"))
-        icons.button_icon(self.new_task_btn, "plus", 15, "#ffffff")
+        self.new_task_btn.setIcon(C.brand_dot_icon(24, "plus"))
+        self.new_task_btn.setIconSize(QSize(24, 24))
         self.new_task_btn.clicked.connect(
             lambda: self.command_triggered.emit("workbench"))
         elevate(self.new_task_btn, theme.SHADOW_ACCENT, theme.ACCENT)
@@ -733,7 +740,7 @@ class Sidebar(QFrame):
         # background over anything the QFrame itself would draw.
         self._pip = QFrame(inner)
         self._pip.setObjectName("railPip")
-        self._pip.setStyleSheet("background: #09090b; border-radius: 2px;")
+        self._pip.setStyleSheet(f"background: {theme.BRAND_RED}; border-radius: 0px;")
         self._pip.hide()
         inner.installEventFilter(self)
 
@@ -751,6 +758,8 @@ class Sidebar(QFrame):
 
         r = QRectF(self.rect())
         radius = 20.0
+        if C.paint_flat_card(self, painter, r, radius):
+            return
 
         clip = QPainterPath()
         clip.addRoundedRect(r, radius, radius)
@@ -838,7 +847,17 @@ class Sidebar(QFrame):
             stack.addWidget(member)
             expanded_row.addLayout(stack, stretch=1)
         else:
-            expanded_row.addWidget(track(name, 0.14), stretch=1)
+            # Wordmark over a small mono "BY ALPHAKORE" -- the family line the
+            # preview shows under the name.
+            name.setText("Prism")
+            stack = QVBoxLayout()
+            stack.setContentsMargins(0, 0, 0, 0)
+            stack.setSpacing(0)
+            stack.addWidget(name)
+            byline = QLabel("BY ALPHAKORE")
+            byline.setObjectName("brandBy")
+            stack.addWidget(byline)
+            expanded_row.addLayout(stack, stretch=1)
 
         self._collapse_btn = QPushButton()
         self._collapse_btn.setObjectName("railCollapseBtn")
@@ -1173,11 +1192,11 @@ class Sidebar(QFrame):
         # so go through global coordinates instead (see 4f65dfd).
         origin = self._inner.mapFromGlobal(widget.mapToGlobal(QPoint(0, 0)))
         top = origin.y()
-        height = max(14, min(22, widget.height() - 10))
+        # The preview's marker: a 6px red square, not a bar.
+        size = 6
         c = getattr(self, "_collapsed", False)
         self._pip.setGeometry(2 if c else 0,
-                              top + (widget.height() - height) // 2,
-                              3 if c else 4, height)
+                              top + (widget.height() - size) // 2, size, size)
         self._pip.show()
         self._pip.raise_()
 
@@ -1334,7 +1353,7 @@ class Sidebar(QFrame):
             self.new_task_btn.setText("")
             self.new_task_btn.setFixedSize(48, 38)
             self.new_task_btn.setToolTip(i18n.t("New task"))
-            icons.button_icon(self.new_task_btn, "plus", 16, "#ffffff")
+            self.new_task_btn.setIcon(C.brand_dot_icon(24, "plus"))
         else:
             self.new_task_btn.setText(i18n.t('New task'))
             self.new_task_btn.setMinimumHeight(C.MIN_TARGET + 6)
