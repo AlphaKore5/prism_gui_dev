@@ -202,7 +202,7 @@ class Loader(QFrame):
     def paintEvent(self, _event):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing, True)
-        ink = QColor(theme.ACCENT)
+        ink = QColor(theme.BRAND_RED)
         track = QColor(theme.NEUTRAL[200])
         quiet = QColor(theme.NEUTRAL[500])
         text = QColor(theme.TEXT)
@@ -351,7 +351,7 @@ class Loader(QFrame):
         grad = QRadialGradient(cx - r * 0.3, cy - r * 0.4, r * 1.4)
         grad.setColorAt(0.0, QColor("#71717a"))
         grad.setColorAt(0.6, QColor(theme.NEUTRAL[800]))
-        grad.setColorAt(1.0, ink)
+        grad.setColorAt(1.0, QColor(theme.ACCENT))
         p.setPen(Qt.NoPen)
         p.setBrush(grad)
         p.drawEllipse(QRectF(cx - r, cy - r, 2 * r, 2 * r))

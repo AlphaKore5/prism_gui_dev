@@ -267,8 +267,8 @@ class TimelineNode(QWidget):
         cx = w / 2.0
         cy = h / 2.0
 
-        pen = QPen(theme.qcolor(theme.HAIRLINE))
-        pen.setWidth(2)
+        pen = QPen(theme.qcolor(theme.DIVIDER))
+        pen.setWidth(1)
         painter.setPen(pen)
         top_y = cy if self._is_first else 0.0
         bot_y = cy if self._is_last else float(h)
@@ -277,6 +277,16 @@ class TimelineNode(QWidget):
         painter.setPen(Qt.NoPen)
         painter.setBrush(QBrush(theme.qcolor(theme.ACCENT)))
         painter.drawEllipse(QPointF(cx, cy), 3.5, 3.5)
+
+
+class _Motto(QLabel):
+    """The mono-caps pill with the AlphaKore red square (.motto)."""
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        p = QPainter(self)
+        p.fillRect(14, (self.height() - 6) // 2, 6, 6, QColor(theme.BRAND_RED))
+        p.end()
 
 
 class ShowcaseTourCard(QFrame):
@@ -306,19 +316,22 @@ class ShowcaseTourCard(QFrame):
         top_row.setContentsMargins(0, 0, 0, 0)
         demo_badge = QLabel("DEMO")
         demo_badge.setStyleSheet(
-            "background: rgba(255, 255, 255, 0.22); color: #ffffff; "
-            "border: 1px solid rgba(255, 255, 255, 0.35); "
-            "border-radius: 4px; padding: 2px 7px; font-size: 10px; "
-            "font-weight: 700; letter-spacing: 0.5px;"
+            f"font-family: '{theme.FONT_MONO}'; "
+            "background: rgba(255, 255, 255, 0.10); color: #ffffff; "
+            "border: 1px solid rgba(255, 255, 255, 0.22); "
+            "border-radius: 6px; padding: 4px 8px; font-size: 10px; "
+            "font-weight: 500;"
         )
+        C.track(demo_badge, 0.08)
         top_row.addWidget(demo_badge)
         top_row.addStretch(1)
         time_lbl = QLabel("01:03 >")
         time_lbl.setStyleSheet(
+            f"font-family: '{theme.FONT_MONO}'; "
             "background: rgba(0, 0, 0, 0.55); color: #ffffff; "
             "border: 1px solid rgba(255, 255, 255, 0.2); "
-            "border-radius: 10px; padding: 2px 8px; font-size: 11px; "
-            "font-weight: 600;"
+            "border-radius: 6px; padding: 4px 8px; font-size: 10px; "
+            "font-weight: 500;"
         )
         top_row.addWidget(time_lbl)
         col.addLayout(top_row)
@@ -326,7 +339,7 @@ class ShowcaseTourCard(QFrame):
         title = QLabel(i18n.t("Ideas to outcomes."))
         title.setStyleSheet(
             f"font-family: '{theme.FONT_HEADING}'; font-size: 22px; "
-            "font-weight: 700; color: #ffffff;"
+            "font-weight: 500; color: #ffffff;"
         )
         col.addWidget(title)
 
@@ -351,8 +364,8 @@ class ShowcaseTourCard(QFrame):
 
         quote = QLabel(i18n.t("“Less work. More possibilities.”"))
         quote.setStyleSheet(
-            f"font-family: '{theme.FONT_BODY}'; font-size: 12px; "
-            "font-style: italic; color: rgba(255, 255, 255, 0.85);"
+            f"font-family: '{theme.FONT_MONO}'; font-size: 10px; "
+            "color: rgba(255, 255, 255, 0.85);"
         )
         quote.setAlignment(Qt.AlignRight)
         col.addWidget(quote)
@@ -798,8 +811,8 @@ class HomePanel(QWidget):
 
         salutation = QLabel(f"{_greeting()},")
         salutation.setStyleSheet(
-            f"font-family: '{theme.FONT_BODY}'; font-size: 18px; "
-            f"font-weight: 400; color: {theme.INK};"
+            f"font-family: 'Geist Light', '{theme.FONT_BODY}'; font-size: 21px; "
+            f"font-weight: 300; color: {theme.TEXT};"
         )
         greet_stack.addWidget(salutation)
 
@@ -808,28 +821,33 @@ class HomePanel(QWidget):
             who = "there"
         name_lbl = QLabel(f"{who.upper()},")
         name_lbl.setStyleSheet(
-            f"font-family: '{theme.FONT_DISPLAY}'; font-size: 48px; "
+            f"font-family: '{theme.FONT_DISPLAY}'; font-size: 52px; "
             f"font-weight: 700; color: {theme.INK};"
         )
-        C.track(name_lbl, -0.02)
+        C.track(name_lbl, 0.02)
         greet_stack.addWidget(name_lbl)
 
         sub_lbl = QLabel(i18n.t("Let's turn ideas into outcomes."))
+        _lead, _tail = "Let's turn ideas ", "into outcomes."
+        if sub_lbl.text() == _lead + _tail:          # English: the tail is the faint clause
+            sub_lbl.setTextFormat(Qt.RichText)
+            sub_lbl.setText(f'{_lead}<span style="color: {theme.FAINT};">{_tail}</span>')
         sub_lbl.setStyleSheet(
             f"font-family: '{theme.FONT_BODY}'; font-size: 18px; "
-            f"font-weight: 400; color: {theme.MUTE};"
+            f"font-weight: 400; color: {theme.INK};"
         )
         greet_stack.addWidget(sub_lbl)
         greet_row.addLayout(greet_stack, stretch=1)
 
-        motto = QLabel(i18n.t("Less work. More possibilities.").upper())
+        motto = _Motto(i18n.t("Less work. More possibilities.").upper())
         motto.setStyleSheet(
             f"font-family: '{theme.FONT_MONO}'; font-size: 11px; "
-            f"font-weight: 500; color: {theme.INK}; "
+            f"font-weight: 400; color: {theme.INK}; "
             f"background: #ffffff; "
-            f"border: 1px solid {theme.BORDER}; border-radius: 15px; "
-            f"padding: 7px 14px;"
+            f"border: 1px solid {theme.HAIRLINE}; border-radius: 16px; "
+            f"padding: 8px 14px 8px 28px;"
         )
+        C.track(motto, 0.05)
         motto.setAlignment(Qt.AlignCenter)
         greet_row.addWidget(motto, alignment=Qt.AlignRight | Qt.AlignVCenter)
         left_col.addLayout(greet_row)
@@ -987,7 +1005,8 @@ class HomePanel(QWidget):
         send_btn = QPushButton()
         send_btn.setObjectName("promptSendBtn")
         send_btn.setCursor(Qt.PointingHandCursor)
-        send_btn.setIcon(icons.icon("arrow-right", 16, "#ffffff"))
+        send_btn.setIcon(C.brand_dot_icon(24, "arrow"))
+        send_btn.setIconSize(QSize(24, 24))
         send_btn.setToolTip(i18n.t("Start task"))
         send_btn.clicked.connect(self._submit_home_task)
         bar.addWidget(send_btn)
@@ -1097,10 +1116,10 @@ class HomePanel(QWidget):
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(theme.SPACE_2)
 
-        prefix = QLabel(i18n.t("Try:"))
+        prefix = QLabel(i18n.t("Try:").upper())
         prefix.setStyleSheet(
-            f"font-family: '{theme.FONT_BODY}'; font-size: 12px; "
-            f"font-weight: 500; color: {theme.NEUTRAL[500]};"
+            f"font-family: '{theme.FONT_MONO}'; font-size: 10px; "
+            f"font-weight: 400; color: {theme.MUTE};"
         )
         row.addWidget(prefix)
 
@@ -1280,6 +1299,7 @@ class HomePanel(QWidget):
         when = run.get("when", "")
         detail_text = f"{source} · {when}" if when else source
         subtitle = _Elided(detail_text, "META")
+        subtitle.setStyleSheet(subtitle.styleSheet() + f" font-family: '{theme.FONT_MONO}';")
         text_col.addWidget(subtitle)
         row.addLayout(text_col, stretch=1)
 
@@ -1390,6 +1410,23 @@ class HomePanel(QWidget):
         return self._make_tool_tile(self, name, logo_key, True, nav_key)
 
 
+class _TileState(QLabel):
+    """Mono caps state under an add-on tile: a small square, then READY."""
+
+    def __init__(self, text: str, colour: str, parent=None):
+        super().__init__(text.upper(), parent)
+        self._colour = colour
+        self.setStyleSheet(f"font-family: '{theme.FONT_MONO}'; font-size: 9px; "
+                           f"color: {colour}; background: transparent; padding-left: 10px;")
+        C.track(self, 0.08)
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        p = QPainter(self)
+        p.fillRect(0, (self.height() - 5) // 2, 5, 5, QColor(self._colour))
+        p.end()
+
+
 class _ToolTile(QFrame):
     """Tool launcher tile with full keyboard navigation and accessible state."""
 
@@ -1422,10 +1459,9 @@ class _ToolTile(QFrame):
         name_lbl.setAlignment(Qt.AlignCenter)
         tile_col.addWidget(name_lbl)
 
-        dot = QLabel("●")
-        dot.setStyleSheet(f"font-size: 10px; color: {theme.OK if builtin else theme.NEUTRAL[400]};")
-        dot.setAlignment(Qt.AlignCenter)
-        tile_col.addWidget(dot)
+        state = _TileState(i18n.t("Ready") if builtin else i18n.t("Not connected"),
+                           theme.BRAND_OK if builtin else theme.NEUTRAL[400])
+        tile_col.addWidget(state, alignment=Qt.AlignCenter)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:

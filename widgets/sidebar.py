@@ -504,7 +504,7 @@ class Sidebar(QFrame):
         self._inner = inner
 
         root = QVBoxLayout(inner)
-        root.setContentsMargins(theme.SPACE_3, theme.SPACE_5,
+        root.setContentsMargins(theme.SPACE_3, theme.SPACE_4 - 2,
                                 theme.SPACE_3, theme.SPACE_3)
         root.setSpacing(theme.SPACE_1)
         self._root_layout = root
@@ -757,7 +757,7 @@ class Sidebar(QFrame):
         painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
 
         r = QRectF(self.rect())
-        radius = 20.0
+        radius = 17.0
         if C.paint_flat_card(self, painter, r, radius):
             return
 
@@ -1324,7 +1324,7 @@ class Sidebar(QFrame):
         if hasattr(self, "_root_layout"):
             self._root_layout.setContentsMargins(
                 8 if c else theme.SPACE_3,
-                theme.SPACE_5,
+                theme.SPACE_4 - 2,
                 8 if c else theme.SPACE_3,
                 theme.SPACE_3,
             )

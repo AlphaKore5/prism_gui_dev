@@ -94,14 +94,26 @@ def has_wallpaper(widget) -> bool:
     return bool(pix is not None and not pix.isNull())
 
 
+CARD_LIP = 5                    # px of painted shadow under a resting card
+
+
 def paint_flat_card(widget, painter, rect: QRectF, radius: float) -> bool:
     """Paint the flat card and return True, or return False when a wallpaper is
     set and the caller should paint its glass instead."""
     if has_wallpaper(widget):
         return False
+    # The preview's resting-card shadow, painted (a QGraphicsEffect turns black
+    # on some machines): a soft lip under the bottom edge, inside the widget's
+    # own rect, so no layout or neighbour has to make room for it.
+    body = rect.adjusted(0, 0, 0, -CARD_LIP) if rect.height() > 4 * CARD_LIP else rect
+    if body is not rect:
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor(20, 20, 18, 11))
+        for i in range(CARD_LIP, 0, -1):
+            painter.drawRoundedRect(body.adjusted(1.5, i, -1.5, i), radius, radius)
     painter.setPen(QPen(QColor(theme.HAIRLINE), 1))
     painter.setBrush(QColor(theme.CARD))
-    painter.drawRoundedRect(rect.adjusted(0.5, 0.5, -0.5, -0.5), radius, radius)
+    painter.drawRoundedRect(body.adjusted(0.5, 0.5, -0.5, -0.5), radius, radius)
     return True
 
 
@@ -360,7 +372,7 @@ class Card(QFrame):
     blueprint registration marks the old design cornered its panels with.
     """
 
-    def __init__(self, stripe: bool = False, radius: int = 18,
+    def __init__(self, stripe: bool = False, radius: int = 17,
                  raised: bool = False, parent=None):
         super().__init__(parent)
         self.setObjectName("card")
@@ -2459,7 +2471,7 @@ class WaveDots(QWidget):
         painter.setRenderHint(QPainter.Antialiasing, True)
         painter.setPen(Qt.NoPen)
 
-        c = QColor(self._custom_color) if self._custom_color else theme.c(theme.NEUTRAL[800])
+        c = QColor(self._custom_color) if self._custom_color else QColor(theme.BRAND_RED)
         painter.setBrush(QBrush(c))
 
         center_y = self.height() / 2.0

@@ -49,6 +49,7 @@ ACCENT_RAMP = {
 STONE = "#EEEDEA"                    # warm canvas
 INK = "#111110"
 MUTE = "#6B6A65"                     # 4.5:1 on STONE and on white (the site's #8C8B86 fails)
+FAINT = "#A9A8A3"                    # placeholder / secondary clause; decoration, not body text
 BRAND_RED = "#C8161D"
 BRAND_OK, BRAND_OK_BG = "#1F6B43", "#E4EFE7"
 BRAND_ERR, BRAND_ERR_BG = "#A3141A", "#F7E3E1"

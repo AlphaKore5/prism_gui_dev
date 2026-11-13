@@ -302,11 +302,12 @@ QToolTip {
     text-align: left;
     background: transparent;
     border: 1px solid transparent;
-    border-radius: 8px;
-    padding: 6px 12px;
+    border-radius: 12px;
+    min-height: 21px;
+    padding: 7px 12px;
     font-family: "Geist";
     font-size: 14px;
-    font-weight: 500;
+    font-weight: 400;
     color: #2a2a28;
 }
 
@@ -334,11 +335,12 @@ QToolTip {
     text-align: left;
     background: transparent;
     border: 1px solid transparent;
-    border-radius: 8px;
+    border-radius: 12px;
+    min-height: 21px;
     padding: 7px 12px;
     font-family: "Geist";
     font-size: 14px;
-    font-weight: 500;
+    font-weight: 400;
     color: #2a2a28;
 }
 
@@ -392,19 +394,20 @@ QToolTip {
 
 /* The New-task button */
 #railPrimary {
-    background: #111110;
-    border: 1px solid #111110;
-    border-radius: 24px;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #3a3a38, stop:1 #0c0c0b);
+    border: 1px solid #0c0c0b;
+    border-radius: 21px;
     color: #ffffff;
     font-family: "Geist";
-    font-weight: 600;
-    font-size: 17px;
-    padding: 9px 12px;
+    font-weight: 500;
+    font-size: 15px;
+    min-height: 25px;
+    padding: 8px 12px;
     text-align: center;
 }
 
-#railPrimary:hover { background: #2a2a28; border-color: #2a2a28; }
-#railPrimary:pressed { background: #000000; }
+#railPrimary:hover { background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #4a4a48, stop:1 #1c1c1b); }
+#railPrimary:pressed { background: #0c0c0b; }
 #railPrimary:focus { border-color: #111110; }
 #railPrimary:disabled {
     background: #F6F5F2;
@@ -623,8 +626,8 @@ QPushButton:disabled, #secondaryBtn:disabled {
    dating thing an interface can wear, and it also breaks the role swap, which
    rewrites flat hexes and cannot see into a qlineargradient's stops. */
 #primaryBtn, #primary {
-    background: #111110;
-    border: 1px solid #111110;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #3a3a38, stop:1 #0c0c0b);
+    border: 1px solid #0c0c0b;
     border-radius: 17px;
     color: #ffffff;
     padding: 6px 20px;
@@ -635,8 +638,8 @@ QPushButton:disabled, #secondaryBtn:disabled {
 }
 
 #primaryBtn:hover, #primary:hover {
-    background: #2a2a28;
-    border-color: #2a2a28;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #4a4a48, stop:1 #1c1c1b);
+    border-color: #1c1c1b;
 }
 
 #primaryBtn:pressed, #primary:pressed {
@@ -1653,8 +1656,7 @@ QProgressBar {
 }
 
 QProgressBar::chunk {
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                                stop:0 #6c63ff, stop:1 #a78bfa);
+    background: #C8161D;
     border-radius: 9px;
     width: 30px;
     margin: 1px;
@@ -1738,8 +1740,8 @@ QSplitter::handle { background: #EFEEEA; }
 
 /* ── chrome ──────────────────────────────────────────────────────────── */
 QStatusBar {
-    background: #111110;
-    color: #EEEDEA;
+    background: #000000;
+    color: #A9A8A3;
     border-top: none;
     font-family: "Geist Mono";
     font-size: 11px;
@@ -2027,10 +2029,10 @@ QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
 #promptChipBtn {
     background: #F6F5F2;
     border: 1px solid #E6E5E1;
-    border-radius: 15px;
+    border-radius: 16px;
     padding: 5px 12px;
     font-size: 13px;
-    font-weight: 500;
+    font-weight: 400;
     color: #2a2a28;
 }
 
@@ -2040,23 +2042,24 @@ QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
 }
 
 #promptSendBtn {
-    background: #111110;
-    border: none;
-    border-radius: 18px;
-    min-width: 36px;
-    max-width: 36px;
-    min-height: 36px;
-    max-height: 36px;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #3a3a38, stop:1 #0c0c0b);
+    border: 1px solid #0c0c0b;
+    border-radius: 20px;
+    min-width: 51px;
+    max-width: 51px;
+    min-height: 40px;
+    max-height: 40px;
+    padding: 0;
 }
 
 #promptSendBtn:hover {
-    background: #2a2a28;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #4a4a48, stop:1 #1c1c1b);
 }
 
 #tryChip {
     background: #ffffff;
     border: 1px solid #E6E5E1;
-    border-radius: 14px;
+    border-radius: 16px;
     padding: 4px 12px;
     font-size: 13px;
     color: #2a2a28;
@@ -2075,13 +2078,13 @@ QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
 }
 
 #tourPlayBtn {
-    background: #ffffff;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #ffffff, stop:1 #f8f7f4);
     color: #111110;
-    border: none;
+    border: 1px solid rgba(20, 20, 18, 0.08);
     border-radius: 18px;
     padding: 7px 16px;
-    font-weight: 600;
-    font-size: 14px;
+    font-weight: 500;
+    font-size: 13px;
 }
 
 #tourPlayBtn:hover {
@@ -2198,7 +2201,7 @@ QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
 #statusBy {
     font-family: "Geist Mono";
     font-size: 11px;
-    color: #A8A7A2;
+    color: #77766F;
     background: transparent;
     padding-right: 10px;
 }

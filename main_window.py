@@ -13,8 +13,8 @@ want to be on screen at once, and the plan is one click back."""
 from __future__ import annotations
 import json
 import os
-from PySide6.QtCore import Qt, QTimer, QUrl, Signal, QSize
-from PySide6.QtGui import QGuiApplication, QFont, QCursor, QDesktopServices, QPainter, QPixmap, QColor, QImage, QLinearGradient
+from PySide6.QtCore import Qt, QTimer, QUrl, Signal, QSize, QRectF, QPointF
+from PySide6.QtGui import QGuiApplication, QFont, QCursor, QDesktopServices, QPainter, QPixmap, QColor, QImage, QLinearGradient, QRadialGradient, QBrush
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QMessageBox, QFrame,
     QFileDialog, QDialog, QLabel, QScrollArea, QStackedWidget, QPushButton,
@@ -229,6 +229,7 @@ class DashboardCentral(QWidget):
         self._cached_pixmap = None
         self._cached_blurred = None
         self._cached_size = None
+        self._dot_tile = None
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -282,6 +283,30 @@ class DashboardCentral(QWidget):
             painter.fillRect(self.rect(), grad)
         else:
             painter.fillRect(self.rect(), QColor(theme.STONE))  # the default: AlphaKore stone
+            self._paint_stone_texture(painter)
+
+    def _paint_stone_texture(self, painter):
+        """The preview's canvas: a soft white light from the top and a faint
+        dot field over the stone. Painted, so it is the same on every OS."""
+        w, h = self.width(), self.height()
+        painter.save()
+        painter.translate(w * 0.58, -h * 0.08)
+        painter.scale(1.0, 0.5)
+        light = QRadialGradient(0, 0, w * 0.646)
+        light.setColorAt(0.0, QColor(255, 255, 255, 190))
+        light.setColorAt(0.7, QColor(255, 255, 255, 0))
+        painter.fillRect(QRectF(-w, -h * 2, w * 2, h * 4), light)
+        painter.restore()
+        if self._dot_tile is None:
+            self._dot_tile = QPixmap(16, 16)
+            self._dot_tile.fill(Qt.transparent)
+            tp = QPainter(self._dot_tile)
+            tp.setRenderHint(QPainter.Antialiasing, True)
+            tp.setPen(Qt.NoPen)
+            tp.setBrush(QColor(17, 17, 16, 20))
+            tp.drawEllipse(QPointF(1, 1), 0.9, 0.9)
+            tp.end()
+        painter.fillRect(self.rect(), QBrush(self._dot_tile))
 
     def set_background(self, path: str):
         if path and os.path.exists(path):
