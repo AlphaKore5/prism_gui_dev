@@ -187,6 +187,39 @@ class WriteupGuidanceIsHvacsOwnAndLivesHereNotInTheEngine(unittest.TestCase):
         self.assertIn("duct", example.lower())
         self.assertNotIn("camera", example.lower())
 
+    def test_hvac_gets_a_rule_against_one_blended_duct_area_total(self):
+        """13 Nov 2026: one real write-up broke supply/return duct into a
+        per-size sheet-metal/insulation area line each; a later run on the
+        same drawing collapsed every duct system into one blended "length x
+        assumed average perimeter" total instead -- correct-looking, useless
+        for ordering sheet by size. This is the rule meant to stop that."""
+        note = industries.writeup_note("HVAC")
+        self.assertIn("NEVER ONE BLENDED TOTAL", note)
+        self.assertIn("per duct size", note.lower())
+
+    def test_hvac_insulation_area_is_always_a_figure_never_a_blank_line(self):
+        """13 Nov 2026: one write-up gave thermal insulation as a worked
+        figure (1,063.7 sqm against the client's 1,114.8); a later one on
+        the same drawing left it a blank provisional line."""
+        note = industries.writeup_note("HVAC")
+        self.assertIn("total insulation area", note)
+        self.assertIn("never left blank", note)
+
+    def test_hvac_bills_vav_boxes_from_the_shape_count(self):
+        note = industries.writeup_note("HVAC")
+        self.assertIn("VAV BOX QUANTITY COMES FROM THE SHAPE COUNT", note)
+
+    def test_a_named_layer_can_start_on_a_remembered_colour_role(self):
+        """item 80: the same real case hvac_takeoff's own test covers,
+        through this add-on's dispatch."""
+        layer = {"name": "ACME-HVAC-Z Piece",
+                 "color_keys": {"#ff0000@1.08:line": 870.0, "#808080@0.72:line": 3000.0}}
+        saved = {"#ff0000@1.08:line": "return", "#808080@0.72:line": "ignore"}
+        self.assertEqual(industries.suggest_role_from_memory("HVAC", layer, saved), "return")
+        self.assertIsNone(industries.suggest_role_from_memory("Marine", layer, saved))
+        self.assertIsNone(industries.suggest_role_from_memory(
+            "HVAC", {"name": None, "color_keys": {"#ff0000@1.08:line": 1.0}}, saved))
+
 
 class SavedLayerRolesIsStep1sOwnCrossTenderMemory(unittest.TestCase):
     """Found 30 Oct 2026: a real client file read 0 duct runs through
@@ -213,6 +246,29 @@ class SavedLayerRolesIsStep1sOwnCrossTenderMemory(unittest.TestCase):
         with mock.patch.object(industries, "_hvac") as hv:
             industries.remember_layer_roles("HVAC", {"k1": "return"})
             hv.return_value.save_map.assert_called_once_with({"k1": "return"})
+
+
+class SuggestRoleReadsARealLayerNameItem76(unittest.TestCase):
+    """item 76's own dispatch surface -- the actual keyword reading lives
+    in hvac_takeoff.suggest_role_from_name(), already tested on its own
+    in hvac_takeoff/test_hvac_takeoff.py; this only covers industry
+    dispatch and the "nothing to read" cases."""
+
+    def test_hvac_reaches_hvac_takeoffs_own_suggestion(self):
+        with mock.patch.object(industries, "_hvac") as hv:
+            hv.return_value.suggest_role_from_name.return_value = "supply"
+            self.assertEqual(
+                industries.suggest_role("HVAC", "ACME-HVAC-Supply Air Duct"), "supply")
+            hv.return_value.suggest_role_from_name.assert_called_once_with(
+                "ACME-HVAC-Supply Air Duct")
+
+    def test_an_unbuilt_industry_suggests_nothing(self):
+        self.assertIsNone(industries.suggest_role("Marine", "Anything"))
+
+    def test_no_name_at_all_suggests_nothing_without_even_asking_hvac_takeoff(self):
+        with mock.patch.object(industries, "_hvac") as hv:
+            self.assertIsNone(industries.suggest_role("HVAC", None))
+            hv.return_value.suggest_role_from_name.assert_not_called()
 
 
 class SymbolCountsAndAreasReachTheReviewScreen(unittest.TestCase):

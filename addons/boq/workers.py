@@ -134,7 +134,10 @@ class HvacTakeoffWorker(_Worker):
         return CB.openrouter.openrouter_chat(
             self.api_key, HVAC_VISION_MODEL, _HVAC_VISION_PROMPT,
             attachments=[{"kind": "image", "mime": "image/png", "b64": b64}],
-            temperature=0.1, max_tokens=900,
+            # item 80: 0, not 0.1 -- the same drawing read 42, 38 and 34
+            # VAV tags on three runs with this code unchanged; a read that
+            # is meant to be repeatable should not be sampled.
+            temperature=0, max_tokens=900,
             extra={"frequency_penalty": 0.4, "reasoning": {"enabled": False}})
 
     def run(self):
@@ -165,12 +168,18 @@ class OpenRouterWriteWorker(_Worker):
         self.api_key = api_key
         self.followup = followup
         self.attachments = attachments
+        # item 70: filled in place by write() before `done` fires -- read
+        # by dialog.py's _on_prism_agent_done() straight off this worker
+        # instance (still the same object `self._worker` points at when
+        # the signal is handled), not threaded through the signal itself,
+        # since `done` already has callers matching on a one-`str` shape.
+        self.usage: dict = {}
 
     def run(self):
         try:
             text = openrouter_writer.write(
                 self.agent, self.prompt, self.api_key, followup=self.followup,
-                attachments=self.attachments)
+                attachments=self.attachments, usage_out=self.usage)
             self.done.emit(text)
         except Exception as e:                           # noqa: BLE001
             self.failed.emit(str(e))

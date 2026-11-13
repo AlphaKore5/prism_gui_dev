@@ -50,6 +50,94 @@ def list_boq_runs() -> list[dict]:
     return out
 
 
+# item 73 (12 Nov 2026): "start the BOQ count from 0... so i can see how
+# i am spending on each of the BOQ" -- the owner's own test runs from
+# today (a pharma client, an ELV client, the locker, the trolley catalogue...)
+# are real files History must keep showing, but they are not the baseline
+# a going-forward "tokens per BOQ" figure should be measured against. One
+# small marker file, never a second copy of the runs themselves: every
+# run from before the marker's own timestamp stops counting toward
+# counts_by_period(), while remaining exactly where it always was for
+# History, follow-ups and everything else that reads list_boq_runs().
+_RESET_MARKER = "_boq_counter_reset.json"
+
+
+def reset_counter() -> None:
+    """Zero the counter from this moment on. Callable again later (a
+    small "Reset" action beside the counter itself, addons/boq/panel.py)
+    -- not a one-off fix only reachable by editing a file by hand."""
+    import time
+    path = os.path.join(CB.config.RUNS_DIR, _RESET_MARKER)
+    os.makedirs(CB.config.RUNS_DIR, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump({"reset_at": time.time()}, f)
+
+
+def _counter_reset_at() -> float:
+    path = os.path.join(CB.config.RUNS_DIR, _RESET_MARKER)
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return float(json.load(f).get("reset_at") or 0.0)
+    except (OSError, ValueError, TypeError):
+        return 0.0
+
+
+# item 70 (12 Nov 2026): "a small BOQ counter... how many were made in a
+# day, a month, a year... and token utilization for each" -- read off the
+# SAME run files list_boq_runs() already reads, bucketed by the run
+# file's own mtime (the same timestamp when_label() already shows, so the
+# counter and History's own dates never disagree). Deliberately not a
+# new counter/log of its own, same reason list_boq_runs() itself gives.
+def counts_by_period(now=None) -> dict:
+    """{"day"/"month"/"year": {"boqs": N, "tokens": N}} -- each period
+    nests the ones below it (this month's count includes today's), the
+    ordinary meaning of "how many this month". `tokens` sums whatever
+    OpenRouter usage a run's own "tokens" field carries (see dialog.py's
+    _on_prism_agent_done) -- a run made entirely by a browser-driven
+    agent (ChatGPT, Claude-in-a-tab, ...) has no token count to add and
+    correctly counts as 0, never guessed from its text length. `now`:
+    only ever passed by a test; real callers take the real clock."""
+    import datetime
+    now = now or datetime.datetime.now()
+    reset_at = _counter_reset_at()
+    out = {"day": {"boqs": 0, "tokens": 0}, "month": {"boqs": 0, "tokens": 0},
+          "year": {"boqs": 0, "tokens": 0}}
+    for run in list_boq_runs():
+        try:
+            mtime = os.path.getmtime(run["_path"])
+        except OSError:
+            continue
+        if mtime < reset_at:
+            continue
+        made = datetime.datetime.fromtimestamp(mtime)
+        tokens = (run.get("tokens") or {}).get("total_tokens") or 0
+        if made.year != now.year:
+            continue
+        out["year"]["boqs"] += 1
+        out["year"]["tokens"] += tokens
+        if made.month != now.month:
+            continue
+        out["month"]["boqs"] += 1
+        out["month"]["tokens"] += tokens
+        if made.date() != now.date():
+            continue
+        out["day"]["boqs"] += 1
+        out["day"]["tokens"] += tokens
+    return out
+
+
+def format_count(n: int) -> str:
+    """1234 -> "1.2K", 1_250_000 -> "1.3M" -- so the counter stays "very
+    little space" even once token counts run into the millions. Anything
+    under 1,000 is shown exactly; nothing here is ever a guess, only a
+    shorter way to write a real sum."""
+    if n < 1000:
+        return str(n)
+    if n < 1_000_000:
+        return f"{n / 1000:.1f}K"
+    return f"{n / 1_000_000:.1f}M"
+
+
 def when_label(path: str) -> str:
     """The run file's own modified time, in a short "Tue 29 Oct, 14:05"
     form -- used by this module's own list AND by dialog.py's

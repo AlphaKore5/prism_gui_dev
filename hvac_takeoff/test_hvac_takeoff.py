@@ -528,9 +528,10 @@ class OcrPageTilesABigRenderAndRemapsEachTilesOwnCoordinates(unittest.TestCase):
 class _FakePage:
     """Just enough of pdfplumber's page shape for count_symbol_rects and
     count_symbol_curves -- they only ever read page.rects / page.curves."""
-    def __init__(self, rects=(), curves=()):
+    def __init__(self, rects=(), curves=(), lines=()):
         self.rects = list(rects)
         self.curves = list(curves)
+        self.lines = list(lines)
 
 
 _RED = (1.0, 0.0, 0.0)
@@ -605,6 +606,31 @@ class CountSymbolRectsCountsShapesNotRawRects(unittest.TestCase):
                 _, _, w, h = out[0]
                 self.assertAlmostEqual(w, 9)
                 self.assertAlmostEqual(h, 9)
+
+
+class CountSymbolRectsVolumeDamperFloorAndRaisedCapItem79(unittest.TestCase):
+    """item 79, found on the client's second real sample file: that
+    file's real damper mark is a long rect (one side a steady ~6pt, the
+    other 15-77pt), not the small square icon the original 12pt cap was
+    tuned for -- and the same real layer carries ~2pt corner-tick noise
+    the floor must drop."""
+
+    LAYER_MAP = {"#ff0000@1.08:rect": "volume_damper"}
+
+    def test_the_real_elongated_damper_mark_is_counted(self):
+        page = _FakePage([_rect(100, 100, 6.24, 76.8, _RED)])
+        out = H.count_symbol_rects(page, self.LAYER_MAP, "volume_damper")
+        self.assertEqual(len(out), 1)
+
+    def test_a_tiny_corner_tick_under_the_floor_is_dropped(self):
+        page = _FakePage([_rect(100, 100, 6.24, 76.8, _RED), _rect(500, 500, 2.04, 1.92, _RED)])
+        out = H.count_symbol_rects(page, self.LAYER_MAP, "volume_damper")
+        self.assertEqual(len(out), 1)
+
+    def test_a_page_border_is_still_excluded_by_the_raised_cap(self):
+        page = _FakePage([_rect(100, 100, 6.24, 76.8, _RED), _rect(0, 0, 888, 1556, _RED)])
+        out = H.count_symbol_rects(page, self.LAYER_MAP, "volume_damper")
+        self.assertEqual(len(out), 1)
 
 
 class TheSecondDuctSystemIsDetectedByItsInkColorNotGuessed(unittest.TestCase):
@@ -844,6 +870,45 @@ class CountSymbolCurvesFindsThePolylineDamperSymbol(unittest.TestCase):
         out = H.count_symbol_curves(page, self.LAYER_MAP, "volume_damper")
         self.assertEqual(out, [])
 
+    def test_a_tiny_hatch_fragment_under_the_floor_is_dropped(self):
+        """item 79: a real named layer can carry hatch-fill fragments far
+        smaller than the damper's own tested mark (4.4 x 36pt) -- these
+        must never be counted as a second, separate damper."""
+        page = _FakePage(curves=[_curve(100, 100, 4.4, 36.0),
+                                 _curve(200, 200, 1.6, 0.2)])
+        out = H.count_symbol_curves(page, self.LAYER_MAP, "volume_damper")
+        self.assertEqual(len(out), 1)
+
+
+class CountSymbolCurvesRequiresASquareBoxForADiffuserItem79(unittest.TestCase):
+    """item 79, found on the client's second real sample file: a diffuser
+    icon's real OCG layer also carries direction-arrow ticks (~5x14pt,
+    never square) and hatch fragments (2.5-4.7pt, far below any real
+    icon) -- diffuser's own real icon (round or square) is always
+    bbox-square, which volume_damper's bowtie mark never needs to be."""
+
+    LAYER_MAP = {"#00ffff@0.84:poly": "diffuser"}
+
+    def test_a_square_curve_above_the_floor_is_counted(self):
+        page = _FakePage(curves=[_curve(100, 100, 10.4, 10.4)])
+        out = H.count_symbol_curves(page, self.LAYER_MAP, "diffuser")
+        self.assertEqual(len(out), 1)
+
+    def test_a_long_thin_tick_mark_is_excluded(self):
+        page = _FakePage(curves=[_curve(100, 100, 5.3, 14.3)])
+        out = H.count_symbol_curves(page, self.LAYER_MAP, "diffuser")
+        self.assertEqual(out, [])
+
+    def test_a_tiny_hatch_fragment_is_excluded_even_if_square(self):
+        page = _FakePage(curves=[_curve(100, 100, 2.5, 2.5)])
+        out = H.count_symbol_curves(page, self.LAYER_MAP, "diffuser")
+        self.assertEqual(out, [])
+
+    def test_volume_damper_itself_is_never_held_to_the_square_rule(self):
+        page = _FakePage(curves=[_curve(100, 100, 4.4, 36.0)])
+        out = H.count_symbol_curves(page, {"#00ffff@0.84:poly": "volume_damper"}, "volume_damper")
+        self.assertEqual(len(out), 1)
+
 
 class ACurveSourcedSymbolsAreaIsNoneNotAWrongNumber(unittest.TestCase):
     """item 29d: a curve symbol's bounding box is the drawn mark's own
@@ -1063,5 +1128,277 @@ class SaveMapRemembersRolesAcrossTendersWithoutTouchingTheRealFile(unittest.Test
             H.save_map({"#000000@1.56:line": "supply"})  # must not raise
 
 
+class LayerKeyIsNeverChangedByACarriedOcgNameItem74(unittest.TestCase):
+    """item 74 (12 Nov 2026), found thinking it through before shipping,
+    not live: a saved layer_map.json is keyed entirely on layer_key()'s
+    own colour@weight:kind output. If layer_key() started returning a
+    name-based key the moment an object carried "ocg_name" (real CAD
+    layer names, read off a PDF's own Optional Content Groups), every
+    already-correct, already-saved colour-keyed mapping would silently
+    stop matching the first time that exact PDF was reopened -- a role
+    quietly falling through to "ignore" with nothing telling anyone why.
+    layer_key() must stay colour-only, unconditionally, forever; the new
+    name-based lookup lives ONLY in layer_display_key()/resolve_role()."""
+
+    def test_an_object_carrying_ocg_name_still_gets_the_old_colour_key(self):
+        obj = _rect(0, 0, 10, 10, color=_RED, lw=1.08)
+        obj["ocg_name"] = "ACME-HVAC-Exhaust Air Duct"
+        self.assertEqual(H.layer_key(obj, "rect"), "#ff0000@1.08:rect")
+
+    def test_layer_display_key_shows_the_real_name_when_present(self):
+        obj = _rect(0, 0, 10, 10, color=_RED, lw=1.08)
+        obj["ocg_name"] = "ACME-HVAC-Exhaust Air Duct"
+        self.assertEqual(H.layer_display_key(obj, "rect"),
+                        "[ACME-HVAC-Exhaust Air Duct]")
+
+    def test_layer_display_key_falls_back_to_the_colour_key_with_no_name(self):
+        obj = _rect(0, 0, 10, 10, color=_RED, lw=1.08)
+        self.assertEqual(H.layer_display_key(obj, "rect"), H.layer_key(obj, "rect"))
+
+
+class ResolveRoleTriesTheNameBeforeFallingBackToColourItem74(unittest.TestCase):
+    """The one place a real layer_map is actually consulted for a role,
+    from item 74 on -- every real caller (extract()'s own duct-wall
+    loop, count_symbol_rects(), count_symbol_curves()) uses this, not a
+    bare `layer_map.get(layer_key(...), "ignore")`."""
+
+    def test_an_existing_colour_only_layer_map_keeps_working_unchanged(self):
+        """The regression this whole item exists to prevent: a real,
+        already-saved layer_map.json has no "[name]" keys in it at all."""
+        obj = _rect(0, 0, 10, 10, color=_RED, lw=1.08)
+        obj["ocg_name"] = "ACME-HVAC-Exhaust Air Duct"
+        layer_map = {"#ff0000@1.08:rect": "return"}
+        self.assertEqual(H.resolve_role(obj, "rect", layer_map), "return")
+
+    def test_a_name_based_mapping_wins_over_a_colour_based_one(self):
+        obj = _rect(0, 0, 10, 10, color=_RED, lw=1.08)
+        obj["ocg_name"] = "ACME-HVAC-Exhaust Air Duct"
+        layer_map = {"#ff0000@1.08:rect": "return",
+                    "[ACME-HVAC-Exhaust Air Duct]": "toilet_exhaust"}
+        self.assertEqual(H.resolve_role(obj, "rect", layer_map), "toilet_exhaust")
+
+    def test_a_name_with_no_matching_entry_falls_back_to_the_colour_key(self):
+        obj = _rect(0, 0, 10, 10, color=_RED, lw=1.08)
+        obj["ocg_name"] = "Some Other Layer"
+        layer_map = {"#ff0000@1.08:rect": "return"}
+        self.assertEqual(H.resolve_role(obj, "rect", layer_map), "return")
+
+    def test_no_name_and_no_colour_match_is_ignore(self):
+        obj = _rect(0, 0, 10, 10, color=_RED, lw=1.08)
+        self.assertEqual(H.resolve_role(obj, "rect", {}), "ignore")
+
+
+class OcgPageFallsBackToTheRealPageWhenNothingIsTagged(unittest.TestCase):
+    """_OcgPage must never leave a caller with no geometry at all just
+    because tagged_page_objects() found nothing to tag -- the ordinary
+    case for a flattened PDF export with no layer data in it."""
+
+    def test_empty_tagged_objects_falls_back_to_the_wrapped_pages_own_geometry(self):
+        fake_page = _FakePage(rects=[_rect(0, 0, 5, 5)], curves=[_curve(0, 0, 4, 4)])
+        fake_page.lines = []
+        with mock.patch.object(H, "tagged_page_objects", return_value=([], [], [])):
+            wrapped = H._OcgPage(fake_page, "/x/does/not/matter.pdf", 0)
+            self.assertEqual(wrapped.rects, fake_page.rects)
+            self.assertEqual(wrapped.curves, fake_page.curves)
+
+    def test_a_non_empty_tagged_result_is_used_instead_of_the_wrapped_page(self):
+        fake_page = _FakePage(rects=[_rect(0, 0, 5, 5)])
+        tagged_rect = _rect(1, 1, 9, 9)
+        tagged_rect["ocg_name"] = "ACME-HVAC-Exhaust Air Duct"
+        with mock.patch.object(H, "tagged_page_objects",
+                              return_value=([], [tagged_rect], [])):
+            wrapped = H._OcgPage(fake_page, "/x/does/not/matter.pdf", 0)
+            self.assertEqual(wrapped.rects, [tagged_rect])
+
+    def test_other_attributes_pass_through_to_the_wrapped_page(self):
+        fake_page = _FakePage()
+        fake_page.width = 3370
+        wrapped = H._OcgPage(fake_page, "/x/does/not/matter.pdf", 0)
+        self.assertEqual(wrapped.width, 3370)
+
+
+class SuggestRoleFromNameReadsTheLayersOwnWordsItem76(unittest.TestCase):
+    """item 76, the owner's own reaction to item 74 landing with every
+    real layer name still defaulted to "ignore": "we have to manually do
+    it". A real CAD layer name is usually already plain English -- this
+    reads it instead of asking a person to. Every name here is a REAL
+    one found on the same real client file item 74/75 were built and
+    verified against, not invented for the test."""
+
+    def test_the_real_supply_duct_layer_suggests_supply(self):
+        self.assertEqual(H.suggest_role_from_name("ACME-HVAC-Supply Air Duct"), "supply")
+
+    def test_the_real_return_duct_layer_suggests_return(self):
+        self.assertEqual(
+            H.suggest_role_from_name("PLAN_01_ACME-HVAC-Return Air Duct"),
+            "return")
+
+    def test_the_real_exhaust_duct_layer_suggests_exhaust(self):
+        self.assertEqual(H.suggest_role_from_name("ACME-HVAC-Exhaust Air Duct"), "exhaust")
+
+    def test_a_name_naming_both_toilet_and_exhaust_suggests_the_narrower_role(self):
+        """Not on the real file (its own exhaust layer never says
+        "toilet") -- generalised for a drawing whose drafter did write
+        the specific branch into the layer name."""
+        self.assertEqual(H.suggest_role_from_name("M-HVAC-Toilet Exhaust Duct"),
+                        "toilet_exhaust")
+
+    def test_the_real_damper_layer_suggests_volume_damper(self):
+        self.assertEqual(H.suggest_role_from_name("ACME-HVAC-DAMPER"), "volume_damper")
+
+    def test_the_real_flex_duct_layer_suggests_flex_connector(self):
+        self.assertEqual(H.suggest_role_from_name("ACME-HVAC-FLEX.DUCT"), "flex_connector")
+
+    def test_a_diffuser_layer_wins_over_the_word_supply_in_the_same_name(self):
+        """"ACME-HVAC-Supply Air Diffuser" contains both "supply" and
+        "diffuser" -- the diffuser is the real, narrower answer, found
+        live: a naive first-match-wins order would have suggested
+        "supply" for the one layer item 74/75 actually needed as
+        "diffuser"."""
+        self.assertEqual(H.suggest_role_from_name("ACME-HVAC-Supply Air Diffuser"),
+                        "diffuser")
+
+    def test_a_text_annotation_layer_is_never_suggested_a_geometry_role(self):
+        """"ACME-HVAC-Exhaust Air Duct Text" is a real layer on the same
+        real file -- label text, not duct-wall geometry, despite
+        containing "exhaust" just as plainly as the real duct layer."""
+        self.assertIsNone(H.suggest_role_from_name("ACME-HVAC-Exhaust Air Duct Text"))
+
+    def test_a_cfm_note_layer_with_a_typo_is_never_suggested_supply(self):
+        """"ACME-HVAC-Suppil air cfm" -- a real, typo'd layer name on the
+        same real file. Still correctly excluded, by "cfm" alone, not by
+        the typo breaking a "supply" match it would otherwise have won."""
+        self.assertIsNone(H.suggest_role_from_name("ACME-HVAC-Suppil air cfm"))
+
+    def test_a_layer_with_no_recognisable_system_word_suggests_nothing(self):
+        # item 80 changed this rule on purpose: "ACME-HVAC-VAV" used to
+        # be asserted None here, when nothing could count a VAV layer.
+        # It now suggests "vav_box" (see the item 80 class below).
+        self.assertIsNone(H.suggest_role_from_name("ACME-HVAC-Grille"))
+        self.assertIsNone(H.suggest_role_from_name("ACME-HVAC-Z Piece"))
+
+    def test_no_name_at_all_suggests_nothing(self):
+        self.assertIsNone(H.suggest_role_from_name(None))
+        self.assertIsNone(H.suggest_role_from_name(""))
+
+
 if __name__ == "__main__":
     unittest.main()
+
+
+class VavBoxesAreCountedAsDrawnBlocksItem80(unittest.TestCase):
+    """13 Nov 2026, the client's second real sample file: the same
+    drawing read 42, 38 and 34 VAV tags on three runs against 48 real
+    boxes. Its own "ACME-HVAC-VAV" layer, grouped into touching
+    clusters, gives 49 every time."""
+
+    LAYER_MAP = {"#ff0000@1.08:rect": "vav_box", "#ff0000@1.08:line": "vav_box"}
+
+    def _box(self, x, y):
+        """An outline rect plus two inner marks, the way one block draws."""
+        return [_rect(x, y, 38, 15, _RED), _rect(x + 4, y + 3, 10, 8, _RED),
+                _rect(x + 20, y + 3, 10, 8, _RED)]
+
+    def test_one_block_of_several_primitives_counts_once(self):
+        page = _FakePage(self._box(100, 100))
+        self.assertEqual(len(H.count_symbol_clusters(page, self.LAYER_MAP, "vav_box")), 1)
+
+    def test_two_separate_blocks_count_twice(self):
+        page = _FakePage(self._box(100, 100) + self._box(400, 300))
+        self.assertEqual(len(H.count_symbol_clusters(page, self.LAYER_MAP, "vav_box")), 2)
+
+    def test_a_stray_tick_and_a_page_wide_shape_are_not_boxes(self):
+        page = _FakePage(self._box(100, 100) + [_rect(600, 600, 2, 2, _RED),
+                                                _rect(0, 900, 2000, 5, _RED)])
+        self.assertEqual(len(H.count_symbol_clusters(page, self.LAYER_MAP, "vav_box")), 1)
+
+    def test_geometry_on_another_layer_is_ignored(self):
+        page = _FakePage(self._box(100, 100) + [_rect(400, 300, 38, 15, _CYAN, lw=0.84)])
+        self.assertEqual(len(H.count_symbol_clusters(page, self.LAYER_MAP, "vav_box")), 1)
+
+    def test_the_real_vav_layer_name_suggests_vav_box(self):
+        self.assertEqual(H.suggest_role_from_name("ACME-HVAC-VAV"), "vav_box")
+
+    def test_vav_wiring_and_text_layers_never_suggest_vav_box(self):
+        for name in ("M HVAC VAV LOOPING CABLE-1", "M HVAC VAV POWER POINT",
+                     "ACME-HVAC-VAV TEXT."):
+            with self.subTest(name=name):
+                self.assertIsNone(H.suggest_role_from_name(name))
+
+    def test_a_smoke_detector_layer_is_never_suggested_as_smoke_extract_duct(self):
+        self.assertIsNone(H.suggest_role_from_name(
+            "FAS-Smoke Detector.FAS_Pen_No__204"))
+        self.assertEqual(H.suggest_role_from_name("Smoke Extract Duct"), "smoke_extract")
+
+    def test_vav_box_is_a_real_role_and_never_paired_as_duct_wall(self):
+        self.assertIn("vav_box", H.ROLES)
+        self.assertIn("vav_box", H.CLUSTER_ROLES)
+
+    def test_the_summary_names_the_shape_count_as_the_quantity(self):
+        res = {"source": {"file": "x.pdf", "pages": 1}, "duct_summary": [],
+               "checks": {"runs": 0, "label_match_rate": 0}, "tr_labels": [],
+               "cfm_label_counts": {}, "rooms": [], "warnings": [], "terminals": [],
+               "accessories": [], "equipment": [], "unresolved_duct_labels": [],
+               "settings": {},
+               "vav_boxes": [{"page": 0}] * 49, "vav_tags": ["VAV-1-1"]}
+        text = H.summary_text(res)
+        self.assertIn("VAV BOXES COUNTED BY SHAPE: 49", text)
+
+
+class ARememberedColourSuggestsARoleForAnUnnamedPurposeLayerItem80(unittest.TestCase):
+    """13 Nov 2026: return duct fell from 16.5 ft to 4.9 ft on the same
+    drawing -- the geometry one remembered colour ("#ff0000@1.08:line" ->
+    return) used to pick up sat inside the real layer "ACME-HVAC-Z
+    Piece", which no name hint matches."""
+
+    SAVED = {"#ff0000@1.08:line": "return", "#808080@0.72:line": "ignore",
+             "#000000@1.56:line": "supply"}
+
+    def test_the_remembered_role_is_suggested(self):
+        keys = {"#808080@0.72:line": 3000.0, "#ff0000@1.08:line": 870.0}
+        self.assertEqual(H.suggest_role_from_colours(keys, self.SAVED), "return")
+
+    def test_the_role_with_more_length_wins(self):
+        keys = {"#000000@1.56:line": 5000.0, "#ff0000@1.08:line": 870.0}
+        self.assertEqual(H.suggest_role_from_colours(keys, self.SAVED), "supply")
+
+    def test_only_ignored_or_unknown_colours_suggest_nothing(self):
+        self.assertIsNone(H.suggest_role_from_colours({"#808080@0.72:line": 3000.0}, self.SAVED))
+        self.assertIsNone(H.suggest_role_from_colours({"#123456@1:line": 10.0}, self.SAVED))
+        self.assertIsNone(H.suggest_role_from_colours(None, self.SAVED))
+        self.assertIsNone(H.suggest_role_from_colours({"#ff0000@1.08:line": 1.0}, {}))
+
+
+class AnAiTagTileThatFailsIsRetriedAndCountedItem80(unittest.TestCase):
+    """A tile whose AI read raised used to be skipped with no trace --
+    its tags silently missing from the VAV count."""
+
+    def _run(self, reader):
+        fake_img = mock.MagicMock()
+        fake_img.size = (100, 100)
+        fake_img.crop.return_value.save = lambda buf, format: buf.write(b"png")
+        fake_pdf = mock.MagicMock()
+        fake_pdf.__getitem__.return_value.render.return_value.to_pil.return_value.convert.return_value = fake_img
+        stats = {"tiles": 0, "failed": 0}
+        with mock.patch("pypdfium2.PdfDocument", return_value=fake_pdf):
+            labels = H.vision_vav_recount("/x/fake.pdf", 0, reader, log=lambda *a: None, stats=stats)
+        return labels, stats
+
+    def test_a_tile_that_fails_once_is_read_on_the_second_try(self):
+        calls = []
+        def reader(png):
+            calls.append(1)
+            if len(calls) == 1:
+                raise RuntimeError("network")
+            return "VAV-1-11"
+        labels, stats = self._run(reader)
+        self.assertEqual([l["tag"] for l in labels], ["VAV-1-11"])
+        self.assertEqual(stats, {"tiles": 1, "failed": 0})
+
+    def test_a_tile_that_fails_twice_is_counted_as_failed(self):
+        def reader(png):
+            raise RuntimeError("network")
+        labels, stats = self._run(reader)
+        self.assertEqual(labels, [])
+        self.assertEqual(stats, {"tiles": 1, "failed": 1})
+

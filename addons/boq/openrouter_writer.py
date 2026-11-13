@@ -32,6 +32,15 @@ import core_bridge as CB
 from addons.boq import agents as boq_agents
 
 
+# item 81: the write-up is a transcription-and-layout job on figures that
+# are already measured -- on the 13 Nov run above, roughly 58,000 of the
+# 65,536 output tokens went on the model's own hidden reasoning and the
+# BOQ itself was cut short. Reasoning off leaves the whole output limit
+# for the document. The same switch the drawing-tile reader
+# (addons/boq/workers.py) has used since item 2.
+WRITE_EXTRA = {"reasoning": {"enabled": False}}
+
+
 def model_for(agent: str, *, followup: bool) -> str:
     """Item 30e's two-tier choice: the heavier generation model, or the
     cheaper same-family sibling for a follow-up/edit."""
@@ -53,7 +62,8 @@ def has_vision(agent: str) -> bool:
 
 
 def write(agent: str, prompt: str, api_key: str, *, followup: bool = False,
-         attachments: list[dict] | None = None) -> str:
+         attachments: list[dict] | None = None,
+         usage_out: dict | None = None) -> str:
     """One Prism Agent completion. Raises RuntimeError with the real
     reason on failure (no key, a rejected key, a network error, ...) --
     caught and shown to the user by whatever calls this off the GUI
@@ -63,11 +73,35 @@ def write(agent: str, prompt: str, api_key: str, *, followup: bool = False,
     shape) to show the model alongside the text, item 32 -- silently
     dropped here if `agent` has no vision capability at all (has_vision()
     already told the caller that before this was ever called; this is
-    the last line of defence, not the place a person first learns it)."""
+    the last line of defence, not the place a person first learns it).
+
+    `usage_out`: passed straight through to CB.openrouter.openrouter_chat()
+    -- item 70's BOQ counter reads it off the worker afterward."""
     model = model_for(agent, followup=followup)
     if attachments and not has_vision(agent):
         attachments = None
-    return CB.openrouter.openrouter_chat(api_key, model, prompt, attachments=attachments)
+    usage = usage_out if usage_out is not None else {}
+    text = CB.openrouter.openrouter_chat(api_key, model, prompt, attachments=attachments,
+                                         usage_out=usage, extra=WRITE_EXTRA)
+    # item 81 (13 Nov 2026), two real failures of the same kind, both
+    # saved as finished BOQs with no warning. 5 Nov, "Prism Agent Deep",
+    # twice in a row: the answer came back empty and the model's own
+    # working notes were written into the workbook -- a 53,000-row "BOQ"
+    # sheet of "Let me write the document. OK. Let me go." 13 Nov, "Prism
+    # Agent Claude": 65,536 output tokens used, 18,745 characters of
+    # answer -- the BOQ stops mid-row in the return-duct table, with
+    # every later section missing. A BOQ that is not whole is never
+    # handed back as if it were.
+    if usage.get("answer_from_reasoning") is True:
+        raise RuntimeError(
+            f"{agent} returned only its working notes, not a BOQ. Nothing was saved. "
+            "Press Make my BOQ again.")
+    if usage.get("finish_reason") == "length":
+        raise RuntimeError(
+            f"{agent} ran out of room before finishing -- the BOQ stops part-way. "
+            "Nothing was saved. Press Make my BOQ again; if it happens twice, "
+            "ask for a shorter BOQ in the request box.")
+    return text
 
 
 # ── a small markdown model -- just enough for a BOQ write-up's own shape ──
@@ -268,6 +302,226 @@ def markdown_to_docx(text: str, path: str) -> str:
     return path
 
 
+# item 66 (11 Nov 2026): an ELV client's own "Rajesh Nagda Hostel" sample only
+# ever matched the WRITE-UP's wording and section order -- markdown_to_docx()
+# above always renders into a brand-new, generic docx, so a client's real
+# letterhead, logo, fonts and column widths never survived no matter how
+# closely the write-up copied the sample's shape. The fix is not a smarter
+# prompt -- it is a different operation: open the client's OWN template file
+# and fill it in place, never rebuild one from scratch. Column matching is a
+# small synonym table rather than an AI call -- every header in this add-on's
+# own real client files so far (an ELV client's and CCTV_ELV_BOQ
+# samples included) is covered by it, and a column it genuinely doesn't
+# recognise is safer left blank than guessed at by a model.
+import copy
+
+_COLUMN_SYNONYMS: dict[str, set[str]] = {
+    "no": {"no", "sr no", "sr", "s no", "sl no", "item no"},
+    "description": {"description", "item description", "item", "particulars",
+                    "site feature", "feature"},
+    "qty": {"qty", "quantity"},
+    "unit": {"unit", "uom"},
+    "rate": {"rate", "rate inr", "unit rate"},
+    "amount": {"amount", "amount inr", "total", "total value inr",
+              "total price inr"},
+    "basis": {"basis", "design basis", "basis reason", "reason", "basis / reason"},
+    "value": {"value", "measured value"},
+    "reference": {"layer block", "drawing reference layer block", "reference",
+                  "layer", "drawing reference"},
+}
+
+
+def _normalize_header(h: str) -> str:
+    h = (h or "").lower().strip()
+    h = re.sub(r"[().,/]", " ", h)
+    h = re.sub(r"\s+", " ", h).strip()
+    return h
+
+
+def _column_group(h: str) -> str | None:
+    """Which synonym group `h` belongs to ('no', 'description', 'qty', ...),
+    or None if it doesn't look like a BOQ line-item column at all (a
+    letterhead's "To"/"Ref" cell, a notice box's only cell)."""
+    norm = _normalize_header(h)
+    if not norm:
+        return None
+    for group, names in _COLUMN_SYNONYMS.items():
+        if norm in names:
+            return group
+    # Loose fallback: the synonym word appears INSIDE the header text (e.g.
+    # "Drawing Reference (Layer / Block)" contains "layer block"). Checked
+    # one-way only -- the reverse ("to" is a substring of "total") would
+    # wrongly match a short, unrelated header against a longer synonym.
+    for group, names in _COLUMN_SYNONYMS.items():
+        for name in names:
+            if len(name) >= 4 and name in norm:
+                return group
+    return None
+
+
+def _map_columns(template_headers: list[str], drafted_headers: list[str]
+                 ) -> dict[int, int]:
+    """template column index -> drafted column index, matched by synonym
+    group ("Sr No" <-> "No", "Item Description" <-> "Description", ...). A
+    template column with no confident match is left out of the map -- its
+    cells stay blank in the output rather than guess wrong."""
+    t_groups = [_column_group(h) for h in template_headers]
+    d_groups = [_column_group(h) for h in drafted_headers]
+    mapping: dict[int, int] = {}
+    used_drafted: set[int] = set()
+    for t_idx, t_group in enumerate(t_groups):
+        if t_group is None:
+            continue
+        for d_idx, d_group in enumerate(d_groups):
+            if d_idx in used_drafted:
+                continue
+            if d_group == t_group:
+                mapping[t_idx] = d_idx
+                used_drafted.add(d_idx)
+                break
+    return mapping
+
+
+def _best_table_match(template_headers: list[str], drafted_tables: list[dict],
+                      used: set[int]) -> tuple[int | None, dict[int, int]]:
+    """Among `drafted_tables` (parse_markdown()'s table blocks) not already
+    in `used`, the one whose columns cover the most of `template_headers`,
+    together with its column map. (None, {}) if nothing covers at least
+    half of the template table's own recognisable columns -- matched by
+    HEADER OVERLAP, not by position, since the drafted BOQ and the
+    client's template rarely have the same number of sections."""
+    best_idx, best_map, best_score = None, {}, 0.0
+    real_cols = sum(1 for h in template_headers if _column_group(h))
+    if not real_cols:
+        return None, {}
+    for idx, block in enumerate(drafted_tables):
+        if idx in used:
+            continue
+        mapping = _map_columns(template_headers, block["headers"])
+        score = len(mapping) / real_cols
+        if score > best_score:
+            best_idx, best_map, best_score = idx, mapping, score
+    if best_score < 0.5:
+        return None, {}
+    return best_idx, best_map
+
+
+def fill_template_docx(text: str, template_path: str, out_path: str) -> dict:
+    """Fill the CLIENT'S OWN template -- their letterhead, logo, fonts,
+    column widths, everything already in `template_path` -- with the line
+    items from `text` (the same markdown a write-up agent returns, parsed
+    the same way markdown_to_docx() parses it).
+
+    A template table that finds no confident match (see _best_table_match)
+    is left COMPLETELY untouched, stale data and all, rather than guessed
+    into. A drafted table that finds no matching template section is
+    appended at the end of the document under a clearly marked heading
+    instead of silently dropped -- the same rule the write-up prompt
+    itself already uses for measured figures ("nothing measured should be
+    silently dropped").
+
+    Returns {"path", "matched", "unmatched_template", "unmatched_drafted"}:
+    `matched`/`unmatched_template` are counts of template tables;
+    `unmatched_drafted` is the list of drafted section headings that had
+    nowhere to go in this template.
+    """
+    import docx
+    blocks = parse_markdown(text)
+    drafted_tables = [b for b in blocks if b["type"] == "table" and b["headers"]]
+    headings: list[str] = []
+    last_heading = ""
+    for b in blocks:
+        if b["type"] == "heading":
+            last_heading = b["text"]
+        elif b["type"] == "table" and b["headers"]:
+            headings.append(last_heading)
+
+    doc = docx.Document(template_path)
+    used: set[int] = set()
+    matched = 0
+    unmatched_template = 0
+    for table in doc.tables:
+        if not table.rows:
+            continue
+        t_headers = [c.text.strip() for c in table.rows[0].cells]
+        idx, col_map = _best_table_match(t_headers, drafted_tables, used)
+        if idx is None:
+            if any(_column_group(h) for h in t_headers):
+                unmatched_template += 1
+            continue
+        used.add(idx)
+        matched += 1
+        block = drafted_tables[idx]
+        data_rows = list(table.rows[1:])
+        style_tr = copy.deepcopy(data_rows[-1]._tr) if data_rows else None
+        for row in data_rows:
+            table._tbl.remove(row._tr)
+        for drafted_row in block["rows"]:
+            if style_tr is not None:
+                table._tbl.append(copy.deepcopy(style_tr))
+                new_row = table.rows[-1]
+            else:
+                new_row = table.add_row()
+            for t_idx, d_idx in col_map.items():
+                if t_idx >= len(new_row.cells):
+                    continue
+                val = drafted_row[d_idx] if d_idx < len(drafted_row) else ""
+                cell = new_row.cells[t_idx]
+                cell.paragraphs[0].text = ""
+                _add_inline_markdown(cell.paragraphs[0], val)
+
+    def _heading(doc_, text_, level_):
+        # Not every real client template keeps python-docx's own default
+        # "Heading N" styles -- a real-world export (confirmed against
+        # an ELV client's own approved CCTV_ELV_BOQ) can strip unused
+        # built-in styles entirely, which makes add_heading() raise
+        # KeyError. A bold paragraph says the same thing without relying
+        # on a style name the template may not define.
+        try:
+            doc_.add_heading(text_, level=level_)
+        except KeyError:
+            p = doc_.add_paragraph()
+            p.add_run(text_).bold = True
+
+    unmatched_drafted = [headings[i] or f"Section {i + 1}"
+                         for i in range(len(drafted_tables)) if i not in used]
+    if unmatched_drafted:
+        doc.add_page_break()
+        _heading(doc, "NOT IN THE TEMPLATE — appended below, unplaced", 2)
+        for i in range(len(drafted_tables)):
+            if i in used:
+                continue
+            block = drafted_tables[i]
+            if headings[i]:
+                _heading(doc, headings[i], 3)
+            cols = len(block["headers"])
+            t = doc.add_table(rows=1, cols=cols)
+            try:
+                t.style = "Light Grid Accent 1"
+            except KeyError:                                     # template-dependent
+                pass
+            for c, h in enumerate(block["headers"]):
+                cell = t.rows[0].cells[c]
+                cell.paragraphs[0].text = ""
+                _add_inline_markdown(cell.paragraphs[0], h)
+                for run in cell.paragraphs[0].runs:
+                    run.bold = True
+            for row in block["rows"]:
+                cells = t.add_row().cells
+                for c, val in enumerate(row[:cols]):
+                    cells[c].paragraphs[0].text = ""
+                    _add_inline_markdown(cells[c].paragraphs[0], val)
+
+    os.makedirs(os.path.dirname(os.path.abspath(out_path)) or ".", exist_ok=True)
+    doc.save(out_path)
+    return {
+        "path": out_path,
+        "matched": matched,
+        "unmatched_template": unmatched_template,
+        "unmatched_drafted": unmatched_drafted,
+    }
+
+
 # item 51 (4 Nov 2026): the owner compared a Prism BOQ against the same job
 # done on claude.ai, which hands back a real multi-sheet .xlsx -- editable,
 # formula-capable, summable -- next to Prism's single flat .docx table. This
@@ -306,10 +560,32 @@ def _xlsx_cell_value(raw: str):
     whole reason this format exists next to the docx table -- otherwise the
     plain stripped text (a cell like "60.56 kg provisional @2.0 mm" stays
     text; inventing a number out of a sentence would be worse than leaving
-    it as a string)."""
+    it as a string).
+
+    item 72 (12 Nov 2026), found live: a real run's Inputs sheet had a
+    Value cell written as "={shs40_mm}*{shs40_mm}-..." -- a formula
+    _compile_cell gave up compiling (its own {name} tokens never
+    resolved), which this function has always been its documented
+    fallback for. But a string starting with '=' becomes a REAL Excel
+    formula the moment it is assigned to a cell -- openpyxl's own rule,
+    nothing to do with whether the text is valid formula syntax -- so the
+    unsubstituted "{shs40_mm}" tokens went straight into the saved file's
+    own <f> element. Curly braces are not legal there; Excel's stricter
+    parser (silently accepted by openpyxl's own reader, caught only by
+    the real application) rejected the whole workbook on open and
+    "repaired" it by stripping the broken formula along with everything
+    else on its calc chain. A single leading space defeats openpyxl's
+    formula check while leaving the text exactly as written -- still
+    visibly starting with '=' to whoever reads the cell, just never
+    interpreted as one. This is every caller of _xlsx_cell_value, not
+    only the Inputs sheet -- the flat (no-INPUTS-table) sheet routes
+    every one of its own cells through this same function with no
+    formula compilation step at all, so it shares the exact same risk."""
     val = _strip_inline_markdown(raw).strip()
     if _NUMERIC_CELL.match(val):
         return int(val) if "." not in val else float(val)
+    if val.startswith("="):
+        return " " + val
     return val
 
 
@@ -618,7 +894,26 @@ def _write_inputs_sheet(wb, table: dict) -> dict:
             continue
         name_cell = ws.cell(row, 1, name)
         name_cell.font = Font(bold=True, color=_XLSX_INK)
-        value_cell = ws.cell(row, 2, _xlsx_cell_value(get(cols["value"])))
+        # item 72 (12 Nov 2026), found live: a real run wrote a Value cell
+        # here as "={shs40_mm}*{shs40_mm}-..." -- a derived input (a
+        # pipe's own mass/m) computed from earlier, more basic ones, the
+        # model's own reasonable idea, just never asked for in THIS
+        # column. Plain _xlsx_cell_value() has no formula concept at all,
+        # but openpyxl itself still reads any string starting with '='
+        # as a real formula the moment it is assigned to a cell -- so the
+        # UNCOMPILED "{shs40_mm}" tokens went straight into the saved
+        # file's own <f> element verbatim. Curly braces are not valid
+        # Excel formula syntax; Excel's own stricter parser (unlike
+        # openpyxl's, which stayed silent) flagged the workbook as
+        # needing repair on open, and stripped the broken formula along
+        # with everything else sharing its calc chain -- "most of the
+        # formulas just vanished" was that repair, not a separate bug.
+        # _compile_cell already has the exact right fallback (a real
+        # formula when every {name} it names resolves -- an EARLIER
+        # Inputs row, since name_to_cell is built top-down as this loop
+        # runs; a plain literal otherwise, never a broken <f>) -- it was
+        # simply never reached for this column before now.
+        value_cell = ws.cell(row, 2, _compile_cell(get(cols["value"]), name_to_cell))
         if isinstance(value_cell.value, (int, float)):
             value_cell.number_format = _XLSX_MONEY_FMT
         if (isinstance(value_cell.value, str)
