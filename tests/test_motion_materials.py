@@ -64,8 +64,10 @@ class MaterialSchemaTests(unittest.TestCase):
     def test_shot_is_normalized_or_dropped(self):
         spec = {"project": {"duration": 6, "fps": 30}, "scenes": [
             {"id": "a", "duration": 2, "shot": "push", "nodes": []},
+            # 99, not 9: the cap was raised from 3 to 12 (a product film pushes
+            # ~8x into one word), so the value must still be out of range.
             {"id": "b", "duration": 2, "shot": {"intent": "Macro ", "target": "hero",
-                                                 "zoom": 9, "easing": "nope"}, "nodes": []},
+                                                 "zoom": 99, "easing": "nope"}, "nodes": []},
             {"id": "c", "duration": 2, "shot": {"intent": "dolly"}, "nodes": []},
             {"id": "d", "duration": 2, "shot": {"intent": "orbit", "target": [10, "x"],
                                                  "easing": "sine.inOut"}, "nodes": []},
