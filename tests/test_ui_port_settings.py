@@ -33,11 +33,14 @@ SECTION_KEYS = ["licence", "profile", "agents", "language", "status",
 
 
 def _panel(section="licence", cfg=None):
-    p = SP.SettingsPanel(dict(cfg or {}))
-    p.resize(980, 700)
-    p.show()
-    p.show_section(section)
-    _app.sendPostedEvents()
+    # A licensed copy is installed in the test, not read from any home folder.
+    from unittest import mock
+    with mock.patch.object(SP.licensing, "state", _valid_state):
+        p = SP.SettingsPanel(dict(cfg or {}))
+        p.resize(980, 700)
+        p.show()
+        p.show_section(section)
+        _app.sendPostedEvents()
     return p
 
 
@@ -58,7 +61,7 @@ def _valid_state():
     import licensing.status as st
     return st.LicenseState(
         status=st.VALID, plan="complete", customer="Parth", kind="paid",
-        features=frozenset(["core", "boq"]), seats=1, license_id="x",
+        features=frozenset(["core", "boq", "gerber"]), seats=1, license_id="x",
         license_ends=int(time.time()) + 86400 * 30,
         token_expires=int(time.time()) + 86400 * 30)
 
@@ -137,9 +140,7 @@ class TestSurfaces(unittest.TestCase):
             self.assertTrue(p._col.count() >= 2, key)
 
     def test_fact_list_is_soft_and_status_is_a_mono_caps_pill_with_a_square(self):
-        from unittest import mock
-        with mock.patch.object(SP.licensing, "state", _valid_state):
-            p = _panel("licence")
+        p = _panel("licence")
         pills = [w for w in p.findChildren(C.Pill) if w.text() == "Active"]
         self.assertEqual(len(pills), 1)
         pill = pills[0]
