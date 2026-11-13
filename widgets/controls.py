@@ -142,7 +142,15 @@ class DarkPill(QPushButton):
     def __init__(self, text: str = "", parent=None):
         super().__init__(text, parent)
         self._kbd_focus = False
-        self.setFixedHeight(self.BODY_H + self.LIP)
+        # The app sheet's `#primaryBtn { min-height: 34px; padding: 6px 20px }`
+        # adds up to a 48px minimum that beats the fixed height below wherever
+        # no header rule overrides it, so this painted pill took 48px and sat
+        # over the row beneath it (Email inquiries, "Update the register").
+        # It paints itself; the sheet must not size it.
+        height = self.BODY_H + self.LIP
+        self.setStyleSheet(f"min-height: {height}px; max-height: {height}px;"
+                           " padding: 0px; border: none;")
+        self.setFixedHeight(height)
 
     def _font(self) -> QFont:
         font = QFont(theme.FONT_BODY)

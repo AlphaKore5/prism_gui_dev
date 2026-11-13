@@ -496,7 +496,7 @@ class QuotationDialog(PrismDialog):
         ask_col.addStretch(1)
         compare.addWidget(ask_card, stretch=1)
 
-        quote_card = C.Card(stripe=True)
+        quote_card = C.Card()
         quote_col = quote_card.body(margins=(16, 14, 16, 16),
                                     spacing=theme.SPACE_1)
         quote_head = QHBoxLayout()

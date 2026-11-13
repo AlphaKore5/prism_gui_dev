@@ -652,6 +652,10 @@ class Sidebar(QFrame):
         self._brand_widget = self._brand()
         root.addWidget(self._brand_widget)
         root.addSpacing(20)
+        # Gaps that give a little back when the window is too short for the whole
+        # rail, so the Settings row is never left half under the user chip. Only
+        # gaps below the add-on rows: the rows themselves keep the preview's y.
+        self._gaps = []
 
         # ── WORK ─────────────────────────────────────────────────────────────
         # One heading over the three things a run is made of: start it, see
@@ -771,8 +775,10 @@ class Sidebar(QFrame):
         # configuring surface, and the rule says "different kind of thing" for
         # nothing but a pixel.
         root.addSpacing(theme.SPACE_2)
+        self._gaps.append((root.itemAt(root.count() - 1), theme.SPACE_2, 0))
         root.addWidget(self._rule())
         root.addSpacing(theme.SPACE_1)
+        self._gaps.append((root.itemAt(root.count() - 1), theme.SPACE_1, 2))
         for key, label, icon_name, tip in MORE:
             btn = nav_button(i18n.t(label), icon_name, small=True,
                              tip=i18n.t(tip))
@@ -883,6 +889,7 @@ class Sidebar(QFrame):
         self._pip.setStyleSheet(f"background: {theme.BRAND_RED}; border-radius: 0px;")
         self._pip.hide()
         inner.installEventFilter(self)
+        scroll.viewport().installEventFilter(self)
 
         for widget in self._chain:
             widget.installEventFilter(self)
@@ -1376,8 +1383,23 @@ class Sidebar(QFrame):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
+        self._fit_gaps()
         self._fit_favorites()
         self._place_pip()
+
+    def _fit_gaps(self):
+        """Tight spacing only while the rail would not otherwise fit its window."""
+        gaps = getattr(self, "_gaps", None)
+        if not gaps:
+            return
+        loose = self._inner.sizeHint().height() + sum(
+            n - item.sizeHint().height() for item, n, _t in gaps)
+        tight = self._scroll.viewport().height() < loose
+        for item, n, t in gaps:
+            want = t if tight else n
+            if item.sizeHint().height() != want:
+                item.changeSize(0, want, QSizePolicy.Minimum, QSizePolicy.Fixed)
+        self._root_layout.invalidate()
 
     # ── keyboard ──────────────────────────────────────────────────────────
     def _focus_chain(self) -> list[QWidget]:
@@ -1385,6 +1407,9 @@ class Sidebar(QFrame):
                 if w is not None and w.isVisibleTo(self) and w.isEnabled()]
 
     def eventFilter(self, obj, event):
+        if obj is self._scroll.viewport() and event.type() == QEvent.Resize:
+            self._fit_gaps()
+            return False
         if obj is self._inner and event.type() in (
                 QEvent.LayoutRequest, QEvent.Resize):
             self._place_pip()

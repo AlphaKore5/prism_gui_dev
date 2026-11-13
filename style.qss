@@ -1882,6 +1882,23 @@ QTableView#registerTable QHeaderView::section:horizontal:hover {
     color: #6b6a65;
 }
 
+/* UI port stage 5: the working window's small buttons (Select, Save as Excel,
+   Reset ...) and the front page's row actions are the preview's
+   `.btn.light.plain.sm` pill, like the page header's. */
+#inquiryWorkspace QPushButton#smallBtn {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #ffffff, stop:1 #f8f7f4);
+    border: 1px solid #e4e3df;
+    border-radius: 17px;
+    padding: 0px 16px;
+    min-height: 31px;
+    font-size: 13px;
+    color: #111110;
+}
+#inquiryWorkspace QPushButton#smallBtn:hover {
+    background: #ffffff;
+    border-color: #d8d7d2;
+}
+
 /* Mailbox checks are an ongoing background action, not a warning. The global
    bar uses a deliberately chunky purple treatment for media work; this thin,
    monochrome sweep is quieter and reads cleanly at the top of a register. */
