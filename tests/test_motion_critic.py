@@ -111,5 +111,92 @@ class Frames(unittest.TestCase):
         self.assertGreater(len(frames[0][1]), 1000)
 
 
+def _d(scene, sev, what="no focus"):
+    return {"scene": scene, "type": what, "where": "centre", "severity": sev}
+
+
+class Repair(unittest.TestCase):
+    """A serious defect sends its scene back once; the fix is kept only if the film has fewer of them."""
+
+    def _run(self, looks):
+        scenes = [{"id": f"s{i}", "duration": 3, "v": 0} for i in range(3)]
+        asked, it = [], iter(looks)
+
+        def ask(prompt, expect=None):
+            asked.append(prompt)
+            return "fixed"
+
+        def parse(text):
+            return {"id": "?", "duration": 0, "v": 1} if text == "fixed" else None
+
+        def keep(old, new):
+            new["id"], new["duration"] = old["id"], old["duration"]
+
+        said = []
+        critic.repair(scenes, lambda rows: {"scenes": rows}, ask, parse, keep, said.append, lambda spec: next(it), '"nodes"')
+        return scenes, asked, said
+
+    def test_a_clean_film_is_left_alone(self):
+        scenes, asked, said = self._run([[_d(1, 1)]])
+        self.assertEqual(asked, [])
+        self.assertTrue(all(s["v"] == 0 for s in scenes))
+
+    def test_a_serious_defect_goes_back_with_its_words_and_a_real_fix_is_kept(self):
+        scenes, asked, said = self._run([[_d(2, 3, "text cut off")], []])
+        self.assertEqual(len(asked), 1)
+        self.assertIn("scene 2", asked[0]); self.assertIn("text cut off", asked[0])
+        self.assertEqual([s["v"] for s in scenes], [0, 1, 0])
+        self.assertEqual(scenes[1]["id"], "s1", "the id survives the rewrite")
+
+    def test_a_fix_that_leaves_as_many_defects_is_not_kept(self):
+        scenes, asked, said = self._run([[_d(2, 3)], [_d(2, 3)]])
+        self.assertEqual([s["v"] for s in scenes], [0, 0, 0])
+
+    def test_a_re_check_that_wipes_every_other_scene_too_is_not_believed(self):
+        # Logged 13 Nov 2026: one scene was rewritten and the critic's next reading of the film was "0 defects"
+        # (it had said 16 before and said 11 after). Fixing scene 1 cannot clear scenes 2-4.
+        before = [_d(1, 3), _d(2, 3), _d(2, 3), _d(3, 3), _d(3, 3)]
+        scenes, asked, said = self._run([before, []])
+        self.assertEqual([s["v"] for s in scenes], [0, 0, 0])
+        self.assertTrue(any("not steady" in m for m in said), said)
+
+    def test_when_the_critic_cannot_re_check_the_fix_is_not_assumed_good(self):
+        scenes, asked, said = self._run([[_d(2, 3)], None])
+        self.assertEqual([s["v"] for s in scenes], [0, 0, 0])
+
+    def test_when_the_critic_cannot_look_at_all_nothing_is_changed(self):
+        scenes, asked, said = self._run([None])
+        self.assertEqual(asked, [])
+
+    def test_at_most_three_scenes_go_back_worst_first(self):
+        scenes = [{"id": f"s{i}", "duration": 3, "v": 0} for i in range(5)]
+        looks = iter([[_d(1, 2), _d(2, 3), _d(3, 3), _d(4, 2), _d(5, 3)],
+                      [_d(1, 2), _d(3, 3), _d(4, 2), _d(5, 3)], [_d(1, 2), _d(4, 2), _d(5, 3)], [_d(1, 2), _d(4, 2)]])
+        asked = []
+        critic.repair(scenes, lambda rows: {"scenes": rows}, lambda p, e=None: asked.append(p) or "fixed",
+                      lambda t: {"id": "?", "duration": 0, "v": 1}, lambda o, n: n.update(id=o["id"], duration=o["duration"]),
+                      lambda m: None, lambda spec: next(looks), '"nodes"')
+        self.assertEqual(len(asked), 3)
+        self.assertTrue(all(("scene 2" in a or "scene 3" in a or "scene 5" in a) for a in asked), asked)
+
+
+class InTheBuilds(unittest.TestCase):
+    def test_both_builders_take_a_critic_and_call_it(self):
+        import json as _j
+        from core import reel_web as RW
+        from core.motion import generate as G
+        calls = []
+        first = _j.dumps({"project": {"width": 1080, "height": 1920, "fps": 30},
+                          "storyboard": [{"scene": i + 1, "seconds": 3, "job": "j", "caption": "", "subject": "s",
+                                          "look": "l", "motion": "m"} for i in range(2)]})
+        ask = lambda p, expect=None: "```json\n" + _j.dumps({"nodes": [{"id": "a", "type": "text", "content": "Hi"}]}) + "\n```"
+        G.build_spec(first, ask, check=lambda s: [], critic=lambda spec: calls.append("motion") or [], skeleton=None)
+        turn_one = '```json\n{"design": {"name": "n", "css": ""}, "storyboard": [{"scene": 1, "job": "a"}, {"scene": 2, "job": "b"}]}\n```'
+        script = _j.dumps({"scenes": [{"role": "hook", "seconds": 3, "headline": "A"}, {"role": "endcard", "seconds": 3, "headline": "B"}]})
+        scene = "```json\n" + _j.dumps({"seconds": 3, "cut": "cut", "css": "", "html": "<p>x</p>"}) + "\n```"
+        RW.build_spec(turn_one, lambda p, expect=None: scene, script=script, critic=lambda spec: calls.append("studio") or [])
+        self.assertEqual(calls, ["motion", "studio"])
+
+
 if __name__ == "__main__":
     unittest.main()
