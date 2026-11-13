@@ -943,7 +943,7 @@ class HomePanel(QWidget):
     def _prompt_card(self) -> QWidget:
         card = QFrame()
         card.setObjectName("heroPromptCard")
-        card.setMinimumHeight(220)
+        card.setMinimumHeight(205)          # preview: 13.6rem (200px) + the 5px lip
         col = QVBoxLayout(card)
         col.setContentsMargins(theme.SPACE_4, theme.SPACE_4,
                                theme.SPACE_4, theme.SPACE_3)

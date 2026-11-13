@@ -98,15 +98,17 @@ class TheCanvasHasTheStoneTexture(unittest.TestCase):
 
 
 class TheRailFitsAt1366x768(unittest.TestCase):
-    def test_every_addon_row_is_37px_and_clears_the_profile_chip(self):
+    def test_every_addon_row_is_37_or_38px_and_clears_the_profile_chip(self):
         rail = Sidebar()
         rail.resize(262, 768 - 24)
         rail.show()
         rows = rail.findChildren(AddonRow)
         self.assertGreaterEqual(len(rows), 8)
         for r in rows:
-            self.assertEqual(r.sizeHint().height(), 37)
-        self.assertEqual(rail.new_task_btn.sizeHint().height(), 43)
+            # stage 4b: 38 or 37 so tops follow the preview's 39.7px pitch
+            self.assertIn(r.sizeHint().height(), (37, 38))
+        # the 43px pill plus its 5px painted shadow
+        self.assertEqual(rail.new_task_btn.sizeHint().height(), 43 + 5)
 
 
 class HomeCarriesThePreviewsPieces(unittest.TestCase):

@@ -39,6 +39,7 @@ import workspace
 from addons import registry
 from widgets import icons
 from widgets.sidebar import Sidebar
+from widgets.controls import PrismStatusBar
 from widgets.home_panel import HomePanel
 from addons.inquiry.panel import InquiryPanel
 from addons.inquiry.dialog import InquiryDialog
@@ -342,10 +343,15 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Prism")
         self._fit_to_screen()
+        self.setStatusBar(PrismStatusBar())
         # The family line at the right of the status bar, as in the preview.
-        _by = QLabel(f"Prism {app_meta.VERSION}  ·  by AlphaKore")
+        _by = QLabel(f"Prism {app_meta.VERSION} · by AlphaKore")
         _by.setObjectName("statusBy")
         self.statusBar().addPermanentWidget(_by)
+        _ak = QLabel()
+        _ak.setPixmap(icons.ak_mark_pixmap(13, "#77766F"))
+        _ak.setContentsMargins(0, 0, 14, 0)
+        self.statusBar().addPermanentWidget(_ak)
 
         self.cfg = CB.config.load()
         try:

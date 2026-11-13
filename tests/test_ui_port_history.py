@@ -170,8 +170,9 @@ class HistoryScreenPieces(unittest.TestCase):
         self.panel._search.setText("")
 
     def test_header_card_is_about_86px_tall(self):
-        # the widget is the card (86) plus its 12px top and 4px bottom inset
-        self.assertIn(self.panel.header.height(), range(98, 104))
+        # stage 4b: the header widget is the card itself, flush with the page
+        # (preview .phead: 85.8px tall)
+        self.assertIn(self.panel.header.height(), range(85, 88))
 
     def test_clear_all_is_a_light_pill_with_red_text(self):
         btn = next(b for b in self.panel.header.findChildren(C.QPushButton)

@@ -243,6 +243,7 @@ QToolTip {
 }
 
 #addonsChevron, #helpChevron, #settingsChevron {
+    min-height: 0;
     background: transparent;
     border: none;
     border-radius: 4px;
@@ -254,6 +255,8 @@ QToolTip {
 }
 
 #railCollapseBtn {
+    min-height: 32px;
+    min-width: 32px;
     background: transparent;
     border: 1px solid transparent;
     border-radius: 6px;
@@ -270,13 +273,14 @@ QToolTip {
 }
 
 #sidebar[collapsed="true"] #navItem,
-#sidebar[collapsed="true"] #navSub,
-#sidebar[collapsed="true"] #railPrimary {
+#sidebar[collapsed="true"] #navSub {
     text-align: center;
     padding: 4px 0px;
     font-weight: 500;
     font-size: 15px;
 }
+
+#sidebar[collapsed="true"] #railPrimary { min-height: 38px; }
 
 #sidebar[collapsed="true"] #navItem[cur="true"],
 #sidebar[collapsed="true"] #navSub[cur="true"] {
@@ -293,7 +297,7 @@ QToolTip {
 
 #brand {
     font-family: "Geist";
-    font-size: 21px;
+    font-size: 19px;
     font-weight: 500;
     color: #111110;
 }
@@ -303,8 +307,8 @@ QToolTip {
     background: transparent;
     border: 1px solid transparent;
     border-radius: 12px;
-    min-height: 21px;
-    padding: 7px 12px;
+    min-height: 0;
+    padding: 0 12px;
     font-family: "Geist";
     font-size: 14px;
     font-weight: 400;
@@ -324,6 +328,12 @@ QToolTip {
     border-color: rgba(0, 0, 0, 0.35);
 }
 
+/* Row heights are 38 or 37px (see widgets/sidebar.py row_height); a QSS
+   min-height is the only minimum the stylesheet will not overwrite. */
+#navItem[rowh="38"], #navSub[rowh="38"] { min-height: 36px; }
+#navItem[rowh="37"], #navSub[rowh="37"] { min-height: 35px; }
+#sidebar[collapsed="true"] #navItem, #sidebar[collapsed="true"] #navSub { min-height: 36px; }
+
 #navItem[cur="true"] {
     background: #EEEDEA;
     border: 1px solid rgba(20, 20, 18, 0.06);
@@ -336,8 +346,8 @@ QToolTip {
     background: transparent;
     border: 1px solid transparent;
     border-radius: 12px;
-    min-height: 21px;
-    padding: 7px 12px;
+    min-height: 0;
+    padding: 0 12px;
     font-family: "Geist";
     font-size: 14px;
     font-weight: 400;
@@ -369,14 +379,14 @@ QToolTip {
     color: rgba(0, 0, 0, 0.25);
 }
 
+/* Tracking (0.77px) is painted by the label itself: QSS cannot track. */
 #navSection {
     font-family: "Geist Mono";
     font-size: 11px;
     font-weight: 400;
     color: #6B6A65;
-    padding: 3px 4px;
+    padding: 0;
     background: transparent;
-    letter-spacing: 0.6px;
 }
 
 #railRule {
@@ -392,27 +402,12 @@ QToolTip {
     background: transparent;
 }
 
-/* The New-task button */
+/* The New-task button paints itself (widgets/sidebar.py _RailPrimary). */
 #railPrimary {
-    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #3a3a38, stop:1 #0c0c0b);
-    border: 1px solid #0c0c0b;
-    border-radius: 21px;
-    color: #ffffff;
-    font-family: "Geist";
-    font-weight: 500;
-    font-size: 15px;
-    min-height: 25px;
-    padding: 8px 12px;
-    text-align: center;
-}
-
-#railPrimary:hover { background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #4a4a48, stop:1 #1c1c1b); }
-#railPrimary:pressed { background: #0c0c0b; }
-#railPrimary:focus { border-color: #111110; }
-#railPrimary:disabled {
-    background: #F6F5F2;
-    border-color: #D8D7D2;
-    color: #a1a1aa;
+    min-height: 48px;
+    padding: 0;
+    border: none;
+    background: transparent;
 }
 
 /* The profile row */
@@ -428,7 +423,7 @@ QToolTip {
 #railProfile:hover { background: #F6F5F2; }
 
 #railProfileName {
-    font-size: 15px;
+    font-size: 14px;
     font-weight: 500;
     color: #111110;
     background: transparent;
@@ -940,9 +935,9 @@ QPushButton:disabled, #secondaryBtn:disabled {
    2px border at rest in the border grey, so the accent focus ring can replace
    the colour without changing the box. */
 QTextEdit, QLineEdit, QComboBox, QListWidget, QPlainTextEdit {
-    background: #ffffff;
+    background: #F6F5F2;
     border: 1px solid #D8D7D2;
-    border-radius: 8px;
+    border-radius: 10px;
     padding: 6px 11px;
     color: #111110;
     selection-background-color: #111110;
@@ -954,7 +949,16 @@ QTextEdit:hover, QLineEdit:hover, QComboBox:hover {
 }
 
 QTextEdit:focus, QLineEdit:focus, QComboBox:focus, QPlainTextEdit:focus {
+    background: #ffffff;
     border-color: #111110;
+}
+
+/* One-line fields, as the preview's .field2: 36px, 14px text, 12px side padding. */
+QLineEdit, QComboBox {
+    padding: 0 12px;
+    min-height: 34px;
+    font-size: 14px;
+    placeholder-text-color: #A9A8A3;
 }
 
 QTextEdit:disabled, QLineEdit:disabled, QComboBox:disabled,
@@ -996,9 +1000,9 @@ QListWidget:focus {
    Capsule rather than rounded-rect: a search box is the one input that reads
    faster as a pill, and it is always the first thing in a toolbar. */
 #searchField {
-    border-radius: 16px;
-    padding: 6px 14px;
-    background: #ffffff;
+    border-radius: 10px;
+    padding: 0 14px;
+    background: #F6F5F2;
     border: 1px solid #D8D7D2;
     color: #111110;
 }
@@ -2203,7 +2207,7 @@ QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
     font-size: 11px;
     color: #77766F;
     background: transparent;
-    padding-right: 10px;
+    padding-right: 2px;
 }
 
 /* ── BOQ "check the count" cards (addons/boq/measured.py) ────────────────── */
@@ -2431,3 +2435,39 @@ QCheckBox::indicator:checked { border: 1.5px solid #111110; }
 
 #settingsDialog QScrollBar::handle:vertical { background: #d8d7d2; }
 #settingsDialog QLineEdit { lineedit-password-character: 8226; }
+
+
+/* ── light pill buttons, as the preview's .btn.light.sm (13px, 33px, ring) ──
+   The primary is DarkPill (widgets/controls.py), which paints itself. */
+#secondaryBtn, #smallBtn, #dangerBtn, #destructiveBtn {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #ffffff, stop:1 #f8f7f4);
+    border: 1px solid rgba(20, 20, 18, 0.10);
+    border-radius: 17px;
+    padding: 0 16px;
+    min-height: 31px;
+    font-family: "Geist";
+    font-size: 13px;
+    font-weight: 500;
+    color: #111110;
+}
+
+#dangerBtn, #destructiveBtn { color: #a3141a; }
+
+#secondaryBtn:hover, #smallBtn:hover, #dangerBtn:hover, #destructiveBtn:hover {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #ffffff, stop:1 #f8f7f4);
+    border-color: rgba(20, 20, 18, 0.22);
+}
+
+#secondaryBtn:pressed, #smallBtn:pressed, #dangerBtn:pressed, #destructiveBtn:pressed {
+    background: #efeeea;
+    border-color: rgba(20, 20, 18, 0.22);
+    color: #111110;
+}
+
+#dangerBtn:pressed, #destructiveBtn:pressed { color: #a3141a; }
+
+#secondaryBtn:disabled, #smallBtn:disabled, #dangerBtn:disabled, #destructiveBtn:disabled {
+    background: #fbfbf9;
+    border-color: rgba(20, 20, 18, 0.05);
+    color: rgba(17, 17, 16, 0.40);
+}
