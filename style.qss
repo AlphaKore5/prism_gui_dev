@@ -2345,3 +2345,89 @@ QCheckBox::indicator:checked { border: 1.5px solid #111110; }
     background: #ffffff;
     border-color: #d8d7d2;
 }
+
+/* ── UI port stage 4: Settings ───────────────────────────────────────────
+   Values are the preview's computed styles at 1366px (1rem = 14.7px). The
+   dialog is one white shell holding a soft section list and the page. */
+#settingsDialog #closeBtn {
+    background: transparent;
+    border: 1px solid #d8d7d2;
+    border-radius: 10px;
+    padding: 0;
+    min-width: 36px; max-width: 36px; min-height: 36px; max-height: 36px;
+}
+#settingsDialog #closeBtn:hover { background: #efeeea; }
+
+#settingsDialog #secBtn {
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 12px;
+    padding: 0 10px;
+    min-height: 32px;
+    font-size: 13.5px;
+    font-weight: 400;
+    color: #2a2a28;
+}
+#settingsDialog #secBtn:hover { background: #ffffff; }
+#settingsDialog #secBtn[cur="true"] {
+    background: #ffffff;
+    border: 1px solid #e6e5e1;
+    color: #111110;
+    font-weight: 500;
+}
+#settingsDialog #secBtn:focus { border-color: #d8d7d2; }
+#settingsDialog #settingsNav #kickMuted { background: transparent; font-weight: 400; }
+#settingsDialog #settingsNav #searchField {
+    background: #ffffff;
+    border: 1px solid #d8d7d2;
+    border-radius: 10px;
+    padding: 3px 8px;
+    font-size: 13.5px;
+    min-height: 24px;
+}
+#settingsDialog #settingsNav #searchField:focus { border: 1.5px solid #111110; }
+#settingsDialog #settingsNav QPushButton#smallBtn { padding: 5px 16px; }
+
+#settingsPage #sectionTitle { font-size: 21px; font-weight: 400; }
+#settingsPage #sectionSubtitle {
+    font-size: 13px;
+    font-weight: 400;
+    color: #6b6a65;
+}
+
+/* inputs: soft field, ring, ink focus (preview .field2 / .sel) */
+#settingsDialog QLineEdit, #settingsDialog QComboBox {
+    background: #f6f5f2;
+    border: 1px solid #d8d7d2;
+    border-radius: 10px;
+    padding: 6px 12px;
+    min-height: 22px;
+    font-size: 14px;
+    font-weight: 400;
+    color: #111110;
+    placeholder-text-color: #a9a8a3;
+}
+#settingsDialog QComboBox { font-weight: 500; padding-right: 32px; }
+#settingsDialog QLineEdit:hover, #settingsDialog QComboBox:hover { background: #f6f5f2; border-color: #cbcac4; }
+#settingsDialog QLineEdit:focus, #settingsDialog QComboBox:focus { background: #ffffff; border: 1.5px solid #111110; }
+#settingsDialog QLineEdit:disabled, #settingsDialog QComboBox:disabled { background: #f6f5f2; border-color: #e6e5e1; color: #a9a8a3; }
+
+/* buttons: the preview's light gradient pill with a ring */
+#settingsDialog QPushButton#secondaryBtn, #settingsDialog QPushButton#smallBtn,
+#settingsDialog QPushButton#dangerBtn {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #ffffff, stop:1 #f8f7f4);
+    border: 1px solid #e4e3df;
+    border-radius: 17px;
+    padding: 5px 16px;
+    font-size: 13px;
+    color: #111110;
+}
+#settingsDialog QPushButton#secondaryBtn:hover, #settingsDialog QPushButton#smallBtn:hover,
+#settingsDialog QPushButton#dangerBtn:hover { background: #ffffff; border-color: #d8d7d2; }
+#settingsDialog QPushButton#dangerBtn { color: #a3141a; }
+#settingsDialog QPushButton#secondaryBtn:disabled, #settingsDialog QPushButton#smallBtn:disabled,
+#settingsDialog QPushButton#dangerBtn:disabled { color: #a9a8a3; background: #f6f5f2; border-color: #e6e5e1; }
+#settingsDialog QPushButton#primaryBtn { font-size: 13px; padding: 4px 16px 4px 6px; border-radius: 18px; }
+
+#settingsDialog QScrollBar::handle:vertical { background: #d8d7d2; }
+#settingsDialog QLineEdit { lineedit-password-character: 8226; }

@@ -493,6 +493,11 @@ class Pill(QLabel):
         "quiet": (theme.NEUTRAL[100], theme.NEUTRAL[700]),
         # The mono add-on tag on a History row: ink on the soft stone fill.
         "tag": ("#EFEEEA", theme.INK),
+        # The preview's `.st`: mono caps with a square before the word.
+        "st_ok": (theme.BRAND_OK_BG, theme.BRAND_OK),
+        "st_err": (theme.BRAND_ERR_BG, theme.BRAND_ERR),
+        "st_warn": ("#F6EDD6", "#7A5A0E"),
+        "st_neutral": ("#EFEEEA", "#2A2A28"),
     }
 
     @classmethod
@@ -519,8 +524,25 @@ class Pill(QLabel):
     def set_tone(self, tone: str):
         tones = self._tones()
         bg, ink = tones.get(tone, tones["neutral"])
+        self._tone_name = tone if tone in tones else "neutral"
         family, px, weight, _ink = theme.T_LABEL
+        self._mark = tone.startswith("st_")
+        if self._mark:
+            # Caps come from the font, so text() keeps the words it was given.
+            font = self.font()
+            font.setCapitalization(QFont.AllUppercase)
+            self.setFont(font)
+            track(self, 0.07)
+            self.setStyleSheet(
+                f"background: {bg}; color: {ink}; border-radius: 7px;"
+                f" font-family: {theme.FONT_MONO_STACK}; font-size: 11px;"
+                f" font-weight: 500; padding: 6px 9px 6px 21px;")
+            self.update()
+            return
         if tone == "tag":
+            font = self.font()
+            font.setCapitalization(QFont.AllUppercase)
+            self.setFont(font)
             track(self, 0.06)
             self.setStyleSheet(
                 f"background: {bg}; color: {ink}; border-radius: 6px;"
@@ -531,6 +553,14 @@ class Pill(QLabel):
             f"background: {bg}; color: {ink}; border-radius: {theme.R_PILL}px;"
             f" font-size: {px}px; font-weight: {weight};"
             f" padding: 3px {theme.SPACE_3 - 1}px;")
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        if getattr(self, "_mark", False):
+            p = QPainter(self)
+            p.fillRect(9, (self.height() - 6) // 2, 6, 6,
+                       QColor(self._tones()[self._tone_name][1]))
+            p.end()
 
 
 class ToolBadge(QLabel):
