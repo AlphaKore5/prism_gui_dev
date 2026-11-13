@@ -151,6 +151,20 @@ something you did not run.
 
 ## Issue log (newest first)
 
+### ISS-023 — A "pull latest" rebase rewrote commits that were already published (2026-11-13) — CAUGHT before pushing
+- **Found by:** checking `merge-base --is-ancestor <remote branch> HEAD` before pushing the engine for a PR.
+- **What went wrong:** asked to pull, I ran `git rebase --autostash origin/main` on the engine branch. Its first nine commits
+  were already on `origin/fix/motion-text-anchor-and-render` (the branch behind an open PR), so the rebase gave them new hashes
+  and the branch no longer fast-forwarded the remote. Pushing would have needed a force-push, and the GUI repo's engine
+  pointers named the old hashes.
+- **Fix:** kept the rebased result on `local/rebased-onto-main-2026-11-13`, went back to the published lineage
+  (`backup/pre-pull-2026-11-13`), committed on top of it, and pushed as a fast-forward. The one new upstream commit is not in
+  the branch; it changes the same `openrouter_chat` signature and will need a one-line merge by whoever lands it.
+- **Check:** before any rebase of a branch that has a PR, `git merge-base --is-ancestor <remote branch> HEAD` must say YES
+  afterwards; if the remote branch is already pushed, do not rebase it, put the new work on top.
+- **Lesson:** "rebase, never merge" is for unpublished work. I applied it to published commits because I did not look at what
+  was published first.
+
 ### ISS-022 — Review found Uninstall could delete a person's own folder (2026-10-28) — FIXED before tagging 1.6.13
 - **Found by:** the two-axis code review (standards + spec) run on today's diffs, before the dev tag.
 - **What was wrong, all confirmed in the code:** "everything" removed any folder named "Prism..." that the person had
