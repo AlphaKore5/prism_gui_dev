@@ -380,7 +380,16 @@ class MarkdownToXlsxBuildsALiveWorkbookWhenTheModelProvidesOne(unittest.TestCase
     def test_an_undeclared_input_name_falls_back_to_plain_text_not_a_broken_formula(self):
         """A `{name}` the INPUTS table never declared must never become a
         formula Excel would show as #NAME? with no explanation -- it stays
-        the model's own raw text, visible and honest about not being live."""
+        the model's own raw text, visible and honest about not being live.
+
+        item 72 (12 Nov 2026): this test's own ORIGINAL assertions only
+        ever checked `.value` (the same string whether the cell is a
+        formula or plain text) -- they never caught that openpyxl was
+        STILL writing this as a real `<f>` formula underneath, unresolved
+        "{made_up_name}" token and all, which is exactly what made a real
+        file need "repair" in Excel. A leading space now keeps the cell
+        out of formula territory; `.value` keeps the content, `.data_type`
+        is what actually proves it's text."""
         import openpyxl
         text = _LIVE_SAMPLE.replace(
             "={frame_length_ft}*0.3048*2", "={made_up_name}*2")
@@ -388,10 +397,12 @@ class MarkdownToXlsxBuildsALiveWorkbookWhenTheModelProvidesOne(unittest.TestCase
             path = os.path.join(d, "out.xlsx")
             W.markdown_to_xlsx(text, path)
             ws = openpyxl.load_workbook(path)["BOQ"]
-            values = [c.value for row in ws.iter_rows() for c in row]
-            self.assertIn("={made_up_name}*2", values)
-            self.assertFalse(any(isinstance(v, str) and v.startswith("=Inputs!")
-                                 and "made_up" in v for v in values))
+            cells = [c for row in ws.iter_rows() for c in row]
+            match = [c for c in cells if isinstance(c.value, str)
+                    and "made_up_name" in c.value]
+            self.assertEqual(len(match), 1)
+            self.assertEqual(match[0].value, " ={made_up_name}*2")
+            self.assertNotEqual(match[0].data_type, "f")
 
     def test_a_bare_token_with_no_equals_sign_still_becomes_a_real_formula(self):
         """item 61 (4 Nov 2026), found live: a real run's Hardware section
@@ -412,6 +423,48 @@ class MarkdownToXlsxBuildsALiveWorkbookWhenTheModelProvidesOne(unittest.TestCase
             values = [c.value for row in ws.iter_rows() for c in row]
             self.assertIn("=Inputs!$B$2", values)
             self.assertNotIn("{frame_length_ft}", values)
+
+    def test_an_inputs_value_formula_referencing_an_earlier_row_becomes_real(self):
+        """item 72 (12 Nov 2026), found live: a real run wrote an Inputs
+        row's own Value as "={frame_length_ft}*2" -- a derived input
+        computed from an earlier, more basic one. name_to_cell is built
+        top-down as the Inputs sheet is written, so an earlier row is
+        already resolvable by the time a later one names it."""
+        import openpyxl
+        text = _LIVE_SAMPLE.replace(
+            "| wastage_mm | 100 | mm | client instruction |",
+            "| wastage_mm | 100 | mm | client instruction |\n"
+            "| derived_double_length | ={frame_length_ft}*2 | ft | computed |")
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "out.xlsx")
+            W.markdown_to_xlsx(text, path)
+            ws = openpyxl.load_workbook(path)["Inputs"]
+            self.assertEqual(ws["B4"].value, "=Inputs!$B$2*2")
+
+    def test_an_inputs_value_formula_with_an_unresolved_name_never_becomes_a_broken_formula(self):
+        """The real bug this item fixes: before this, ANY string starting
+        with '=' assigned to a cell became a real Excel <f> formula
+        whether or not its {name} tokens ever got substituted --
+        openpyxl's own behaviour, not this module's choice. A formula
+        naming something not yet declared (a forward reference, or a
+        typo) must fall back to plain text, the same safe rule the BOQ
+        sheet already had, never leaving a literal "{...}" inside a
+        saved <f> element for Excel's own stricter parser to reject."""
+        import openpyxl
+        text = _LIVE_SAMPLE.replace(
+            "| wastage_mm | 100 | mm | client instruction |",
+            "| wastage_mm | 100 | mm | client instruction |\n"
+            "| derived_bad | ={not_declared_anywhere}*2 | ft | computed |")
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "out.xlsx")
+            W.markdown_to_xlsx(text, path)
+            ws = openpyxl.load_workbook(path)["Inputs"]
+            self.assertEqual(ws["B4"].value, " ={not_declared_anywhere}*2")
+            # The real regression: this cell must be a plain string, not
+            # a formula -- a formula cell with unresolved {name} tokens
+            # in it is exactly what made Excel's own stricter parser
+            # reject the real file and offer to "repair" it.
+            self.assertNotEqual(ws["B4"].data_type, "f")
 
     def test_the_summary_sheet_sums_the_boq_sections_own_amount_column(self):
         import openpyxl
@@ -576,7 +629,40 @@ class WriteCallsOpenrouterWithTheRightModel(unittest.TestCase):
         self.assertEqual(out, "the answer")
         chat.assert_called_once_with(
             "sk-or-x", boq_agents.PRISM_AGENT_MODELS["Prism Agent Deep"], "a prompt",
-            attachments=None)
+            attachments=None, usage_out=mock.ANY, extra=W.WRITE_EXTRA)
+
+    def test_a_cut_off_answer_is_refused_not_saved_as_a_boq(self):
+        """item 81, 13 Nov 2026: a real run used 65,536 output tokens and
+        the BOQ stopped mid-row in the return-duct table -- saved and
+        opened as if finished."""
+        def chat(*a, usage_out=None, **k):
+            usage_out.update({"finish_reason": "length", "answer_from_reasoning": False})
+            return "| RET-11 | 27 | ={duct_h_in} | 0.61 | 1 | ={perim_factor"
+        with mock.patch.object(W.CB.openrouter, "openrouter_chat", side_effect=chat):
+            with self.assertRaises(RuntimeError) as cm:
+                W.write("Prism Agent Claude", "a prompt", "sk-or-x")
+        self.assertIn("stops part-way", str(cm.exception))
+
+    def test_working_notes_in_place_of_an_answer_are_refused(self):
+        """item 81, 5 Nov 2026: "Prism Agent Deep" twice wrote 53,000 rows
+        of its own reasoning into the BOQ sheet."""
+        def chat(*a, usage_out=None, **k):
+            usage_out.update({"finish_reason": "length", "answer_from_reasoning": True})
+            return "The user wants a BOQ document. Let me go. OK."
+        with mock.patch.object(W.CB.openrouter, "openrouter_chat", side_effect=chat):
+            with self.assertRaises(RuntimeError) as cm:
+                W.write("Prism Agent Deep", "a prompt", "sk-or-x")
+        self.assertIn("working notes", str(cm.exception))
+
+    def test_a_whole_answer_still_comes_back_and_fills_the_callers_usage(self):
+        usage = {}
+        def chat(*a, usage_out=None, **k):
+            usage_out.update({"total_tokens": 9, "finish_reason": "stop",
+                              "answer_from_reasoning": False})
+            return "the BOQ"
+        with mock.patch.object(W.CB.openrouter, "openrouter_chat", side_effect=chat):
+            self.assertEqual(W.write("Prism Agent Claude", "p", "sk-or-x", usage_out=usage), "the BOQ")
+        self.assertEqual(usage["total_tokens"], 9)
 
     def test_write_passes_the_followup_model_when_asked(self):
         with mock.patch.object(W.CB.openrouter, "openrouter_chat",
@@ -584,7 +670,7 @@ class WriteCallsOpenrouterWithTheRightModel(unittest.TestCase):
             W.write("Prism Agent Deep", "a prompt", "sk-or-x", followup=True)
         chat.assert_called_once_with(
             "sk-or-x", boq_agents.PRISM_AGENT_FOLLOWUP_MODELS["Prism Agent Deep"], "a prompt",
-            attachments=None)
+            attachments=None, usage_out=mock.ANY, extra=W.WRITE_EXTRA)
 
 
 class HasVisionAndAttachmentGating(unittest.TestCase):
@@ -609,7 +695,7 @@ class HasVisionAndAttachmentGating(unittest.TestCase):
             W.write("Prism Agent Claude", "check it", "sk-or-x", attachments=att)
         chat.assert_called_once_with(
             "sk-or-x", boq_agents.PRISM_AGENT_MODELS["Prism Agent Claude"], "check it",
-            attachments=att)
+            attachments=att, usage_out=mock.ANY, extra=W.WRITE_EXTRA)
 
     def test_an_attachment_also_reaches_openrouter_for_deep_now(self):
         """item 38: Deep used to be the no-vision example here -- now
@@ -621,7 +707,7 @@ class HasVisionAndAttachmentGating(unittest.TestCase):
             W.write("Prism Agent Deep", "check it", "sk-or-x", attachments=att)
         chat.assert_called_once_with(
             "sk-or-x", boq_agents.PRISM_AGENT_MODELS["Prism Agent Deep"], "check it",
-            attachments=att)
+            attachments=att, usage_out=mock.ANY, extra=W.WRITE_EXTRA)
 
     def test_an_attachment_is_dropped_for_an_agent_with_no_vision(self):
         """Not an error -- the text-only question still gets answered,
@@ -638,7 +724,7 @@ class HasVisionAndAttachmentGating(unittest.TestCase):
         self.assertEqual(out, "ok")
         chat.assert_called_once_with(
             "sk-or-x", boq_agents.PRISM_AGENT_MODELS["Prism Agent Deep"], "check it",
-            attachments=None)
+            attachments=None, usage_out=mock.ANY, extra=W.WRITE_EXTRA)
 
 
 class WriteFileDispatchesByFormat(unittest.TestCase):
@@ -654,6 +740,120 @@ class WriteFileDispatchesByFormat(unittest.TestCase):
             path = os.path.join(d, "out.csv")
             W.write_file(_SAMPLE, "CSV", path)   # case-insensitive
             self.assertTrue(os.path.exists(path))
+
+
+class ColumnGroupAndMappingMatchRealHeaderVariants(unittest.TestCase):
+    """The exact header wordings seen in this add-on's own real client
+    files (an ELV client's and approved CCTV_ELV_BOQ samples),
+    not invented ones."""
+    def test_sr_no_and_no_are_the_same_group(self):
+        self.assertEqual(W._column_group("Sr No"), W._column_group("No"))
+
+    def test_item_description_and_description_are_the_same_group(self):
+        self.assertEqual(W._column_group("Item Description"),
+                         W._column_group("Description"))
+
+    def test_rate_inr_and_rate_are_the_same_group(self):
+        self.assertEqual(W._column_group("Rate\n(INR)"), W._column_group("Rate"))
+
+    def test_a_letterhead_cell_matches_no_group(self):
+        self.assertIsNone(W._column_group("To"))
+
+    def test_map_columns_skips_a_template_column_with_no_match(self):
+        mapping = W._map_columns(["Sr No", "Item Description", "Basis"],
+                                 ["Sr.", "Description", "Qty"])
+        self.assertEqual(mapping, {0: 0, 1: 1})   # "Basis" stays unmapped
+
+
+def _template_docx(path: str) -> None:
+    """A small stand-in for a client's own approved BOQ: one real
+    line-item table with stale data (to prove it gets REPLACED, not
+    appended to) and one letterhead-style table (to prove it is left
+    alone -- it has nothing a BOQ line item could ever map onto)."""
+    import docx
+    doc = docx.Document()
+    doc.add_paragraph("CLIENT NAME (letterhead)")
+    info = doc.add_table(rows=1, cols=2)
+    info.rows[0].cells[0].text = "To"
+    info.rows[0].cells[1].text = "Client name"
+    items = doc.add_table(rows=2, cols=6)
+    for c, h in enumerate(["Sr No", "Item Description", "Qty", "Unit",
+                          "Rate (INR)", "Amount (INR)"]):
+        items.rows[0].cells[c].text = h
+    for c, v in enumerate(["1", "STALE old line item", "99", "Nos", "1", "99"]):
+        items.rows[1].cells[c].text = v
+    doc.save(path)
+
+
+_DRAFTED_MATCHING = """# BILL OF QUANTITIES
+
+## CCTV Component
+
+| Sr. | Description | Qty | Unit | Rate (INR) | Amount (INR) |
+| --- | --- | --- | --- | --- | --- |
+| C1 | IR Dome Camera, 5MP | 48 | Nos |  |  |
+| C2 | PTZ Camera, 20x zoom | 2 | Nos |  |  |
+
+## Access Control
+
+| No | Note |
+| --- | --- |
+| E1 | Not covered by the template at all |
+"""
+
+
+class FillTemplateDocxKeepsTheClientsOwnFileAndFillsItInPlace(unittest.TestCase):
+    def test_the_matching_table_is_replaced_not_appended_to(self):
+        with tempfile.TemporaryDirectory() as d:
+            template = os.path.join(d, "template.docx")
+            out = os.path.join(d, "out.docx")
+            _template_docx(template)
+            report = W.fill_template_docx(_DRAFTED_MATCHING, template, out)
+            self.assertEqual(report["matched"], 1)
+            import docx
+            doc = docx.Document(out)
+            rows = [[c.text for c in r.cells] for r in doc.tables[1].rows]
+            self.assertEqual(rows[0], ["Sr No", "Item Description", "Qty",
+                                       "Unit", "Rate (INR)", "Amount (INR)"])
+            self.assertEqual(rows[1][:4], ["C1", "IR Dome Camera, 5MP", "48", "Nos"])
+            self.assertEqual(rows[2][:4], ["C2", "PTZ Camera, 20x zoom", "2", "Nos"])
+            self.assertEqual(len(rows), 3)   # header + 2 -- the stale row is gone
+
+    def test_the_letterhead_table_is_left_completely_untouched(self):
+        with tempfile.TemporaryDirectory() as d:
+            template = os.path.join(d, "template.docx")
+            out = os.path.join(d, "out.docx")
+            _template_docx(template)
+            W.fill_template_docx(_DRAFTED_MATCHING, template, out)
+            import docx
+            doc = docx.Document(out)
+            rows = [[c.text for c in r.cells] for r in doc.tables[0].rows]
+            self.assertEqual(rows, [["To", "Client name"]])
+
+    def test_a_drafted_section_with_nowhere_to_go_is_appended_not_dropped(self):
+        with tempfile.TemporaryDirectory() as d:
+            template = os.path.join(d, "template.docx")
+            out = os.path.join(d, "out.docx")
+            _template_docx(template)
+            report = W.fill_template_docx(_DRAFTED_MATCHING, template, out)
+            self.assertEqual(report["unmatched_drafted"], ["Access Control"])
+            import docx
+            doc = docx.Document(out)
+            texts = " ".join(p.text for p in doc.paragraphs)
+            self.assertIn("NOT IN THE TEMPLATE", texts)
+            self.assertIn("Access Control", texts)
+            last_table_rows = [[c.text for c in r.cells] for r in doc.tables[-1].rows]
+            self.assertEqual(last_table_rows[1][:2], ["E1", "Not covered by the template at all"])
+
+    def test_a_template_with_no_matching_section_at_all_is_reported(self):
+        with tempfile.TemporaryDirectory() as d:
+            template = os.path.join(d, "template.docx")
+            out = os.path.join(d, "out.docx")
+            _template_docx(template)
+            report = W.fill_template_docx("# Empty\n\nNo tables here at all.",
+                                          template, out)
+            self.assertEqual(report["matched"], 0)
+            self.assertEqual(report["unmatched_template"], 1)   # the items table
 
 
 if __name__ == "__main__":

@@ -13,7 +13,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import core_bridge as CB  # noqa: E402
 
 from addons.step.workers import (StepApplyWorker, StepAskWorker,  # noqa: E402
-                                 StepPlanWorker, image_attachment)
+                                 StepCatalogExplainWorker, StepPlanWorker,
+                                 image_attachment)
 
 
 class AskAndPlanCallOpenRouterNeverGroq(unittest.TestCase):
@@ -84,6 +85,45 @@ class AskAndPlanCallOpenRouterNeverGroq(unittest.TestCase):
                                   side_effect=RuntimeError("no key set")):
             failed = []
             worker = StepAskWorker({}, {"file": "a.step"}, "q?")
+            worker.failed.connect(failed.append)
+            worker.run()
+        self.assertEqual(failed, ["no key set"])
+
+
+class CatalogExplainCallsOpenRouterWithNumbersOnly(unittest.TestCase):
+    """The near-miss explainer -- one plain OpenRouter call with whatever
+    prompt core.stepfile.catalog_explain_prompt built. This worker never
+    touches the catalog file or the STEP file itself; it only forwards
+    the prompt string it was handed."""
+
+    def test_calls_openrouter_with_the_given_prompt_and_model(self):
+        with mock.patch.object(CB.openrouter, "openrouter_chat",
+                              return_value=" explanation ") as chat:
+            worker = StepCatalogExplainWorker(
+                {"openrouter_api_key": "sk-or-test"}, "PROMPT",
+                model="anthropic/claude-sonnet-5.5")
+            done = []
+            worker.done.connect(done.append)
+            worker.run()
+        chat.assert_called_once()
+        args, kwargs = chat.call_args
+        self.assertEqual(args[0], "sk-or-test")
+        self.assertEqual(args[1], "anthropic/claude-sonnet-5.5")
+        self.assertEqual(args[2], "PROMPT")
+        self.assertEqual(done, ["explanation"])
+
+    def test_defaults_to_haiku(self):
+        with mock.patch.object(CB.openrouter, "openrouter_chat",
+                              return_value="a") as chat:
+            StepCatalogExplainWorker({"openrouter_api_key": "k"},
+                                     "PROMPT").run()
+        self.assertEqual(chat.call_args[0][1], "anthropic/claude-haiku-5.5")
+
+    def test_a_failed_call_reports_the_real_error_not_a_crash(self):
+        with mock.patch.object(CB.openrouter, "openrouter_chat",
+                              side_effect=RuntimeError("no key set")):
+            failed = []
+            worker = StepCatalogExplainWorker({}, "PROMPT")
             worker.failed.connect(failed.append)
             worker.run()
         self.assertEqual(failed, ["no key set"])

@@ -408,6 +408,11 @@ def _folded(values) -> frozenset:
     return frozenset(v for v in (_fold(x) for x in values or ()) if v)
 
 
+# Public names for what companies.py shares: Apollo's "is any of" / "is none of".
+folded = _folded
+names_pass = _names_pass
+
+
 def _facts(person: Person):
     """What is known about the person's company, in match_company's shape —
     from their Account CSV import record, else their own row. None when

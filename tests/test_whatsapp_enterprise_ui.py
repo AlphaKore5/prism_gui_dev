@@ -405,6 +405,61 @@ def test_connecting_beside_the_phone_app_asks_for_that_kind_of_link(served, call
     assert last(calls, "onboarding/link") == {}
 
 
+def test_the_connect_with_a_token_button_sends_the_ids_and_the_token_and_lists_the_number(served, calls, monkeypatch):
+    from addons.whatsapp import settings
+    s = settings.ConnectionSection()
+    answers = iter([{"phone_number_id": "222", "waba_id": "111", "access_token": "EAAsecret", "coexistence": True}, None])
+    monkeypatch.setattr(s, "_ask_for_token", lambda: next(answers))
+    assert "Connect with an access token" in buttons(s)
+    s.attach_btn.click()                                                      # the real button, not the method behind it
+    assert last(calls, "onboarding/attach") == {"phone_number_id": "222", "waba_id": "111", "access_token": "EAAsecret", "coexistence": True}
+    assert "Connected" in s.numbers_note.text() and all(b.isEnabled() for b in (s.connect_btn, s.connect_co_btn, s.attach_btn))
+    assert any(c[0] == "numbers/list" for c in calls[calls.index(next(c for c in calls if c[0] == "onboarding/attach")):])
+    before = len(calls)
+    s.attach_btn.click()                                                      # cancelled: nothing is sent
+    assert len(calls) == before
+
+
+def test_the_real_window_path_returns_the_boxes_when_accepted_and_nothing_when_cancelled(served, monkeypatch):
+    # The other tests replace _ask_for_token; this one runs it, with only the blocking exec() answered for the person.
+    from PySide6.QtWidgets import QDialog
+    from addons.whatsapp import attach_dialog, settings
+    s = settings.ConnectionSection()
+
+    def filled_and_accepted(self):
+        self.number_edit.setText("222")
+        self.waba_edit.setText("111")
+        self.token_edit.setText("EAAx")
+        return QDialog.Accepted
+    monkeypatch.setattr(attach_dialog.AttachDialog, "exec", filled_and_accepted)
+    assert s._ask_for_token() == {"phone_number_id": "222", "waba_id": "111", "access_token": "EAAx", "coexistence": False}
+    monkeypatch.setattr(attach_dialog.AttachDialog, "exec", lambda self: QDialog.Rejected)
+    assert s._ask_for_token() is None
+
+
+def test_a_refused_token_is_shown_in_words_and_the_buttons_come_back(monkeypatch):
+    from addons.whatsapp import settings
+    monkeypatch.setattr(ui, "PlatformWorker", worker([], fail={"onboarding/attach": ("Meta did not accept that token for that account: expired", {"reason": "token_rejected"})}))
+    s = settings.ConnectionSection()
+    monkeypatch.setattr(s, "_ask_for_token", lambda: {"phone_number_id": "2", "waba_id": "1", "access_token": "x", "coexistence": False})
+    s.attach_btn.click()
+    assert "did not accept that token" in s.numbers_note.text() and s.attach_btn.isEnabled() and s.connect_btn.isEnabled()
+
+
+def test_the_token_window_wants_all_three_boxes_and_tidies_what_was_pasted():
+    from PySide6.QtWidgets import QDialog
+    from addons.whatsapp.attach_dialog import AttachDialog
+    d = AttachDialog()
+    d.number_edit.setText(" 1234 5678 ")
+    d._accept()
+    assert d.result() != QDialog.Accepted and "all three" in d.note.text() and d.token_edit.echoMode() == d.token_edit.EchoMode.Password
+    d.waba_edit.setText("987\n654")
+    d.token_edit.setText("  EAAx yz  ")
+    d._accept()
+    assert d.result() == QDialog.Accepted
+    assert d.value() == {"phone_number_id": "12345678", "waba_id": "987654", "access_token": "EAAxyz", "coexistence": False}
+
+
 def test_a_number_not_shared_with_the_phone_app_can_be_marked_as_shared(served, calls):
     from addons.whatsapp.settings import ConnectionSection
     s = ConnectionSection()

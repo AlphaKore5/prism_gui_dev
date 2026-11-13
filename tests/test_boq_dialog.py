@@ -1381,6 +1381,19 @@ class TheLiveWorkbookInstructionIsScopedToXlsxAndAPrismAgent(unittest.TestCase):
         line = d._format_request_line()
         self.assertNotIn("INPUTS", line)
 
+    def test_it_asks_for_a_per_unit_total_split_from_the_whole_order_total(self):
+        """item 69 (12 Nov 2026), found live on a real 40-off locker job:
+        "Total Wt" alone, with an order quantity above 1, was read as the
+        whole-order figure -- the one-unit subtotal was never shown at
+        all, so getting it back meant multiplying Wt/Pc by Qty by hand.
+        The instruction now names both columns explicitly."""
+        d = _dialog()
+        d.writer_combo.setCurrentText("Prism Agent Claude")
+        d.format_combo.setCurrentIndex(d.format_combo.findData("xlsx"))
+        line = d._format_request_line()
+        self.assertIn("Total Wt per unit", line)
+        self.assertIn("Total Wt, all units", line)
+
 
 class AttachingASampleTemplateIsDiscoverableAndConfirmed(unittest.TestCase):
     """The owner's ask: "option for the user to just give in the sample
@@ -2767,3 +2780,40 @@ class MeasuringADxfAlreadyPutsItsRealTextInTheSummaryItem65(unittest.TestCase):
             "text_entities": [], "layers": ["0", "WALLS"], "entity_count": 1}
         d._on_measured(q, [])
         self.assertNotIn("TEXT ON THE DRAWING", d.summary)
+
+
+class EveryFileReadingPromptWarnsAboutCompartmentDividersItem67(unittest.TestCase):
+    """item 67, found live on a real pharma-client job: an SS rack drawn
+    as 8 visually separate compartments came back with the frame and the
+    outer panels/doors in the BOM, but no partition or middle-shelf line
+    at all -- nothing in the file ever NAMES a divider as its own part,
+    only the frame members are. All three prompts that ask the model to
+    read a file's drawing directly (not just cross-check against already-
+    measured figures) need the same warning, not just the one that
+    happened to catch it."""
+    def test_every_read_the_file_prompt_carries_the_same_warning(self):
+        from addons.boq import dialog as D
+        for prompt in (D.VERIFY_PROMPT, D.MAKE_WITH_DRAWING_PROMPT,
+                      D.MAKE_WITH_DRAWING_NO_MEASUREMENT_PROMPT):
+            self.assertIn("enclosing panel", prompt)
+            self.assertIn("unless the file states or clearly shows", prompt)
+
+
+class EveryFileReadingPromptAlsoWarnsAboutHandwritingAndCatalogueFilesItem68(
+        unittest.TestCase):
+    """item 68, found reviewing four more real client files before live
+    testing: a hand-scanned sketch stated its own +100mm sheet allowance
+    only by hand, in a margin brace grouping five named parts together,
+    with two other parts (doors, legs) deliberately left out of that
+    brace; and a separate file held ten different, separately-named
+    products in one PDF, two of its own pages with no product name at
+    all. Same reasoning as item 67: every prompt that reads a file
+    directly shares both risks, so both notes go on all three."""
+    def test_every_read_the_file_prompt_carries_both_new_warnings(self):
+        from addons.boq import dialog as D
+        for prompt in (D.VERIFY_PROMPT, D.MAKE_WITH_DRAWING_PROMPT,
+                      D.MAKE_WITH_DRAWING_NO_MEASUREMENT_PROMPT):
+            self.assertIn("handwritten", prompt)
+            self.assertIn("not to the whole object", prompt)
+            self.assertIn("distinctly-named item", prompt)
+            self.assertIn("never carry a dimension", prompt)

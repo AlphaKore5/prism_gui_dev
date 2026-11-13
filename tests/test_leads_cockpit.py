@@ -210,7 +210,7 @@ class CockpitBehaviour(unittest.TestCase):
         actions["Plants"].trigger()
         actions["Automation leaders"].trigger()
         self.assertEqual((picked, started), (["s1"], ["icp"]))
-        actions["Cards"].trigger()                  # the layouts live here too
+        actions["List"].trigger()                   # the layouts live here too (the row list was the "Cards" view)
         self.assertEqual(self.c._view, "cards")
 
     def test_drawer_renders_on_select(self):
@@ -248,7 +248,7 @@ class LayoutStates(unittest.TestCase):
     def test_loading_leads_leaves_the_empty_state(self):
         c = CK.LeadsCockpit()
         c.set_dossiers([_dos("A", 90, "a@x.com", "valid")])
-        self.assertEqual(c._view_stack.currentIndex(), 0)
+        self.assertEqual(c._view_stack.currentIndex(), 1)          # the row list is the default view; 2 is the empty state
         self.assertFalse(c._toolbar.isHidden())
         # The bulk bar waits for a tick now: "0 selected" over five dead
         # buttons was the heaviest thing on the screen.
@@ -626,18 +626,21 @@ class WorkspaceSurface(unittest.TestCase):
         self.d2 = _dos("Vaibhav", 80, "v@x.com", "")
         self.w = CK.LeadsWorkspace(leads_folder=tempfile.mkdtemp())
 
-    def test_six_tabs_over_six_screens(self):
-        self.assertEqual(len(self.w._tabs), 6)
-        self.assertEqual(self.w._stack.count(), 6)
+    def test_ten_tabs_over_ten_screens(self):
+        # Deals and Due today (the CRM mockup's boards) joined the original seven, at the end so nothing earlier moved.
+        self.assertEqual(len(self.w._tabs), 10)
+        self.assertEqual(self.w._stack.count(), 10)
         self.assertIs(self.w._stack.currentWidget(), self.w.leads)  # Leads default
 
     def test_selecting_a_tab_switches_the_stack(self):
-        self.w._select(5)                                   # Analytics
+        self.w._select(6)                                   # Analytics
         self.assertIs(self.w._stack.currentWidget(), self.w._analytics)
-        self.w._select(2)                                   # Lists
+        self.w._select(3)                                   # Lists
         self.assertIs(self.w._stack.currentWidget(), self.w._lists)
-        self.w._select(1)                                   # Sessions
+        self.w._select(2)                                   # Sessions
         self.assertIs(self.w._stack.currentWidget(), self.w._sessions)
+        self.w._select(1)                                   # Companies
+        self.assertIs(self.w._stack.currentWidget(), self.w.companies)
 
     def test_set_dossiers_reaches_leads_and_analytics(self):
         self.w.set_dossiers([self.d1, self.d2])
@@ -811,10 +814,26 @@ class WorkbenchAndPanel(_Workbench):
         fresh = Draft(dossier=drafts[0].dossier, subject="s", body="b")
         self.assertEqual(self._WB.LeadsWorkbench._pending(drafts + [fresh]), [fresh])
 
+    def test_create_deal_on_a_person_ties_the_deal_to_them(self):
+        from unittest import mock
+        from addons.leads import deals as DL
+        wb = self._WB.LeadsWorkbench({})
+        dos = _dos("Kunyi", 96, "k@x.com", "valid")
+        values = {"title": "Panel order", "company": "Co", "value": 120000, "stage": "Proposal", "next_step": "Call Thu"}
+        with mock.patch.object(wb, "_ask_new_deal", return_value=None):
+            wb._panel_create_deal(dos.lead)                       # cancelled: nothing is written
+        self.assertEqual(DL.list_deals(self._contacts), [])
+        with mock.patch.object(wb, "_ask_new_deal", return_value=values):
+            wb._panel_create_deal(dos.lead)
+        [mine] = wb._person_view(dos).deals
+        self.assertEqual((mine.title, mine.person, mine.stage), ("Panel order", dos.lead.name, "Proposal"))
+        stranger = _dos("Someone Else", 70, "else@y.com", "")
+        self.assertEqual(wb._person_view(stranger).deals, [])     # a deal is only the drawer's of the person it is tied to
+
     def test_workbench_builds_with_the_cockpit(self):
         wb = self._WB.LeadsWorkbench({})
         self.assertIsNotNone(wb._cockpit)
-        self.assertEqual(len(wb._cockpit._tabs), 6)
+        self.assertEqual(len(wb._cockpit._tabs), 10)
         self.assertEqual(wb._cockpit._tabs[0].text(), "People")
 
     def test_status_line_hides_until_it_has_text(self):
@@ -1171,7 +1190,7 @@ class LeadFiltersInTheWorkbench(_Workbench):
                       "include_earlier": True, "offer": "Line retrofits"})
         wb = self._WB.LeadsWorkbench({})
         wb._cockpit.refresh_searches()
-        wb._cockpit._select(3)
+        wb._cockpit._select(4)
         card = wb._cockpit._saved._grid.itemAt(0).widget()
         card._use.click()
         self.assertEqual(wb._filters.spec(), spec)
@@ -4110,8 +4129,8 @@ _COCKPIT_KEYS = _TOOLBAR_KEYS + ("table", "select_all", "col_lead", "col_focus",
 _BULK_KEYS = ("bulk_bar", "bulk_save", "bulk_remove", "bulk_verify", "bulk_emails",
               "bulk_phones", "bulk_list", "bulk_export", "bulk_stage", "bulk_qualify",
               "bulk_sequence")
-_TAB_KEYS = ("tab_people", "tab_sessions", "tab_lists", "tab_saved",
-             "tab_sequences", "tab_analytics")
+_TAB_KEYS = ("tab_people", "tab_companies", "tab_sessions", "tab_lists", "tab_saved",
+             "tab_sequences", "tab_analytics", "tab_deals", "tab_due", "tab_stats")
 # The workbench's own: Find new people. (Search settings' rows are one
 # toolbar step — they sit in a modal dialog the walk must not open.)
 _SEARCH_KEYS = ("btn_find",)
@@ -4137,6 +4156,17 @@ class PointAtMeCockpit(unittest.TestCase):
         self.d2 = _dos("Vaibhav", 80, "v@x.com", "")
         self.c = CK.LeadsCockpit()
         self.c.set_dossiers([self.d1, self.d2])
+        # These keys name the table's own parts (its column headings, its select-all). The list, the default view, has none of those, so the
+        # tour skips those steps there (see test_the_list_view_*); here the table is asked for.
+        self.c._set_view("table")
+
+    def test_the_list_view_points_results_at_the_list_and_skips_the_column_steps(self):
+        c = CK.LeadsCockpit()
+        c.set_dossiers([self.d1, self.d2])
+        t = c.help_targets()
+        self.assertIs(t["table"], c._gallery)
+        for key in ("select_all", "col_lead", "col_focus", "col_fit", "col_status", "col_signal"):
+            self.assertNotIn(key, t)
 
     def test_every_key_points_at_something_on_this_screen(self):
         targets = self.c.help_targets()
@@ -4322,6 +4352,7 @@ class PointAtMeWorkspace(unittest.TestCase):
         self.ws.set_dossiers([_dos("Kunyi", 96, "k@x.com", "valid")])
 
     def test_the_tabs_are_its_own_keys_and_the_cockpit_lends_the_rest(self):
+        self.ws.leads._set_view("table")        # the column keys are the table's; the list, the default, has none (see the cockpit tests)
         t = self.ws.help_targets()
         for i, key in enumerate(_TAB_KEYS):
             self.assertIs(t[key], self.ws._tabs[i])
@@ -4418,7 +4449,7 @@ class PointAtMeWorkbench(_Workbench):
                     fp.spec().to_dict(), sorted(ck._checked))
 
         ck.set_filters_shown(False)
-        ws._select(1)
+        ws._select(2)
         before = state()
         walk = T.Tour(T.Guide(wb), wb)
         walk.start()
@@ -4456,6 +4487,55 @@ class PointAtMeWorkbench(_Workbench):
         self.assertEqual(state(), before)
         self.assertIsNone(wb._worker)
         self.assertEqual(wb._jobs, 0)
+
+
+class ResultRows(unittest.TestCase):
+    """The default People view is a list of calm rows (addons/leads/result_rows.py), the look drafted in "Prism CRM: interface mockups"
+    (3 Nov 2026). The table is still there as the other view."""
+
+    def _person(self, name, title, company, location, fit, saved=False, check="valid"):
+        from addons.leads import pool
+        lead = Lead(name=name, title=title, company=company, email=name.lower() + "@x.com", fit_score=fit)
+        lead.extra = {"email_check": check, "location": location}
+        return pool.Person(lead=lead, saved=saved, stage="Cold" if saved else "", keys=frozenset({"n:" + name.lower()}))
+
+    def test_it_opens_on_the_list_and_the_toggle_says_list(self):
+        c = CK.LeadsCockpit()
+        self.assertEqual(c._view, "cards")
+        self.assertEqual((c._view_table_btn.text(), c._view_cards_btn.text()), ("Table", "List"))
+        self.assertTrue(c._view_cards_btn.isChecked())
+
+    def test_a_row_says_who_why_and_how_good(self):
+        c = CK.LeadsCockpit()
+        c.set_dossiers([_dos("Ramesh Patel", 92, "r@x.com", "valid", company="Patel Switchgear")])
+        row = c._grid.rows()[0]
+        self.assertEqual(row.name.full_text(), "Ramesh Patel")
+        self.assertIn("Patel Switchgear", row.company.full_text())
+        self.assertIn("Founder", row.subline.full_text())
+        self.assertEqual([p.text() for p in row.pills][:2], ["Verified", "Fit 92"])
+
+    def test_open_opens_the_person_and_save_asks_to_save_someone_not_yet_saved(self):
+        c = CK.LeadsCockpit()
+        c.set_people([self._person("Anita Shah", "Head of Procurement", "Shah Automation", "Ahmedabad", 81),
+                      self._person("Kale", "Owner", "Kale Panels", "Pune", 64, saved=True)],
+                     {"page": 0, "pages": 1, "start": 1, "end": 2, "total": 2}, {"total": 2, "net_new": 1, "saved": 1})
+        rows = c._grid.rows()
+        self.assertEqual([b.text() for b in rows[0].buttons], ["Open", "Save"])
+        self.assertEqual([b.text() for b in rows[1].buttons], ["Open"])               # already saved
+        self.assertIn("Cold", [p.text() for p in rows[1].pills])                      # a saved person shows their stage
+        asked = []
+        c.saveContactsRequested.connect(asked.append)
+        rows[0].buttons[1].click()
+        self.assertEqual([d.lead.name for d in asked[0]], ["Anita Shah"])
+        rows[0].buttons[0].click()
+        self.assertFalse(c._drawer_w.isHidden())
+
+    def test_the_table_is_still_one_click_away(self):
+        c = CK.LeadsCockpit()
+        c.set_dossiers([_dos("A", 90, "a@x.com", "valid")])
+        c._set_view("table")
+        self.assertEqual(c._view_stack.currentIndex(), 0)
+        self.assertEqual(c._table.rowCount(), 1)
 
 
 if __name__ == "__main__":

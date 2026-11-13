@@ -145,7 +145,8 @@ class ASavedContact(unittest.TestCase):
     def test_the_left_widgets_apollos_order(self):
         heads = [w.text() for w in self.p._left.findChildren(QLabel)
                  if w.objectName() == "pHead"]
-        self.assertEqual(heads, ["CONTACT INFORMATION", "RECORD DETAILS", "TASKS",
+        # Apollo's five, plus the CRM mockup's Deal box (3-Nov-2026) after Record details: who it is with and a Create deal button.
+        self.assertEqual(heads, ["CONTACT INFORMATION", "RECORD DETAILS", "DEAL", "TASKS",
                                  "ACCOUNT", "NOTES"])
 
     def test_contact_information_and_record_details(self):

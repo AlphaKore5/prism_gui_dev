@@ -4431,3 +4431,36 @@ untested DXF rasterizer) already insisted on elsewhere in this same change. Left
 **Tested:** full new `tests/test_boq_drawing_reader.py`, rewritten `tests/test_boq_elv_dialog.py`,
 updated `tests/test_boq_workers.py`/`tests/test_boq_industries.py` -- 80 tests pass across the four
 files together.
+
+## 79. Real layer names made diffuser and damper counts nonsense (4 and 873)
+
+Found 13 Nov 2026 on a real client HVAC drawing. A real named layer carries hatching and
+tick marks the old colour key never did. `count_symbol_curves()` now takes a per-role size floor and,
+for diffuser, a near-square check; `count_symbol_rects()` takes a floor and a raised cap for
+volume_damper. Result on the real file: diffuser 86 (client 96), damper 14 (client 8).
+
+## 80. Three things a week-old BOQ did that a new one did not
+
+Compared the BOQ of 5 Nov (the BOQ of 5 Nov) with the one of 13 Nov, against
+the client's own take-off workbook.
+
+- **Return duct fell 16.5 ft -> 4.9 ft.** The geometry one remembered colour key
+  (`#ff0000@1.08:line` -> return) used to pick up sits inside the real layer `ACME-HVAC-Z Piece`,
+  whose name no hint reads, so its row started on "ignore". Fix: `scan_layers()` reports each named
+  layer's colours; `suggest_role_from_colours()` pre-fills a named layer from a colour the owner
+  already mapped. With that layer on "return": 76.3 ft at 13.5 pt/ft, client 86.8 ft.
+- **VAV tags read 42, 38, 34 on three runs, same code.** The count only ever came from reading tag
+  text. New role `vav_box` counts drawn blocks on the drawing's own VAV layer
+  (`count_symbol_clusters()`): 49, client 48. The AI tag read now runs at temperature 0, retries a
+  failed tile once, and warns when a tile still fails. NOT yet run against the live API.
+- **Per-size sheet-metal and insulation area disappeared from the write-up.** Nothing in the prompt
+  asked for it; one run did it unprompted, the next gave one blended total. `writeup_note()` rules
+  (h) and (i) now ask for it, and for the VAV shape count as the quantity. NOT yet run against the
+  live API.
+
+Also: the two `...FAS-Smoke Detector...` layers had been saved as smoke-extract duct; reset to
+"ignore" in `hvac_takeoff/layer_map.json`, and "detector"/"cable"/"power" no longer suggest a role.
+
+**Still open:** duct height is read on about 15% of runs, so area still rests on one assumed height;
+acoustic vs thermal insulation; fittings; chained wall strips in `pair_runs()` (merging them was
+tried and made return and toilet exhaust worse, so it was not done).

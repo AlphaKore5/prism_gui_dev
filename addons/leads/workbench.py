@@ -54,7 +54,8 @@ from addons.leads.filter_panel import (
 )
 from addons.leads.credits_page import CreditPopover, CreditUsageDialog, UpgradeDialog
 from addons.leads.workers import (CreditsCallWorker, CreditsWorker, LeadsEmailWorker,
-                                  LeadsExportWorker, LeadsPhoneWorker, LeadsQualifyWorker,
+                                  LeadsExportWorker, LeadsMobileWorker, LeadsPhoneWorker,
+                                  LeadsQualifyWorker,
                                   LeadsSendWorker, LeadsSessionLoadWorker,
                                   LeadsVerifyWorker, SourceWorker, outside_filters)
 from addons.leads.cockpit import LeadsWorkspace
@@ -1173,6 +1174,14 @@ class LeadsWorkbench(QWidget):
         pp.listRequested.connect(lambda dos: self._save_list([dos]))
         pp.sequenceRequested.connect(lambda dos: self._add_to_sequence([dos]))
         pp.enrichRequested.connect(self._panel_enrich)
+        pp.dealRequested.connect(self._panel_create_deal)
+        # The Companies tab (Apollo's Companies): a view over the same pool, and
+        # the controller that answers it (companies_controller.py).
+        from addons.leads.companies_controller import CompaniesController
+        self._companies = CompaniesController(self, self._cockpit.companies)
+        self._cockpit.companiesShown.connect(self._companies.on_shown)
+        self._cockpit.dueOpenRequested.connect(self._due_open)
+        self._cockpit.dueTaskDoneRequested.connect(self._due_task_done)
         frame = QFrame()
         frame.setObjectName("leadsFrame")
         frame.setAttribute(Qt.WA_StyledBackground, True)
@@ -1223,6 +1232,7 @@ class LeadsWorkbench(QWidget):
         self._filters.set_imports(IM.list_imports(folder, "contacts"),
                                   IM.list_imports(folder, "accounts"))
         self._accounts = {}
+        self._refresh_companies()
 
     def reload_pool(self) -> None:
         """Read every saved contact and every past run, off the UI thread, and
@@ -1274,6 +1284,9 @@ class LeadsWorkbench(QWidget):
                                  self._removed_keys)
         self._filters.set_record_options(P.record_options(self._people,
                                                           self._saved_accounts))
+        self._refresh_companies()
+        self._cockpit.set_due_contacts(self._contacts)      # the Due today tab
+        self._cockpit.set_deals_folder(self._contacts_dir())    # the Deals tab
 
     def _set_saved_accounts(self, accounts) -> None:
         from addons.leads import accounts as AC
@@ -1284,6 +1297,14 @@ class LeadsWorkbench(QWidget):
         """Re-read the saved accounts after something here wrote them."""
         from addons.leads import accounts as AC
         self._set_saved_accounts(AC.list_accounts(self._accounts_dir()))
+        self._refresh_companies()
+
+    def _refresh_companies(self) -> None:
+        """The Companies tab reads the people and the saved accounts: tell it
+        they moved (it rebuilds when it is on screen, else when it next is)."""
+        companies = getattr(self, "_companies", None)
+        if companies is not None:
+            companies.refresh()
 
     def _accounts_for(self, spec) -> dict:
         """pool.resolve_accounts for the chosen Account CSV imports, cached
@@ -1618,7 +1639,15 @@ class LeadsWorkbench(QWidget):
             account=self._account_index.match(lead),
             company=dict(person.account) if person is not None and person.account else {},
             colleagues=near[:6], more_colleagues=max(0, len(near) - 6),
-            found_by=found_by)
+            found_by=found_by, deals=self._deals_of(lead))
+
+    def _deals_of(self, lead) -> list:
+        """The deals tied to this person; none when the folder cannot be read."""
+        from addons.leads import deals as DL
+        try:
+            return DL.linked(self._contacts_dir(), lead)
+        except Exception:                                   # noqa: BLE001 — the drawer must open without them
+            return []
 
     @staticmethod
     def _search_words(params) -> str:
@@ -1723,6 +1752,47 @@ class LeadsWorkbench(QWidget):
             return
         self._panel_done()
 
+    def _ask_new_deal(self, company: str, title: str):
+        """The New deal form, pre-filled from the person. A dict of its values, or None when cancelled. Tests answer this."""
+        from addons.leads.deals_page import NewDealDialog
+        dlg = NewDealDialog(self, company=company, title=title)
+        return dlg.values() if dlg.exec() else None
+
+    def _panel_create_deal(self, lead) -> None:
+        """Create deal on a person: a deal tied to them, so their drawer shows it and Due today can follow it."""
+        from addons.leads import deals as DL
+        from prospector.identity import keys_of
+        values = self._ask_new_deal(lead.company or "", f"{lead.company} deal".strip() if lead.company else "")
+        if values is None:
+            return
+        try:
+            DL.add(self._contacts_dir(), person=lead.name, keys=sorted(keys_of(lead)), **values)
+        except (DL.DealError, DL.store.StoreError) as e:
+            self._status.setText(str(e))
+            return
+        self._cockpit.deals.refresh()
+        self._cockpit.set_stats_contacts(self._contacts)
+        self._panel_done(i18n.t("Deal added."))
+
+    def _due_open(self, lead) -> None:
+        """Open on a Due today row: that person's profile, on the People tab."""
+        from prospector.identity import keys_of
+        keys = keys_of(lead)
+        person = next((p for p in self._people if keys & p.keys), None)
+        if person is not None:
+            self._cockpit.open_person(person)
+
+    def _due_task_done(self, lead, task_id: str, done: bool) -> None:
+        """Done on a Due today task: written like the panel's tick, then the list is read again."""
+        from addons.leads import contacts as CT
+        self._panel_task_done(lead, task_id, done)
+        try:
+            self._contacts = CT.list_contacts(self._contacts_dir())
+        except CT.StoreError as e:
+            self._status.setText(str(e))
+            return
+        self._cockpit.set_due_contacts(self._contacts)
+
     def _panel_log(self, lead, kind: str, text: str) -> None:
         from addons.leads import contacts as CT
         if not self._ensure_contact(lead):
@@ -1795,7 +1865,7 @@ class LeadsWorkbench(QWidget):
             self._status.setText(i18n.t(
                 "Wait for the job that is running to finish, then try again."))
             return
-        self._enrich_queue = [(dos, f) for f in ("email", "phone", "company", "qualify")
+        self._enrich_queue = [(dos, f) for f in ("email", "phone", "mobile", "company", "qualify")
                               if f in (fields or ())]
         self._next_enrichment()
 
@@ -1808,6 +1878,8 @@ class LeadsWorkbench(QWidget):
                 self._find_emails([dos])
             elif what == "phone":
                 self._find_phones([dos])
+            elif what == "mobile":
+                self._find_mobiles([dos])
             elif what == "company":
                 self._enrich_company(dos.lead)
             elif what == "qualify":
@@ -2761,6 +2833,90 @@ class LeadsWorkbench(QWidget):
                                                 or getattr(self._res, "all_leads", None)):
             self._start_export(self._autosave_dir(), announce=False)
 
+    def _find_mobiles(self, dossiers):
+        """"Find their mobile" — one PERSON's own mobile number from Apollo, through the
+        licence server (prospector/mobiles.py). Apollo answers in minutes, so the worker
+        starts every lookup and then reads them together; a credit is used only for a
+        number found, and once. Prism's credits only: there is no mobile source behind a
+        developer's own keys."""
+        if not dossiers or self._jobs:
+            return
+        from prospector import mobiles
+        leads = [d.lead for d in dossiers if mobiles.needs_mobile(d.lead)]
+        if not leads:
+            self._status.setText(i18n.t(
+                "Those people already have a mobile number, or Prism has no company website "
+                "to look one up with."))
+            return
+        if not self._pooled():
+            self._status.setText(i18n.t(
+                "Finding a person's mobile number runs on Prism's credits, so it isn't "
+                "available with your own provider keys."))
+            return
+        blocked = self._pool_blocker("mobile")
+        if blocked:
+            self._status.setText(blocked)
+            return
+        leads = leads[:mobiles.LIMIT]
+        if not self._confirm_mobiles(len(leads)):
+            return
+        self._set_running(True)
+        self._acted = list(leads)
+        self._status.setText(i18n.t(
+            "Finding mobile numbers for {n} people — this can take a few minutes…").format(
+                n=len(leads)))
+        self._mobile_worker = LeadsMobileWorker(leads, self.cfg)
+        self._mobile_worker.progress.connect(lambda i, n: self._status.setText(
+            i18n.t("Finished {i} of {n} mobile lookups…").format(i=i, n=n)))
+        self._mobile_worker.done.connect(self._on_mobiles_found)
+        self._mobile_worker.failed.connect(self._on_failed)
+        self._job_started()
+        self._mobile_worker.start()
+
+    def _confirm_mobiles(self, n: int) -> bool:
+        """Every lookup asks first, in credits. Priced per number FOUND, so the figure is a
+        ceiling. Tests patch this."""
+        price = gateway.rate("phone_mobile", 10)
+        return self._confirm_pool(i18n.t("Find mobiles"), [
+            i18n.t("Look up the mobile number for {n} people — up to {c}.").format(
+                n=n, c=self._cr(n * price)),
+            i18n.t("Prism asks Apollo for each person's own mobile number. It can take a few "
+                   "minutes. A credit is used only for a number found. Nothing is called "
+                   "or checked beyond its format.")])
+
+    def _on_mobiles_found(self, counts) -> None:
+        """Fold the mobiles in: each person Apollo had one for now carries it (the drawer
+        shows it with where it came from), and the line says what was and was not found."""
+        idle = self._job_done()
+        counts = counts if isinstance(counts, dict) else {}
+        found, asked, given = (int(counts.get(k, 0)) for k in ("found", "asked", "given"))
+        failed, pending = int(counts.get("failed", 0)), int(counts.get("pending", 0))
+        self._save_session()
+        if not self._keep_as_contacts(getattr(self, "_acted", []), "phone"):
+            self._rebuild_pool_keep_page()
+        if idle:
+            self._set_running(False)
+        stopped = gateway.exhausted()
+        said = dict.fromkeys(str(w).strip() for w in (counts.get("why") or ()))
+        reason = " ".join(i18n.t(w) for w in said if w and w != stopped)
+        if failed and not asked:
+            parts = [i18n.t("No mobile numbers were looked up.")]
+            if reason:
+                parts.append(reason)
+        else:
+            parts = [i18n.t("Found {f} mobile number(s) for {a} people — not called, "
+                            "format checked only.").format(f=found, a=asked)]
+            if asked > found + pending:
+                parts.append(i18n.t("{n} have none on file.").format(n=asked - found - pending))
+            if failed:
+                parts.append(i18n.t("{n} couldn't be looked up.").format(n=failed))
+            if reason:
+                parts.append(reason)
+        self._status.setText("   ·   ".join(parts) + self._used_note())
+        if given and self._res is not None and (self._res.dossiers
+                                                or getattr(self._res, "all_leads", None)):
+            self._start_export(self._autosave_dir(), announce=False)
+
     def _qualify_selected(self, dossiers):
         """Qualify & draft the checked people the run sourced but never
         qualified — a leads-sheet-only run's whole list, or everyone past a full
@@ -2953,9 +3109,10 @@ class LeadsWorkbench(QWidget):
         return len(dossiers)
 
     def _add_to_sequence(self, dossiers):
-        """Enrol the checked leads. For now this sends the first touch (the
-        reviewed draft) now; automatic follow-ups arrive with the Phase-2
-        stop-on-reply engine. Only leads that were drafted can be enrolled."""
+        """Enrol the checked leads: this sends the first touch (the reviewed
+        draft) now. The later touches are drafted in the Sequences tab and
+        listed in Due today when they fall due, for the owner to send; nothing
+        sends them by itself. Only leads that were drafted can be enrolled."""
         if not dossiers or self._jobs:
             return
         drafts = [dr for dr in (self._draft_for(d) for d in dossiers) if dr is not None]
@@ -2979,8 +3136,8 @@ class LeadsWorkbench(QWidget):
         confirm = QMessageBox.question(
             self, i18n.t("Add to sequence"),
             i18n.t("Send the first touch to {n} selected lead(s) now, from "
-                   "{addr}?\n\nAutomatic follow-ups arrive with the sequence "
-                   "engine — for now this sends touch 1.").format(
+                   "{addr}?\n\nThe later touches are drafted in Sequences and "
+                   "listed in Due today when they fall due. You send those.").format(
                        n=len(drafts), addr=addr))
         if confirm == QMessageBox.StandardButton.Yes:
             self._run_send(drafts)
