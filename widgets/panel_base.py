@@ -136,12 +136,17 @@ class _Elided(QLabel):
 
     def __init__(self, text: str = "", level: str = "BODY", colour: str = "",
                  weight: int = 0, grow: bool = True, min_w: int = 0,
-                 max_w: int = 0, mode=Qt.ElideRight, parent=None):
+                 max_w: int = 0, mode=Qt.ElideRight, parent=None,
+                 px: int = 0):
         super().__init__(parent)
         self._full = text or ""
         self._mode = mode
-        self.setFont(theme.font(level, weight))
-        family, px, css_weight, ink = theme.TYPE.get(level, theme.T_BODY)
+        font = theme.font(level, weight)
+        if px:
+            font.setPixelSize(px)
+        self.setFont(font)
+        family, size, css_weight, ink = theme.TYPE.get(level, theme.T_BODY)
+        px = px or size
         stack = (theme.FONT_MONO_STACK if level == "MONO" else f"'{family}'")
         self.setStyleSheet(
             f"font-family: {stack}; font-size: {px}px;"
@@ -534,13 +539,13 @@ class _RunRow(QFrame):
         self.setMinimumHeight(C.MIN_TARGET + 22)
 
         row = QHBoxLayout(self)
-        row.setContentsMargins(theme.SPACE_4, theme.SPACE_3,
-                               theme.SPACE_4, theme.SPACE_3)
+        row.setContentsMargins(theme.SPACE_4, 10, theme.SPACE_4, 10)
         row.setSpacing(theme.SPACE_3)
 
         self.tick = None
         if selectable:
             self.tick = QCheckBox()
+            self.tick.setFixedWidth(20)
             self.tick.setAccessibleName(i18n.t("Select this run"))
             # The box is its own control: clicking it must tick, not open
             # the run, so it swallows the press rather than letting the
@@ -554,7 +559,8 @@ class _RunRow(QFrame):
         stack = QVBoxLayout()
         stack.setContentsMargins(0, 0, 0, 0)
         stack.setSpacing(1)
-        stack.addWidget(_Elided(title, "SUPPORT", theme.TEXT, weight=500))
+        stack.addWidget(_Elided(title, "SUPPORT", theme.TEXT, weight=400,
+                                px=14))
 
         under = QHBoxLayout()
         under.setContentsMargins(0, 0, 0, 0)
@@ -567,20 +573,21 @@ class _RunRow(QFrame):
         if tools:
             under.addSpacing(theme.SPACE_1)
         under.addWidget(_Elided(" · ".join(tools) or i18n.t("No tool recorded"),
-                                "META"), stretch=1)
+                                "META", theme.MUTE, weight=400, px=12),
+                        stretch=1)
         stack.addLayout(under)
         row.addLayout(stack, stretch=1)
 
         if kind:
-            row.addWidget(C.Pill(i18n.t(ADDONS[kind]), "info"))
-        row.addWidget(_Elided(run.get("when", ""), "META", grow=False,
-                              min_w=76, max_w=118))
+            row.addWidget(C.Pill(i18n.t(ADDONS[kind]).upper(), "tag"))
+        row.addWidget(_Elided(run.get("when", ""), "LABEL", grow=False,
+                              min_w=76, max_w=118, px=11))
         detail = i18n.t("never ran") if state == "cancelled" else ""
         row.addWidget(C.StatusBadge(state, detail, focusable=False))
 
         if deletable:
             binw = C.icon_button("trash", i18n.t("Delete this run"),
-                                 self.removed.emit)
+                                 self.removed.emit, colour=theme.MUTE)
             row.addWidget(binw)
 
         self.setAccessibleName(f"{title}. {run.get('when', '')}")

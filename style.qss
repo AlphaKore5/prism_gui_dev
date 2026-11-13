@@ -2263,3 +2263,69 @@ QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
     border-color: #111110;
     color: #ffffff;
 }
+
+/* ── UI port stage 2: History ────────────────────────────────────────────
+   Values are the preview's computed styles at 1366px (1rem = 14.7px). */
+#pageTitle { font-size: 29px; }
+#pageSubtitle { font-size: 13px; color: #6b6a65; }
+#pageHeader QPushButton#dangerBtn {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #ffffff, stop:1 #f8f7f4);
+    border: 1px solid #e4e3df;
+    border-radius: 17px;
+    padding: 6px 16px;
+    color: #a3141a;
+}
+#pageHeader QPushButton#dangerBtn:hover { background: #ffffff; border-color: #d8d7d2; }
+
+#searchField {
+    border-radius: 10px;
+    padding: 6px 12px;
+    background: #f6f5f2;
+    border: 1px solid #e6e5e1;
+}
+#searchField:focus { background: #ffffff; border: 1.5px solid #111110; }
+#monoMeta {
+    font-family: "Geist Mono";
+    font-size: 11px;
+    font-weight: 400;
+    color: #6b6a65;
+    background: transparent;
+}
+
+#filterChips {
+    background: rgba(255, 255, 255, 0.55);
+    border: 1px solid rgba(20, 20, 18, 0.06);
+    border-radius: 18px;
+}
+#filterChips #chipBtn { font-weight: 400; color: #2a2a28; }
+#filterChips #chipBtn:hover { background: rgba(255, 255, 255, 0.7); }
+#filterChips #chipBtn:checked { background: #111110; border-color: #111110; color: #ffffff; }
+
+#sectionTitle { font-size: 19px; }
+#sectionSubtitle[mono="true"] {
+    font-family: "Geist Mono";
+    font-size: 11px;
+    font-weight: 400;
+    color: #6b6a65;
+}
+
+QCheckBox::indicator { width: 17px; height: 17px; border: 1.5px solid #d8d7d2; border-radius: 4px; }
+QCheckBox::indicator:hover { border-color: #a9a8a3; }
+QCheckBox::indicator:checked { border: 1.5px solid #111110; }
+
+#iconBtn { background: transparent; border: none; border-radius: 10px; }
+#iconBtn:hover { background: #efeeea; }
+
+#selBar {
+    background: #111110;
+    border: none;
+    border-radius: 13px;
+}
+#selBar QLabel { color: #ffffff; font-weight: 500; }
+#selBar QPushButton#destructiveBtn, #selBar QPushButton#smallBtn {
+    background: #ffffff;
+    border: 1px solid #ffffff;
+    border-radius: 14px;
+    color: #a3141a;
+    padding: 4px 14px;
+}

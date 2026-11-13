@@ -491,6 +491,8 @@ class Pill(QLabel):
         "warn": (theme.WARN_BG, theme.WARN_INK),
         "err": (theme.ERR_BG, theme.ERR_INK),
         "quiet": (theme.NEUTRAL[100], theme.NEUTRAL[700]),
+        # The mono add-on tag on a History row: ink on the soft stone fill.
+        "tag": ("#EFEEEA", theme.INK),
     }
 
     @classmethod
@@ -518,6 +520,13 @@ class Pill(QLabel):
         tones = self._tones()
         bg, ink = tones.get(tone, tones["neutral"])
         family, px, weight, _ink = theme.T_LABEL
+        if tone == "tag":
+            track(self, 0.06)
+            self.setStyleSheet(
+                f"background: {bg}; color: {ink}; border-radius: 6px;"
+                f" font-family: {theme.FONT_MONO_STACK}; font-size: 11px;"
+                f" font-weight: 500; padding: 4px 7px;")
+            return
         self.setStyleSheet(
             f"background: {bg}; color: {ink}; border-radius: {theme.R_PILL}px;"
             f" font-size: {px}px; font-weight: {weight};"
@@ -1235,8 +1244,8 @@ class PageHeader(QFrame):
         # The band is a white rounded card floating on the stone page (the
         # AlphaKore preview's .phead): inset so the card edge clears the page
         # sides, with the text padded inside it.
-        row.setContentsMargins(self._INSET + 24, self._INSET_TOP + theme.SPACE_4,
-                               self._INSET + 16, self._INSET_BOTTOM + theme.SPACE_4)
+        row.setContentsMargins(self._INSET + 24, self._INSET_TOP + 13,
+                               self._INSET + 16, self._INSET_BOTTOM + 13)
         row.setSpacing(theme.SPACE_4)
 
         col = QVBoxLayout()
@@ -1245,7 +1254,7 @@ class PageHeader(QFrame):
         self.title = QLabel(title)
         self.title.setObjectName("pageTitle")
         self.title.setTextFormat(Qt.RichText)
-        track(self.title, -0.015)
+        track(self.title, -0.035)
         col.addWidget(self.title)
         # Parented at creation: setVisible below runs before col.addWidget, and
         # setVisible(True) on a parentless widget flashes it as a top-level OS
@@ -1623,6 +1632,59 @@ class SearchField(QLineEdit):
         super().keyPressEvent(event)
 
 
+class _CountChip(QPushButton):
+    """A filter chip whose count is drawn small, mono and muted after the
+    label (the preview's `.seg .n`). text() stays "All  9", so everything that
+    reads the chip still reads the same words."""
+
+    def __init__(self, text: str, count, parent=None):
+        super().__init__(f"{text}  {count}" if count is not None else text,
+                         parent)
+        self._label, self._count = text, count
+        self._mono = QFont(theme.FONT_MONO)
+        self._mono.setPixelSize(11)
+        self._mono.setWeight(QFont.Medium)
+
+    def _fonts(self):
+        label = QFont(self.font())
+        label.setPixelSize(14)
+        label.setWeight(QFont.Normal)
+        return label, self._mono
+
+    def sizeHint(self):
+        label, mono = self._fonts()
+        w = QFontMetrics(label).horizontalAdvance(self._label) + 28
+        if self._count is not None:
+            w += 8 + QFontMetrics(mono).horizontalAdvance(str(self._count))
+        return QSize(w, max(MIN_TARGET, 32))
+
+    def paintEvent(self, event):
+        from PySide6.QtWidgets import QStyle, QStyleOptionButton
+        p = QPainter(self)
+        opt = QStyleOptionButton()
+        self.initStyleOption(opt)
+        opt.text = ""
+        self.style().drawControl(QStyle.CE_PushButtonBevel, opt, p, self)
+        label, mono = self._fonts()
+        on = self.isChecked()
+        lm, mm = QFontMetrics(label), QFontMetrics(mono)
+        count = str(self._count) if self._count is not None else ""
+        total = lm.horizontalAdvance(self._label) + (
+            8 + mm.horizontalAdvance(count) if count else 0)
+        x = (self.width() - total) / 2
+        mid = self.height() / 2
+        p.setFont(label)
+        p.setPen(QColor("#FFFFFF" if on else "#2A2A28"))
+        p.drawText(QPointF(x, mid + (lm.ascent() - lm.descent()) / 2),
+                   self._label)
+        if count:
+            p.setFont(mono)
+            p.setPen(QColor(theme.FAINT if on else theme.MUTE))
+            p.drawText(QPointF(x + lm.horizontalAdvance(self._label) + 8,
+                               mid + (mm.ascent() - mm.descent()) / 2), count)
+        p.end()
+
+
 class FilterChips(QWidget):
     """A row of exclusive filter chips — "All · Completed · Failed".
 
@@ -1671,7 +1733,7 @@ class FilterChips(QWidget):
             else:
                 value = text = option
                 count = None
-            btn = QPushButton(f"{text}  {count}" if count is not None else text)
+            btn = _CountChip(text, count)
             btn.setObjectName("chipBtn")
             btn.setCheckable(True)
             btn.setCursor(Qt.PointingHandCursor)
