@@ -57,8 +57,8 @@ CONTRACT = {
     "col_focus", "col_fit", "col_status", "col_signal", "pager", "bulk_bar",
     "bulk_save", "bulk_remove", "bulk_verify", "bulk_emails", "bulk_phones", "bulk_list",
     "bulk_export", "bulk_stage", "bulk_qualify", "bulk_sequence", "drawer", "tab_people",
-    "tab_sessions",
-    "tab_lists", "tab_saved", "tab_sequences", "tab_analytics",
+    "tab_companies", "tab_sessions",
+    "tab_lists", "tab_saved", "tab_sequences", "tab_analytics", "tab_deals", "tab_due", "tab_stats",
 }
 
 
@@ -372,8 +372,10 @@ class Walking(unittest.TestCase):
             self.assertEqual(screen, {"tab": "sessions"})
             self.assertTrue(restored)
         # Walked off the end with a snapshot: no extra trip to the Leads tab
-        # on the way out, or the restore would land on the wrong screen.
-        self.assertEqual(owner.revealed[-1], "tab_analytics")
+        # on the way out, or the restore would land on the wrong screen. The last
+        # reveal is the last step the walk tried (it tries every step, found or
+        # not), which is now Due today, the final tab, and no longer Analytics.
+        self.assertEqual(owner.revealed[-1], T.STEPS[-1][0])
 
     def test_tab_never_walks_the_focus_under_the_scrim(self):
         """Qt's focus chain runs on from the card to whatever is underneath —

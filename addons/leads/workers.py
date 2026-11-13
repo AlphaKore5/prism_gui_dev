@@ -405,6 +405,10 @@ class LeadsEmailWorker(_Worker):
             # before this existed (27-Sep-2026: this was the missing step).
             self.progress.emit(0, len(self.leads), None)
             verify.find_domains(self.leads, self.cfg)
+            # One Hunter Domain Search per company domain (not per lead) before
+            # the per-person finder — the same credit, a cheaper way to buy it
+            # when several leads share a company (02-Oct-2026).
+            verify.find_emails_by_domain(self.leads, keys)
             refused: dict = {}
             for i, lead in enumerate(self.leads, 1):
                 self.progress.emit(i, len(self.leads), lead)
@@ -445,6 +449,31 @@ class LeadsPhoneWorker(_Worker):
             from prospector import phones
             self.done.emit(phones.find(self.leads, self.cfg,
                                        on_progress=lambda i, n: self.progress.emit(i, n)))
+        except Exception as e:                          # noqa: BLE001
+            self.failed.emit(str(e))
+
+
+class LeadsMobileWorker(_Worker):
+    """Find each SELECTED person's own mobile number (Apollo, through the licence
+    server), off the UI thread. Apollo answers in minutes, so this holds a thread
+    that long: every lookup is started first and then all are read together
+    (prospector/mobiles.py). Credits are charged per number found, once.
+
+    `done` carries mobiles.find's counts — {"asked", "found", "given", "failed",
+    "pending", "why"}."""
+    progress = Signal(int, int)             # lookups finished so far, of how many
+    done = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, leads: list, cfg: dict):
+        super().__init__()
+        self.leads, self.cfg = list(leads or []), _run_cfg(cfg)
+
+    def run(self):
+        try:
+            from prospector import mobiles
+            self.done.emit(mobiles.find(self.leads, self.cfg,
+                                        on_progress=lambda i, n: self.progress.emit(i, n)))
         except Exception as e:                          # noqa: BLE001
             self.failed.emit(str(e))
 
