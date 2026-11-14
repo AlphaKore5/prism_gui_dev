@@ -72,10 +72,10 @@ class AllFiltersDialog(PrismDialog):
         side.setStyleSheet(
             f"QPushButton#fgroupBtn{{background:transparent;border:none;text-align:left;"
             f"padding:7px 10px;border-radius:{theme.R_CONTROL}px;min-height:20px;"
-            f"color:{theme.NEUTRAL[700]};font-size:13px;font-weight:600;}}"
+            f"color:{theme.NEUTRAL[700]};font-size:13px;font-weight:500;}}"
             f"QPushButton#fgroupBtn:hover{{background:{theme.WELL};}}"
-            f"QPushButton#fgroupBtn:checked{{background:{theme.INFO_BG};"
-            f"color:{theme.INFO_INK};}}")
+            f"QPushButton#fgroupBtn:checked{{background:#EFEEEA;"
+            f"color:{theme.INK};}}")
         row.addWidget(side)
 
         right = QVBoxLayout()

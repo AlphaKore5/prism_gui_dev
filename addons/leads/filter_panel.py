@@ -243,8 +243,8 @@ def _sheet() -> str:
     t = theme
     heading = f"font-family:'{t.FONT_HEADING}';letter-spacing:1px;font-weight:600;"
     # 20px content + 3px padding + 1px border: a 28px target, not the app's 34.
-    small = (f"border-radius:{t.R_CHIP}px;padding:3px 6px;min-height:20px;"
-             f"font-size:12px;font-weight:600;")
+    small = (f"border-radius:14px;padding:3px 8px;min-height:20px;"
+             f"font-size:12px;font-weight:500;")
     badge = "border-radius:8px;padding:0px 5px;font-size:11px;font-weight:700;"
     return "".join((
         f"QLabel#fkick{{color:{t.NEUTRAL[600]};{heading}font-size:11px;}}",
@@ -258,20 +258,22 @@ def _sheet() -> str:
         # header actions
         f"QPushButton#fclearAll{{background:transparent;border:1px solid transparent;"
         f"{small}color:{t.ACCENT_RAMP[700]};}}",
-        f"QPushButton#fclearAll:hover{{background:{t.INFO_BG};color:{t.INFO_INK};}}",
+        f"QPushButton#fclearAll:hover{{background:#EFEEEA;color:{t.INK};}}",
         f"QPushButton#fclearAll:focus{{border-color:{t.ACCENT};}}",
         # "More filters (n)" — Apollo's "View 60+ Filters", a quiet outline
-        f"QPushButton#fmore{{background:{t.CARD};border:1px solid {t.NEUTRAL[300]};"
-        f"{small}padding:3px 10px;color:{t.NEUTRAL[800]};}}",
-        f"QPushButton#fmore:hover{{background:{t.WELL};border-color:{t.NEUTRAL[400]};}}",
+        f"QPushButton#fmore{{background:{t.CARD};border:1px solid {t.HAIRLINE};"
+        f"border-radius:16px;padding:0 14px;min-height:31px;max-height:31px;font-size:13px;font-weight:500;"
+        f"color:{t.INK};}}",
+        f"QPushButton#fmore:hover{{background:{t.WELL};border-color:{t.BORDER};}}",
         f"QPushButton#fmore:focus{{border-color:{t.ACCENT};}}",
         # a CSV import's row: box, file name, what it held
         f"QLabel#fimportName{{color:{t.TEXT};font-size:13px;font-weight:500;}}",
         f"QLabel#fimportMeta{{color:{t.NEUTRAL[600]};font-size:11px;}}",
         f"QCheckBox#fimportBox{{border:none;background:transparent;}}",
-        f"QPushButton#fsave{{background:{t.CARD};border:1px solid {t.NEUTRAL[300]};"
-        f"{small}padding:3px 10px;color:{t.NEUTRAL[800]};}}",
-        f"QPushButton#fsave:hover{{background:{t.WELL};border-color:{t.NEUTRAL[400]};}}",
+        f"QPushButton#fsave{{background:{t.CARD};border:1px solid {t.HAIRLINE};"
+        f"border-radius:16px;padding:0 14px;min-height:31px;max-height:31px;font-size:13px;font-weight:500;"
+        f"color:{t.INK};}}",
+        f"QPushButton#fsave:hover{{background:{t.WELL};border-color:{t.BORDER};}}",
         f"QPushButton#fsave:pressed{{background:{t.NEUTRAL[200]};}}",
         f"QPushButton#fsave:focus{{border-color:{t.ACCENT};}}",
         # an include/exclude facet's input and its suggestions
@@ -280,7 +282,7 @@ def _sheet() -> str:
         f"QFrame#fsugRow:hover{{background:{t.WELL};}}",
         f"QPushButton#fsugInc{{background:transparent;border:1px solid transparent;"
         f"{small}color:{t.ACCENT_RAMP[700]};}}",
-        f"QPushButton#fsugInc:hover{{background:{t.INFO_BG};color:{t.INFO_INK};}}",
+        f"QPushButton#fsugInc:hover{{background:#EFEEEA;color:{t.INK};}}",
         f"QPushButton#fsugInc:pressed{{background:{t.ACCENT_RAMP[200]};}}",
         f"QPushButton#fsugInc:focus{{border-color:{t.ACCENT};}}",
         f"QPushButton#fsugExc{{background:transparent;border:1px solid transparent;"
@@ -292,37 +294,36 @@ def _sheet() -> str:
         f"color:{t.NEUTRAL[800]};}}",
         # bands
         f"QPushButton#fband{{background:{t.WELL};border:1px solid {t.HAIRLINE};"
-        f"border-radius:{t.R_CHIP}px;padding:3px 10px;min-height:20px;"
+        f"border-radius:14px;padding:3px 10px;min-height:20px;"
         f"font-size:12px;font-weight:500;color:{t.NEUTRAL[800]};}}",
         f"QPushButton#fband:hover{{border-color:{t.NEUTRAL[300]};}}",
-        f"QPushButton#fband:checked{{background:{t.INFO_BG};color:{t.INFO_INK};"
+        f"QPushButton#fband:checked{{background:#EFEEEA;color:{t.INK};"
         f"border-color:{t.ACCENT};}}",
         f"QPushButton#fband:focus{{border-color:{t.ACCENT};}}",
         # Stage / Lists / Custom fields: Apollo's Contact | Account switch
-        f"QFrame#fseg{{background:{t.WELL};border:1px solid {t.HAIRLINE};"
-        f"border-radius:{t.R_CONTROL}px;}}",
+        f"QFrame#fseg{{background:#EFEEEA;border:none;border-radius:16px;}}",
         f"QFrame#fseg QPushButton{{background:transparent;border:none;"
-        f"border-radius:{t.R_CHIP}px;padding:3px 10px;min-height:18px;font-size:12px;"
-        f"font-weight:600;color:{t.NEUTRAL[600]};}}",
+        f"border-radius:14px;padding:3px 10px;min-height:20px;font-size:13px;"
+        f"font-weight:500;color:{t.NEUTRAL[600]};}}",
         f"QFrame#fseg QPushButton:hover{{color:{t.TEXT};}}",
         f"QFrame#fseg QPushButton:checked{{background:{t.CARD};color:{t.TEXT};}}",
         f"QComboBox#fcustomField{{padding:4px 10px;min-height:20px;font-size:13px;}}",
         f"QToolButton#fpin{{background:transparent;border:1px solid transparent;"
         f"border-radius:{t.R_CHIP}px;padding:3px;}}",
         f"QToolButton#fpin:hover{{background:{t.WELL};}}",
-        f"QToolButton#fpin:checked{{background:{t.INFO_BG};border-color:{t.ACCENT};}}",
+        f"QToolButton#fpin:checked{{background:#EFEEEA;border-color:{t.ACCENT};}}",
         # chips
-        f"#fchipInc{{background:{t.INFO_BG};border:1px solid {t.INFO_BG};"
+        f"#fchipInc{{background:#EFEEEA;border:1px solid #EFEEEA;"
         f"border-radius:{t.R_CHIP}px;}}",
         f"#fchipInc:hover{{border-color:{t.ACCENT_RAMP[300]};}}",
-        f"#fchipInc:focus{{border-color:{t.INFO_INK};}}",
+        f"#fchipInc:focus{{border-color:{t.INK};}}",
         f"#fchipExc{{background:{t.ERR_BG};border:1px solid {t.ERR_BG};"
         f"border-radius:{t.R_CHIP}px;}}",
         f"#fchipExc:hover{{border-color:{t.ERR_LINE};}}",
         f"#fchipExc:focus{{border-color:{t.ERR_INK};}}",
         f"QToolButton#fchipX{{background:transparent;border:none;padding:0px;"
         f"margin:0px;border-radius:{t.R_MICRO}px;}}",
-        f"#fchipInc QToolButton#fchipX:hover{{background:{t.tint(t.INFO_INK, '29')};}}",
+        f"#fchipInc QToolButton#fchipX:hover{{background:{t.tint(t.INK, '1F')};}}",
         f"#fchipExc QToolButton#fchipX:hover{{background:{t.tint(t.ERR_INK, '29')};}}",
     ))
 
@@ -512,7 +513,7 @@ class _Chip(_Pressable):
         self._minus = QLabel(self)
         self._minus.setFixedSize(_MINUS, _MINUS)
         self._minus.hide()
-        self._text = _Elided("fchipText", theme.INFO_INK, self)
+        self._text = _Elided("fchipText", theme.INK, self)
         self._x = QToolButton(self)
         self._x.setObjectName("fchipX")
         self._x.setFixedSize(_CHIP_X, _CHIP_X)
@@ -534,7 +535,7 @@ class _Chip(_Pressable):
     def set_state(self, value: str, text: str, side: str, flippable: bool = True):
         self.value, self.flippable = value, flippable
         exclude = side == "exclude"
-        ink = theme.ERR_INK if exclude else theme.INFO_INK
+        ink = theme.ERR_INK if exclude else theme.INK
         if side != self.side:
             self.side = side
             self.setObjectName("fchipExc" if exclude else "fchipInc")

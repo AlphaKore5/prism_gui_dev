@@ -227,11 +227,11 @@ class ViewToggle(QFrame):
         self.setObjectName("viewSeg")
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setStyleSheet(
-            f"QFrame#viewSeg{{background:{theme.WELL};border:1px solid {theme.HAIRLINE};border-radius:{theme.R_CONTROL}px;}}"
+            f"QFrame#viewSeg{{background:#EFEEEA;border:none;border-radius:16px;}}"
             f"QFrame#viewSeg QPushButton{{background:transparent;border:none;color:{theme.NEUTRAL[600]};padding:3px 14px;"
-            f"min-height:20px;font-size:12px;font-weight:600;border-radius:{theme.R_CHIP}px;}}"
+            f"min-height:22px;font-size:13px;font-weight:500;border-radius:14px;}}"
             f"QFrame#viewSeg QPushButton:hover{{color:{theme.TEXT};}}"
-            f"QFrame#viewSeg QPushButton:checked{{background:{theme.CARD};color:{theme.TEXT};}}")
+            f"QFrame#viewSeg QPushButton:checked{{background:{theme.CARD};color:{theme.INK};}}")
         lay = QHBoxLayout(self)
         lay.setContentsMargins(2, 2, 2, 2)
         lay.setSpacing(2)

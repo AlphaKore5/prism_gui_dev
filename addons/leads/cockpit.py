@@ -1679,14 +1679,13 @@ class LeadsCockpit(QWidget):
         seg.setObjectName("viewSeg")
         seg.setAttribute(Qt.WA_StyledBackground, True)
         seg.setStyleSheet(
-            f"QFrame#viewSeg{{background:{theme.WELL};border:1px solid {theme.HAIRLINE};"
-            f"border-radius:{theme.R_CONTROL}px;}}"
+            f"QFrame#viewSeg{{background:#EFEEEA;border:none;border-radius:16px;}}"
             f"QFrame#viewSeg QPushButton{{background:transparent;border:none;"
-            f"color:{theme.NEUTRAL[600]};padding:3px 14px;min-height:20px;"
-            f"font-size:12px;font-weight:600;border-radius:{theme.R_CHIP}px;}}"
+            f"color:{theme.NEUTRAL[600]};padding:3px 14px;min-height:22px;"
+            f"font-size:13px;font-weight:500;border-radius:14px;}}"
             f"QFrame#viewSeg QPushButton:hover{{color:{theme.TEXT};}}"
             f"QFrame#viewSeg QPushButton:checked{{background:{theme.CARD};"
-            f"color:{theme.TEXT};}}")
+            f"color:{theme.INK};}}")
         lay = QHBoxLayout(seg)
         lay.setContentsMargins(2, 2, 2, 2)
         lay.setSpacing(2)
@@ -3358,7 +3357,7 @@ class _ListsTab(QWidget):
         btn.setCursor(Qt.PointingHandCursor)
         btn.setStyleSheet(
             f"QPushButton{{color:#fff;background:{theme.ACCENT};border:none;"
-            f"border-radius:15px;padding:0 15px;min-height:30px;max-height:30px;"
+            f"border-radius:14px;padding:0 15px;min-height:28px;max-height:28px;"
             f"font-size:13px;font-weight:500;}}"
             f"QPushButton:hover{{background:{theme.ACCENT_RAMP[600]};}}")
         btn.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
@@ -3504,7 +3503,7 @@ class _SessionsTab(QWidget):
         btn.setCursor(Qt.PointingHandCursor)
         btn.setStyleSheet(
             f"QPushButton{{color:#fff;background:{theme.ACCENT};border:none;"
-            f"border-radius:15px;padding:0 15px;min-height:30px;max-height:30px;"
+            f"border-radius:14px;padding:0 15px;min-height:28px;max-height:28px;"
             f"font-size:13px;font-weight:500;}}"
             f"QPushButton:hover{{background:{theme.ACCENT_RAMP[600]};}}"
             f"QPushButton:disabled{{background:{theme.NEUTRAL[200]};"
@@ -3678,7 +3677,7 @@ def _small_button(text: str, primary: bool) -> QPushButton:
     if primary:
         btn.setStyleSheet(
             f"QPushButton{{color:#fff;background:{theme.ACCENT};border:none;"
-            f"border-radius:15px;padding:0 15px;min-height:30px;max-height:30px;"
+            f"border-radius:14px;padding:0 15px;min-height:28px;max-height:28px;"
             f"font-size:13px;font-weight:500;}}"
             f"QPushButton:hover{{background:{theme.ACCENT_RAMP[600]};}}"
             f"QPushButton:disabled{{background:{theme.NEUTRAL[200]};"

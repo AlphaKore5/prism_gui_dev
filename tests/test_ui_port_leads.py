@@ -12,6 +12,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PySide6.QtGui import QFont                                       # noqa: E402
 from PySide6.QtWidgets import QApplication, QLabel, QPushButton       # noqa: E402
 
 _app = QApplication.instance() or QApplication([])
@@ -196,7 +197,7 @@ class TheOtherTabsAndPager(unittest.TestCase):
         for t in ("Refresh", "Open folder"):
             self.assertIn("border-radius:16px", btns[t].styleSheet())
             self.assertIn("font-size:13px;font-weight:500", btns[t].styleSheet())
-        self.assertIn("border-radius:15px", btns["Open"].styleSheet())
+        self.assertIn("border-radius:14px", btns["Open"].styleSheet())
         card = btns["Open"].parentWidget()
         self.assertLess(card.height(), 200)
 
@@ -209,8 +210,70 @@ class TheOtherTabsAndPager(unittest.TestCase):
         sheet = card.move_btn.styleSheet()
         self.assertIn(f"background:{theme.CARD}", sheet)
         self.assertIn(f"border:1px solid {theme.HAIRLINE}", sheet)
-        self.assertIn("border-radius:12px", sheet)
-        self.assertEqual(card.move_btn.maximumHeight(), 24)
+        self.assertIn("border-radius:13px", sheet)
+        self.assertEqual(card.move_btn.maximumHeight(), 28)
+
+
+class TheButtonsShareOneLook(unittest.TestCase):
+    """The consistency sweep: every Leads tab, every visible button, one family of sizes, radii, fonts and tones."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.w = _workspace()
+        cls.w.resize(1000, 700)
+
+    def _buttons(self):
+        from PySide6.QtWidgets import QToolButton
+        for i in range(len(self.w._tabs)):
+            self.w._tabs[i].click()
+            _app.processEvents()
+            for b in self.w.findChildren(QPushButton) + self.w.findChildren(QToolButton):
+                if b.isVisibleTo(self.w) and b.width() > 6 and (b.text() or b.objectName()):
+                    yield i, b
+
+    def test_no_button_on_any_tab_has_the_old_12px_600_or_a_blue_tone(self):
+        seen = 0
+        for i, b in self._buttons():
+            sheet = b.styleSheet()
+            self.assertNotIn("rgba(2, 132, 199", sheet, (i, b.text()))
+            self.assertNotIn("font-size:12px;font-weight:600", sheet, (i, b.text(), sheet[:80]))
+            seen += 1
+        self.assertGreater(seen, 20)
+
+    def test_every_text_button_font_is_12_to_14_px_and_never_bold(self):
+        for i, b in self._buttons():
+            if not b.text().strip() or b.text() in ("‹", "›"):
+                continue
+            px = b.font().pixelSize()
+            if px > 0:
+                self.assertIn(px, (12, 13, 14), (i, b.text(), px))
+            self.assertLessEqual(b.font().weight(), QFont.Medium, (i, b.text()))
+
+    def test_row_and_card_pills_are_28px_and_toolbar_pills_33px(self):
+        for i, b in self._buttons():
+            if b.text() in ("Open", "Save", "Done", "New deal"):
+                self.assertEqual(b.height(), 28, (i, b.text()))
+            if b.text() in ("Refresh", "Open folder", "Save search", "Import", "More filters"):
+                self.assertEqual(b.height(), 33, (i, b.text()))
+
+    def test_filter_rail_uses_stone_not_blue(self):
+        from addons.leads import filter_panel as FP
+        sheet = FP._sheet()
+        self.assertNotIn("rgba(2, 132, 199", sheet)
+        self.assertIn("QPushButton#fmore{background:" + theme.CARD + ";border:1px solid " + theme.HAIRLINE, sheet)
+        self.assertIn("border-radius:16px", sheet)
+
+    def test_the_view_switch_and_the_company_bulk_bar_match_the_people_ones(self):
+        vt = RR.ViewToggle([("t", "Table"), ("l", "List")], "t")
+        vt.resize(160, 32)
+        vt.show()
+        _app.processEvents()
+        self.assertIn("#EFEEEA", vt.styleSheet())
+        self.assertIn("font-size:13px;font-weight:500", vt.styleSheet())
+        self.assertEqual(vt._buttons["t"].font().pixelSize(), 13)
+        from addons.leads import companies_page as CPG
+        src = open(CPG.__file__, encoding="utf-8").read()
+        self.assertNotIn("padding:5px 14px;min-height:20px;font-family", src)
 
 
 if __name__ == "__main__":

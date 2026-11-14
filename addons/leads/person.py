@@ -266,12 +266,12 @@ def _sheet() -> str:
         f"QLabel#pMuted{{color:{t.NEUTRAL[600]};font-size:12px;}}",
         f"QFrame#pWidget{{background:{t.CARD};border:1px solid {t.HAIRLINE};"
         f"border-radius:{t.R_CONTROL}px;}}",
-        f"QFrame#pBanner{{background:{t.INFO_BG};border:none;"
+        f"QFrame#pBanner{{background:#EFEEEA;border:none;"
         f"border-radius:{t.R_CONTROL}px;}}",
-        f"QLabel#pBannerText{{color:{t.INFO_INK};font-size:12px;font-weight:600;}}",
+        f"QLabel#pBannerText{{color:{t.INK};font-size:12px;font-weight:600;}}",
         f"QPushButton#pTab{{background:transparent;border:none;border-bottom:2px solid "
         f"transparent;border-radius:0px;padding:6px 8px;min-height:20px;"
-        f"color:{t.NEUTRAL[600]};font-size:13px;font-weight:600;}}",
+        f"color:{t.NEUTRAL[600]};font-size:13px;font-weight:500;}}",
         f"QPushButton#pTab:hover{{color:{t.TEXT};}}",
         f"QPushButton#pTab:checked{{color:{t.TEXT};border-bottom-color:{t.ACCENT};}}",
         f"QPushButton#pLink{{background:transparent;border:none;padding:2px 0px;"
@@ -280,12 +280,12 @@ def _sheet() -> str:
         f"QPushButton#pLink:hover{{text-decoration:underline;}}",
         f"QPushButton#pLink:disabled{{color:{t.NEUTRAL[400]};}}",
         f"QPushButton#pSeg{{background:transparent;border:1px solid {t.HAIRLINE};"
-        f"border-radius:{t.R_CHIP}px;padding:3px 10px;min-height:18px;font-size:12px;"
-        f"font-weight:600;color:{t.NEUTRAL[600]};}}",
-        f"QPushButton#pSeg:checked{{background:{t.INFO_BG};color:{t.INFO_INK};"
+        f"border-radius:14px;padding:3px 10px;min-height:18px;font-size:12px;"
+        f"font-weight:500;color:{t.NEUTRAL[600]};}}",
+        f"QPushButton#pSeg:checked{{background:#EFEEEA;color:{t.INK};"
         f"border-color:{t.ACCENT};}}",
-        f"QToolButton#pMore{{background:{t.CARD};border:1px solid {t.BORDER};"
-        f"border-radius:{t.R_CONTROL}px;padding:4px;}}",
+        f"QToolButton#pMore{{background:{t.CARD};border:1px solid {t.HAIRLINE};"
+        f"border-radius:15px;padding:4px;}}",
         f"QToolButton#pMore::menu-indicator{{image:none;width:0px;}}",
         f"QPlainTextEdit#pNote{{font-size:13px;}}",
     ))

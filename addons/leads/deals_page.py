@@ -91,7 +91,7 @@ class _Card(QFrame):
             self.move_btn.setFixedHeight(24)
             self.move_btn.setStyleSheet(
                 f"QPushButton{{background:{theme.CARD};color:{theme.INK};border:1px solid {theme.HAIRLINE};"
-                f"border-radius:12px;padding:0 12px;font-size:13px;font-weight:500;}}"
+                f"border-radius:13px;padding:0 12px;min-height:26px;max-height:26px;font-size:13px;font-weight:500;}}"
                 f"QPushButton:hover{{background:{theme.WELL};border-color:{theme.BORDER};}}"
                 f"QPushButton::menu-indicator{{image:none;width:0px;}}")
             self.menu = QMenu(self.move_btn)
