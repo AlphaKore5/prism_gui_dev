@@ -35,15 +35,14 @@ class TodayInsights(unittest.TestCase):
         self.panel = HomePanel({})
         self.tiles = self.panel.findChildren(_StatTile)
 
-    def test_four_insight_tiles(self):
-        self.assertEqual(len(self.tiles), 4)
+    def test_no_register_collapses_the_three_inquiry_tiles_into_one(self):
+        # Was four tiles; with no register the three inquiry ones are one.
+        self.assertEqual(len(self.tiles), 2)
 
     def test_no_register_shows_a_dash_and_says_why(self):
-        # The first three read off the inquiry register; this panel has none.
-        for tile in self.tiles[:3]:
-            texts = _texts(tile)
-            self.assertEqual(texts[0], "–", texts)
-            self.assertIn("No inquiry register yet", texts)
+        texts = _texts(self.tiles[0])
+        self.assertEqual(texts[0], "–", texts)
+        self.assertIn("No inquiry register yet", texts)
 
     def test_every_tile_is_a_way_in(self):
         for tile in self.tiles:

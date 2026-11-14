@@ -50,7 +50,9 @@ class ATipShowsOnlyWhenAFestivalIsDue(unittest.TestCase):
         self.assertIsNotNone(col)
         # Both rows (post + reel) belong to the SAME, nearest festival --
         # never a mix of two different festivals' rows at once.
-        self.assertEqual(col.count(), 2)
+        # (one banner card holds the two rows)
+        from PySide6.QtWidgets import QFrame
+        self.assertEqual(len(col.findChildren(QFrame, "festivalTip")), 2)
         nearest = festivals.upcoming(3, today=date(2026, 11, 7))[0]
         self.assertEqual(nearest["name"], "Diwali")
 
