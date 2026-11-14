@@ -1491,7 +1491,7 @@ class LeadsCockpit(QWidget):
         self._next_btn.setToolTip("Next page")
         self._page_box = QComboBox()
         self._page_box.setObjectName("leadsSort")
-        self._page_box.setStyleSheet(_combo_sheet())
+        self._page_box.setStyleSheet(_combo_sheet().replace("31px", "30px"))   # 32 tall like ‹ ›
         self._page_box.setFixedWidth(72)
         for b in (self._prev_btn, self._next_btn):
             b.setCursor(Qt.PointingHandCursor)
@@ -3124,12 +3124,27 @@ def _pill(text: str, ink: str, bg: str) -> QLabel:
     return lab
 
 
+class _TabButton(QPushButton):
+    """A Leads tab: the active one carries a 2px ink underline as wide as its text (10px in from each side)."""
+    _on = False
+
+    def paintEvent(self, ev):
+        super().paintEvent(ev)
+        if self._on:
+            p = QPainter(self)
+            p.fillRect(10, self.height() - 2, self.width() - 20, 2, QColor(theme.INK))
+            p.end()
+
+
 def _mono_chip(text: str) -> QLabel:
     """The preview's `.chipm`: mono 11px on the soft stone, a 6px radius, no tint of blue."""
     lab = QLabel(text)
     lab.setStyleSheet(
         f"QLabel{{color:{theme.TEXT};background:#EFEEEA;border-radius:6px;padding:4px 8px;"
         f"font-family:{theme.FONT_MONO_STACK};font-size:10px;}}")
+    f = lab.font()
+    f.setLetterSpacing(QFont.AbsoluteSpacing, 0.2)
+    lab.setFont(f)
     lab.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
     return lab
 
@@ -3250,8 +3265,8 @@ class _ListsTab(QWidget):
             b.setCursor(Qt.PointingHandCursor)
             b.setStyleSheet(
                 f"QPushButton{{color:{theme.TEXT};background:{theme.CARD};"
-                f"border:1px solid {theme.BORDER};border-radius:{theme.R_CONTROL}px;"
-                f"padding:7px 13px;font-size:12px;font-weight:600;}}"
+                f"border:1px solid {theme.HAIRLINE};border-radius:16px;"
+                f"padding:0 14px;min-height:31px;max-height:31px;font-size:13px;font-weight:500;}}"
                 f"QPushButton:hover{{background:{theme.WELL};}}")
         refresh.clicked.connect(self.refresh)
         open_dir.clicked.connect(self._open_folder)
@@ -3316,6 +3331,7 @@ class _ListsTab(QWidget):
         for i, (path, name, size, mtime) in enumerate(files):
             self._grid.addWidget(self._file_card(path, name, size, mtime),
                                  i // 2, i % 2)
+        self._grid.setRowStretch((len(files) + 1) // 2, 1)       # cards keep their own height
 
     def _file_card(self, path: str, name: str, size: int, mtime: float) -> QWidget:
         ext = os.path.splitext(name)[1].lower().lstrip(".")
@@ -3342,8 +3358,8 @@ class _ListsTab(QWidget):
         btn.setCursor(Qt.PointingHandCursor)
         btn.setStyleSheet(
             f"QPushButton{{color:#fff;background:{theme.ACCENT};border:none;"
-            f"border-radius:{theme.R_CONTROL}px;padding:7px 16px;font-size:12px;"
-            f"font-weight:600;}}"
+            f"border-radius:15px;padding:0 15px;min-height:30px;max-height:30px;"
+            f"font-size:13px;font-weight:500;}}"
             f"QPushButton:hover{{background:{theme.ACCENT_RAMP[600]};}}")
         btn.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
         btn.clicked.connect(lambda _=False, p=path: self._open(p))
@@ -3391,8 +3407,8 @@ class _SessionsTab(QWidget):
         refresh.setCursor(Qt.PointingHandCursor)
         refresh.setStyleSheet(
             f"QPushButton{{color:{theme.TEXT};background:{theme.CARD};"
-            f"border:1px solid {theme.BORDER};border-radius:{theme.R_CONTROL}px;"
-            f"padding:7px 13px;font-size:12px;font-weight:600;}}"
+            f"border:1px solid {theme.HAIRLINE};border-radius:16px;"
+            f"padding:0 14px;min-height:31px;max-height:31px;font-size:13px;font-weight:500;}}"
             f"QPushButton:hover{{background:{theme.WELL};}}")
         refresh.clicked.connect(self.refresh)
         head.addWidget(refresh)
@@ -3488,8 +3504,8 @@ class _SessionsTab(QWidget):
         btn.setCursor(Qt.PointingHandCursor)
         btn.setStyleSheet(
             f"QPushButton{{color:#fff;background:{theme.ACCENT};border:none;"
-            f"border-radius:{theme.R_CONTROL}px;padding:7px 16px;font-size:12px;"
-            f"font-weight:600;}}"
+            f"border-radius:15px;padding:0 15px;min-height:30px;max-height:30px;"
+            f"font-size:13px;font-weight:500;}}"
             f"QPushButton:hover{{background:{theme.ACCENT_RAMP[600]};}}"
             f"QPushButton:disabled{{background:{theme.NEUTRAL[200]};"
             f"color:{theme.NEUTRAL[600]};}}")
@@ -3662,16 +3678,16 @@ def _small_button(text: str, primary: bool) -> QPushButton:
     if primary:
         btn.setStyleSheet(
             f"QPushButton{{color:#fff;background:{theme.ACCENT};border:none;"
-            f"border-radius:{theme.R_CONTROL}px;padding:7px 16px;font-size:12px;"
-            f"font-weight:600;}}"
+            f"border-radius:15px;padding:0 15px;min-height:30px;max-height:30px;"
+            f"font-size:13px;font-weight:500;}}"
             f"QPushButton:hover{{background:{theme.ACCENT_RAMP[600]};}}"
             f"QPushButton:disabled{{background:{theme.NEUTRAL[200]};"
             f"color:{theme.NEUTRAL[600]};}}")
     else:
         btn.setStyleSheet(
             f"QPushButton{{color:{theme.NEUTRAL[700]};background:transparent;"
-            f"border:1px solid transparent;border-radius:{theme.R_CONTROL}px;"
-            f"padding:6px 12px;font-size:12px;font-weight:600;}}"
+            f"border:1px solid transparent;border-radius:15px;"
+            f"padding:0 13px;min-height:28px;max-height:28px;font-size:13px;font-weight:500;}}"
             f"QPushButton:hover{{background:{theme.ERR_BG};color:{theme.ERR_INK};}}")
     btn.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
     return btn
@@ -3938,11 +3954,11 @@ class LeadsWorkspace(QWidget):
             f"QFrame#wsTabs{{background:{theme.CARD};border:none;"
             f"border-bottom:1px solid {theme.HAIRLINE};}}")
         lay = QHBoxLayout(bar)
-        lay.setContentsMargins(6, 0, 12, 0)
+        lay.setContentsMargins(9, 0, 12, 0)
         lay.setSpacing(0)
         self._tabs = []
         for i, name in enumerate(_TABS):
-            b = QPushButton(name)
+            b = _TabButton(name)
             b.setCursor(Qt.PointingHandCursor)
             b.setFlat(True)
             b.clicked.connect(lambda _=False, k=i: self._select(k))
@@ -3963,19 +3979,19 @@ class LeadsWorkspace(QWidget):
         return bar
 
     def _style_tab(self, b: QPushButton, active: bool) -> None:
-        # border-radius:0 on purpose: the app-wide QPushButton radius would curl
-        # the ends of the 2px underline up into a bracket.
+        # The ink underline is painted by _TabButton, inset by the padding like the preview's
+        # `.utabs button.on::after` (a QSS border would run the full width of the padded button).
+        b._on = active
         if active:
             b.setStyleSheet(
-                f"QPushButton{{background:transparent;border:none;border-radius:0px;"
-                f"border-bottom:2px solid {theme.INK};color:{theme.INK};"
-                f"padding:0 10px;min-height:42px;margin-bottom:-1px;font-size:14px;font-weight:500;}}")
+                f"QPushButton{{background:transparent;border:none;border-radius:0px;color:{theme.INK};"
+                f"padding:0 10px;min-height:44px;font-size:14px;font-weight:500;}}")
         else:
             b.setStyleSheet(
                 f"QPushButton{{background:transparent;border:none;border-radius:0px;"
-                f"border-bottom:2px solid transparent;color:{theme.NEUTRAL[600]};"
-                f"padding:0 10px;min-height:42px;font-size:14px;font-weight:400;}}"
+                f"color:{theme.NEUTRAL[600]};padding:0 10px;min-height:44px;font-size:14px;font-weight:400;}}"
                 f"QPushButton:hover{{color:{theme.TEXT};}}")
+        b.update()
 
     def _select(self, i: int) -> None:
         self._stack.setCurrentIndex(i)

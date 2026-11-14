@@ -90,9 +90,9 @@ class _Card(QFrame):
             self.move_btn.setCursor(Qt.PointingHandCursor)
             self.move_btn.setFixedHeight(24)
             self.move_btn.setStyleSheet(
-                f"QPushButton{{background:transparent;color:{theme.NEUTRAL[700]};border:1px solid {theme.NEUTRAL[300]};"
-                f"border-radius:{theme.R_CHIP}px;padding:0 10px;font-size:12px;font-weight:600;}}"
-                f"QPushButton:hover{{background:{theme.NEUTRAL[100]};}}"
+                f"QPushButton{{background:{theme.CARD};color:{theme.INK};border:1px solid {theme.HAIRLINE};"
+                f"border-radius:12px;padding:0 12px;font-size:13px;font-weight:500;}}"
+                f"QPushButton:hover{{background:{theme.WELL};border-color:{theme.BORDER};}}"
                 f"QPushButton::menu-indicator{{image:none;width:0px;}}")
             self.menu = QMenu(self.move_btn)
             self.actions_by_stage = {}

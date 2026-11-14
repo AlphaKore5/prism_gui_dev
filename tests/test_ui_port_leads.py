@@ -46,8 +46,18 @@ class TheTabStrip(unittest.TestCase):
         self.assertGreaterEqual(tab.height(), 43)
         self.assertLessEqual(tab.height(), 45)
         self.assertIn("font-size:14px", tab.styleSheet())
-        self.assertIn(f"border-bottom:2px solid {theme.INK}", tab.styleSheet())
-        self.assertNotIn(f"border-bottom:2px solid {theme.INK}", self.w._tabs[1].styleSheet())
+        self.assertTrue(tab._on)
+        self.assertFalse(self.w._tabs[1]._on)
+
+    def test_the_underline_is_painted_as_wide_as_the_text_not_the_button(self):
+        tab = self.w._tabs[0]
+        img = tab.grab().toImage()
+        y = img.height() - 1
+        ink = [x for x in range(img.width()) if img.pixelColor(x, y).name().lower() == theme.INK.lower()]
+        self.assertTrue(ink)
+        self.assertEqual((min(ink), max(ink)), (10, tab.width() - 11))
+        other = self.w._tabs[1].grab().toImage()
+        self.assertFalse([x for x in range(other.width()) if other.pixelColor(x, other.height() - 1).name().lower() == theme.INK.lower()])
 
     def test_every_tab_still_switches_the_page(self):
         for i, b in enumerate(self.w._tabs):
@@ -155,6 +165,52 @@ class TheFilterRail(unittest.TestCase):
         self.assertIn("QPushButton:checked{background:" + theme.CARD, sheet)
         ck._tab_btns["net_new"].click()
         self.assertEqual(ck.tab(), "net_new")
+
+
+class TheOtherTabsAndPager(unittest.TestCase):
+    def setUp(self):
+        self.w = _workspace()
+
+    def test_the_credits_chip_fits_beside_ten_tabs_at_1366(self):
+        self.w.resize(1000, 640)                      # the card inside a 1366 window
+        _app.processEvents()
+        chip = [l for l in self.w.findChildren(QLabel) if l.text() == "Your credits · your inbox"][0]
+        self.assertGreaterEqual(chip.width(), chip.sizeHint().width())
+        self.assertAlmostEqual(chip.font().letterSpacing(), 0.2, delta=0.05)
+
+    def test_the_page_picker_and_arrows_are_the_same_32px(self):
+        ck = self.w.leads
+        hs = {n: getattr(ck, n).sizeHint().height() for n in ("_prev_btn", "_page_box", "_next_btn")}
+        self.assertEqual(set(hs.values()), {32}, hs)
+
+    def test_lists_buttons_are_soft_pills_and_the_cards_keep_their_height(self):
+        d = tempfile.mkdtemp()
+        for n in ("a.csv", "b.csv"):
+            open(os.path.join(d, n), "w").write("name\nx\n")
+        tab = CK._ListsTab(d) if hasattr(CK, "_ListsTab") else None
+        self.assertIsNotNone(tab)
+        tab.resize(900, 700)
+        tab.show()
+        _app.processEvents()
+        btns = {b.text(): b for b in tab.findChildren(QPushButton)}
+        for t in ("Refresh", "Open folder"):
+            self.assertIn("border-radius:16px", btns[t].styleSheet())
+            self.assertIn("font-size:13px;font-weight:500", btns[t].styleSheet())
+        self.assertIn("border-radius:15px", btns["Open"].styleSheet())
+        card = btns["Open"].parentWidget()
+        self.assertLess(card.height(), 200)
+
+    def test_the_deals_move_button_is_a_white_ringed_pill(self):
+        from addons.leads import deals_page as DP
+        from addons.leads import deals as DL
+        deal = DL.Deal(**{k: v for k, v in dict(id="d1", title="Panel order", company="Patel", value=1000.0).items()
+                          if k in DL.Deal.__dataclass_fields__})
+        card = DP._Card(deal, 0, [("Proposal", "Proposal", lambda: None)])
+        sheet = card.move_btn.styleSheet()
+        self.assertIn(f"background:{theme.CARD}", sheet)
+        self.assertIn(f"border:1px solid {theme.HAIRLINE}", sheet)
+        self.assertIn("border-radius:12px", sheet)
+        self.assertEqual(card.move_btn.maximumHeight(), 24)
 
 
 if __name__ == "__main__":
