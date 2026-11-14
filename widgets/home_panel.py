@@ -741,24 +741,6 @@ class ActiveRunCard(C.Card):
         return chain
 
 
-# One short demo video per main feature, shown under the composer so a new
-# person can see what Prism does without leaving the app. A tile plays
-# assets/demos/<key>.mp4 when that file exists. Until it is recorded the tile
-# stays off and says so; dropping the file in turns it on, no code change.
-DEMOS = (
-    ("reel", "Make a reel", "A 9:16 video from one sentence", "reel"),
-    ("boq", "Bill of Quantities", "From a drawing to a priced sheet", "boq"),
-    ("inquiry", "Email inquiries", "Quote, remind, record the order", "inquiry"),
-    ("leads", "Leads & Outreach", "Find people, draft, send", "leads"),
-)
-
-
-def demo_path(key: str) -> str:
-    """The recorded demo for a feature, or "" when it has not been made yet."""
-    p = paths.resource("assets", "demos", f"{key}.mp4")
-    return p if os.path.isfile(p) else ""
-
-
 class _FlatCard(C.Card):
     """An EmptyState's own card, drawn as nothing: on Home it already sits in
     the Recent activity card, and a card inside a card was visual duplication."""
@@ -769,90 +751,6 @@ class _FlatCard(C.Card):
 
 def _flatten(empty) -> None:
     empty.card.__class__ = _FlatCard
-
-
-def _small_title(text: str) -> "_Elided":
-    lbl = _Elided(text, "BODY", weight=500)
-    lbl.setStyleSheet(lbl.styleSheet() + " font-size: 13px; color: #111110;")
-    return lbl
-
-
-class _Cell(QFrame):
-    """A compact, clickable cell of the strip under Recent activity: soft
-    grey like an add-on tile, white on hover."""
-
-    clicked = Signal()
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setObjectName("stripCell")
-        self.setMinimumHeight(46)
-        self.setAttribute(Qt.WA_StyledBackground, True)
-        self.setStyleSheet(
-            "QFrame#stripCell { background: #F6F5F2; border: 1px solid #E6E5E1; border-radius: 10px; }"
-            "QFrame#stripCell:hover { background: #FFFFFF; border-color: #D8D7D2; }"
-            "QFrame#stripCell:disabled { background: #F6F5F2; }")
-
-    def mousePressEvent(self, event):
-        if self.isEnabled():
-            self.clicked.emit()
-        super().mousePressEvent(event)
-
-    def keyPressEvent(self, event):
-        if self.isEnabled() and event.key() in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Space):
-            self.clicked.emit()
-            return
-        super().keyPressEvent(event)
-
-
-class _StatTile(_Cell):
-    """One number that matters today. Opens the screen where it is acted on."""
-
-    def __init__(self, number: str, title: str, caption: str, parent=None):
-        super().__init__(parent)
-        self.setCursor(Qt.PointingHandCursor)
-        self.setFocusPolicy(Qt.TabFocus)
-        row = QHBoxLayout(self)
-        row.setContentsMargins(10, 6, 10, 6)
-        row.setSpacing(10)
-        num = QLabel(number)
-        num.setStyleSheet(f"font-family: '{theme.FONT_DISPLAY}'; font-size: 22px; "
-                          f"font-weight: 700; color: {theme.INK}; background: transparent; border: none;")
-        row.addWidget(num)
-        col = QVBoxLayout()
-        col.setContentsMargins(0, 0, 0, 0)
-        col.setSpacing(0)
-        col.addWidget(_small_title(title))
-        col.addWidget(_Elided(caption, "META", theme.MUTE))
-        row.addLayout(col, 1)
-        self.setToolTip(f"{title}: {caption}")
-
-
-class _DemoTile(_Cell):
-    """A demo-video tile. Off, with the reason, until its video exists."""
-
-    def __init__(self, title: str, caption: str, icon_name: str, video: str, parent=None):
-        super().__init__(parent)
-        self._video = video
-        row = QHBoxLayout(self)
-        row.setContentsMargins(6, 6, 10, 6)
-        row.setSpacing(8)
-        thumb = QLabel()
-        thumb.setAlignment(Qt.AlignCenter)
-        thumb.setFixedSize(30, 30)
-        thumb.setStyleSheet(
-            "background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #3a3a38, stop:1 #111110);"
-            " border-radius: 9px; border: none;")
-        thumb.setPixmap(_pixel_play(14) if video else icons.icon(icon_name, 14, "#FFFFFF").pixmap(14, 14))
-        row.addWidget(thumb)
-        row.addWidget(_small_title(title), 1)
-        if video:
-            self.setCursor(Qt.PointingHandCursor)
-            self.setFocusPolicy(Qt.TabFocus)
-            self.setToolTip(f"{title}: {caption}")
-        else:
-            self.setEnabled(False)
-            self.setToolTip(i18n.t("This demo hasn't been recorded yet."))
 
 
 class HomePanel(QWidget):
@@ -1004,9 +902,6 @@ class HomePanel(QWidget):
 
         # 3. Bottom section (Left: Recent activity; Right: Add-ons)
         self._col.addLayout(self._bottom_section(runs, stalled))
-
-        # 4. One compact strip: Today's numbers and the demo videos
-        self._col.addWidget(self._strip_card())
         self._col.addStretch(1)
 
     def _drop(self, layout):
@@ -1388,75 +1283,6 @@ class HomePanel(QWidget):
             hint.setStyleSheet(theme.type_css("MONO", theme.MUTE) + " font-size: 11px;")
             row.addWidget(hint)
         return row
-
-    def _strip_card(self) -> QWidget:
-        """ONE short card under Recent activity and Add-ons: Today's numbers
-        and the demo videos, one row of small cells each. The numbers are read
-        from the register and the run records; nothing is invented. With no
-        register the three inquiry cells collapse into one that says so and
-        still opens Email Inquiries."""
-        needs = DATA.needs_you(self.cfg, self._rows)
-        month = DATA.month_summary(self.cfg, self._rows)
-        done, failed = DATA.run_counts(self.cfg, 7)
-        have = bool(self._rows)
-        dash = "–"
-        inquiry = (
-            (str(needs["to_quote"]) if have else dash, i18n.t("Inquiries to quote"),
-             i18n.t("Waiting for your price") if needs["to_quote"] else
-             (i18n.t("Nothing waiting") if have else i18n.t("No inquiry register yet")),
-             lambda: self.open_addon.emit("inquiry")),
-            (str(needs["waiting"]) if have else dash, i18n.t("Quotations, no answer"),
-             (i18n.t("{n} need a reminder today").format(n=needs["due"]) if needs["due"] else
-              (i18n.t("Nobody to chase") if have else i18n.t("No inquiry register yet"))),
-             lambda: self.open_addon.emit("inquiry")),
-            (str(month["converted"]) if month else dash, i18n.t("Orders this month"),
-             month["month"] if month else i18n.t("No inquiry register yet"),
-             lambda: self.open_addon.emit("inquiry")),
-        )
-        tasks = (str(done + failed), i18n.t("Tasks run this week"),
-                 (i18n.t("{n} did not finish").format(n=failed) if failed else
-                  i18n.t("All saved in History")),
-                 self.open_history.emit)
-        if not have and not month:
-            inquiry = ((dash, i18n.t("Inquiry register"),
-                        i18n.t("No inquiry register yet"),
-                        lambda: self.open_addon.emit("inquiry")),)
-        tiles = inquiry + (tasks,)
-        card = C.Card()
-        row = QHBoxLayout()
-        card.body((theme.SPACE_3, theme.SPACE_3, theme.SPACE_3, theme.SPACE_3),
-                  spacing=0).addLayout(row)
-        row.setSpacing(theme.SPACE_2)
-        today_col = QVBoxLayout()
-        today_col.setSpacing(theme.SPACE_1)
-        today_col.addWidget(C.kicker(i18n.t("Today")))
-        cells = QHBoxLayout()
-        cells.setSpacing(theme.SPACE_2)
-        for number, title, caption, go in tiles:
-            tile = _StatTile(number, title, caption)
-            tile.clicked.connect(go)
-            cells.addWidget(tile, stretch=1)
-        today_col.addLayout(cells)
-        row.addLayout(today_col, stretch=15 * len(tiles))
-
-        demo_col = QVBoxLayout()
-        demo_col.setSpacing(theme.SPACE_1)
-        demo_col.addWidget(C.kicker(i18n.t("See Prism work")))
-        demos = QHBoxLayout()
-        demos.setSpacing(theme.SPACE_2)
-        for key, title, caption, icon_name in DEMOS:
-            video = demo_path(key)
-            tile = _DemoTile(i18n.t(title), i18n.t(caption), icon_name, video)
-            if video:
-                tile.clicked.connect(lambda _p=video: self._open_demo(_p))
-            demos.addWidget(tile, stretch=1)
-        demo_col.addLayout(demos)
-        row.addLayout(demo_col, stretch=60)
-        return card
-
-    def _open_demo(self, path: str):
-        from dialogs.preview_dialog import open_preview
-        open_preview(path, self, demo_mode=True)
 
     def _bottom_section(self, runs, stalled) -> QHBoxLayout:
         row = QHBoxLayout()

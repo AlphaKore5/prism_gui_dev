@@ -387,7 +387,7 @@ class HomeCardsAndButtonsHaveShadows(unittest.TestCase):
         home.resize(1200, 1200)
         home.show()
         cards = [c for c in home.findChildren(C.Card)]
-        self.assertGreaterEqual(len(cards), 4)           # composer, recent, add-ons, Today/demos strip
+        self.assertGreaterEqual(len(cards), 3)           # composer, recent, add-ons
         for c in cards:
             nested = isinstance(c.parentWidget().parentWidget(), C.Card) or any(
                 isinstance(w, C.Card) for w in _ancestors(c))
