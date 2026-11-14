@@ -190,6 +190,19 @@ _STROKED.update({
     "arrow-right": ["M5 12h14M13.5 6.5 19 12l-5.5 5.5"],
 })
 
+# The preview's glyphs that the Home page uses and no other screen did yet. New
+# names, so nothing that already draws "film", "command" or "sparkles" changes.
+_STROKED.update({
+    "cmd":      ["M9 6.5a2.5 2.5 0 1 0-2.5 2.5h11A2.5 2.5 0 1 0 15 6.5v11a2.5 2.5 0 1 0 2.5-2.5"
+                 "h-11A2.5 2.5 0 1 0 9 17.5z"],
+    "spark":    ["M12 4v4M12 16v4M4 12h4M16 12h4M7 7l1.8 1.8M15.2 15.2 17 17M17 7l-1.8 1.8"
+                 "M8.8 15.2 7 17"],
+    "bars":     ["M6 19V11M12 19V5M18 19v-6"],
+    "film-box": [_rect(3.5, 4.5, 17, 15, 2),
+                 "M7.5 4.5v15M16.5 4.5v15M3.5 9.5h4M3.5 14.5h4M16.5 9.5h4M16.5 14.5h4"],
+    "more-dots": [_circle(6, 12, .9), _circle(12, 12, .9), _circle(18, 12, .9)],
+})
+
 # Icons the design fills rather than strokes.
 _FILLED: dict[str, list[str]] = {
     "play": ["M7 5l12 7-12 7z"],
@@ -282,6 +295,23 @@ def pixmap(name: str, size: int = 18, color: str = theme.TEXT,
 def icon(name: str, size: int = 18, color: str = theme.TEXT,
          stroke: float = 1.7) -> QIcon:
     return QIcon(pixmap(name, size, color, stroke))
+
+
+def icon_gapped(name: str, size: int = 14, color: str = theme.TEXT,
+                gap: float = 3, stroke: float = 1.7) -> QIcon:
+    """An icon with `gap` extra transparent px on its right. Qt puts a fixed
+    4px between a button's icon and its text; the preview has ~6.6px, and the
+    only handle on that is a wider icon."""
+    app = QApplication.instance()
+    dpr = app.devicePixelRatio() if app else 1.0
+    base = pixmap(name, size, color, stroke)
+    px = QPixmap(int((size + gap) * dpr + .5), int(size * dpr + .5))
+    px.setDevicePixelRatio(dpr)
+    px.fill(Qt.transparent)
+    p = QPainter(px)
+    p.drawPixmap(0, 0, base)
+    p.end()
+    return QIcon(px)
 
 
 def button_icon(btn, name: str, size: int = 16, color: str = theme.TEXT,

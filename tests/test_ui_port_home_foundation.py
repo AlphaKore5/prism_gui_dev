@@ -119,9 +119,8 @@ class HomeCarriesThePreviewsPieces(unittest.TestCase):
     def test_the_send_button_is_a_pill_with_the_red_dot(self):
         send = self.home.findChild(QPushButton, "promptSendBtn")
         self.assertIsNotNone(send)
-        self.assertFalse(send.icon().isNull())
+        self.assertIsInstance(send, H._SendButton)      # painted (polish pass): gradient pill + red dot
         self.assertTrue(send.toolTip())                # says what it does
-        self.assertIn("qlineargradient", QSS.split("#promptSendBtn {", 1)[1].split("}", 1)[0])
 
     def test_the_motto_is_a_mono_pill_with_a_red_square(self):
         motto = [w for w in self.home.findChildren(H._Motto)]
@@ -143,8 +142,8 @@ class HomeCarriesThePreviewsPieces(unittest.TestCase):
         self.assertTrue(all(s.text() == "READY" for s in states))
 
     def test_the_demo_button_is_a_light_gradient_pill(self):
-        block = QSS.split("#tourPlayBtn {", 1)[1].split("}", 1)[0]
-        self.assertIn("qlineargradient", block)
+        btn = self.home.findChild(QPushButton, "tourPlayBtn")
+        self.assertIsInstance(btn, H._WatchDemoButton)   # painted: white gradient pill + dark play chip
 
 
 if __name__ == "__main__":

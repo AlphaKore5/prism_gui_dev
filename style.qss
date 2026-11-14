@@ -2033,12 +2033,6 @@ QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
 
 
 
-#heroPromptCard {
-    background: #ffffff;
-    border: 1px solid #E6E5E1;
-    border-radius: 18px;
-}
-
 #heroPromptInput {
     background: transparent;
     border: none;
@@ -2047,43 +2041,35 @@ QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
     padding: 4px 0px;
 }
 
+/* composer chips: the preview's .chip, 34px, 13px, ring #E6E5E1, white on hover
+   (the hover shadow is painted by controls.ShadowUnder) */
 #promptChipBtn {
     background: #F6F5F2;
     border: 1px solid #E6E5E1;
-    border-radius: 16px;
-    padding: 5px 12px;
+    border-radius: 17px;
+    padding: 0px 12px;
+    min-height: 32px;
+    max-height: 32px;
     font-size: 13px;
     font-weight: 400;
     color: #2a2a28;
 }
 
 #promptChipBtn:hover {
-    background: #EFEEEA;
+    background: #ffffff;
     border-color: #D8D7D2;
 }
 
-#promptSendBtn {
-    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #3a3a38, stop:1 #0c0c0b);
-    border: 1px solid #0c0c0b;
-    border-radius: 20px;
-    min-width: 51px;
-    max-width: 51px;
-    min-height: 40px;
-    max-height: 40px;
-    padding: 0;
-}
-
-#promptSendBtn:hover {
-    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #4a4a48, stop:1 #1c1c1b);
-}
-
+/* "Try" chips: .try .chip, 32px, white at 60%, 13px weight 500 ink */
 #tryChip {
-    background: #ffffff;
+    background: rgba(255, 255, 255, 0.6);
     border: 1px solid #E6E5E1;
     border-radius: 16px;
-    padding: 4px 12px;
+    padding: 0px 12px;
+    min-height: 30px;
+    max-height: 30px;
     font-size: 13px;
-    color: #2a2a28;
+    color: #111110;
     font-weight: 500;
 }
 
@@ -2092,43 +2078,18 @@ QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
     border-color: #D8D7D2;
 }
 
+/* the demo card paints itself (painting, wash, ring), see ShowcaseTourCard */
 #tourCard {
-    background-color: #0b1120;
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    border-radius: 18px;
-}
-
-#tourPlayBtn {
-    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #ffffff, stop:1 #f8f7f4);
-    color: #111110;
-    border: 1px solid rgba(20, 20, 18, 0.08);
-    border-radius: 18px;
-    padding: 7px 16px;
-    font-weight: 500;
-    font-size: 13px;
-}
-
-#tourPlayBtn:hover {
-    background: #f6f5f2;
-}
-
-#toolTile {
-    background: #ffffff;
-    border: 1px solid #E6E5E1;
-    border-radius: 12px;
-    padding: 6px;
-}
-
-#toolTile:hover {
-    background: rgba(255, 255, 255, 0.92);
-    border-color: #D8D7D2;
+    background: transparent;
+    border: none;
+    border-radius: 17px;
 }
 
 #recentMenuBtn {
     background: transparent;
     border: none;
-    border-radius: 6px;
-    padding: 4px;
+    border-radius: 10px;
+    padding: 0px;
 }
 
 #recentMenuBtn:hover {

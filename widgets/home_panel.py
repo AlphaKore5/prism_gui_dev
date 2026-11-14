@@ -42,11 +42,11 @@ import os
 
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import (
-    QBrush, QColor, QCursor, QFontMetrics, QLinearGradient, QPainter,
-    QPainterPath, QPen, QPixmap,
+    QBrush, QColor, QCursor, QFont, QFontMetrics, QLinearGradient, QPainter,
+    QPainterPath, QPen, QPixmap, QRadialGradient,
 )
 from PySide6.QtWidgets import (
-    QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QMenu,
+    QApplication, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QMenu,
     QPushButton, QScrollArea, QSizePolicy, QVBoxLayout, QWidget,
 )
 
@@ -251,32 +251,71 @@ class _Row(QFrame):
         super().keyPressEvent(event)
 
 
+class _TimelineRow(_Row):
+    """A Recent activity row. No border (a 1px one would leave a gap in the
+    timeline wire at every row); keyboard focus paints its ring instead."""
+
+    def __init__(self, parent=None):
+        super().__init__(True, parent)
+        self.setStyleSheet(f"#rowFlat {{ border: none; }}"
+                           f"#rowFlat:focus {{ background: {theme.WELL}; }}")
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        if self.hasFocus():
+            p = QPainter(self)
+            p.setRenderHint(QPainter.Antialiasing, True)
+            p.setPen(QPen(QColor(theme.ACCENT), 1))
+            p.setBrush(Qt.NoBrush)
+            p.drawRoundedRect(QRectF(self.rect()).adjusted(.5, .5, -.5, -.5), 8, 8)
+            p.end()
+
+
 class TimelineNode(QWidget):
-    """Paints vertical timeline connector track with centered node dot."""
+    """The preview's `.acts li::before/::after`: a 1.2px #CBCAC4 wire at the left
+    of the row (from the row's middle on the first row, full height otherwise)
+    and a 7.4px ink dot centred on the row."""
+
+    WIRE = "#CBCAC4"
 
     def __init__(self, is_first: bool = False, is_last: bool = False, parent=None):
         super().__init__(parent)
-        self.setFixedWidth(20)
+        self.setFixedWidth(8)
         self._is_first = is_first
         self._is_last = is_last
 
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
-        w, h = self.width(), self.height()
-        cx = w / 2.0
+        h = float(self.height())
         cy = h / 2.0
-
-        pen = QPen(theme.qcolor(theme.DIVIDER))
-        pen.setWidth(1)
-        painter.setPen(pen)
         top_y = cy if self._is_first else 0.0
-        bot_y = cy if self._is_last else float(h)
-        painter.drawLine(QPointF(cx, top_y), QPointF(cx, bot_y))
-
         painter.setPen(Qt.NoPen)
-        painter.setBrush(QBrush(theme.qcolor(theme.ACCENT)))
-        painter.drawEllipse(QPointF(cx, cy), 3.5, 3.5)
+        painter.setBrush(QColor(self.WIRE))
+        painter.drawRect(QRectF(3.8, top_y, 1.2, h - top_y))
+        painter.setBrush(QColor(theme.INK))
+        painter.drawEllipse(QPointF(4.0, cy), 3.7, 3.7)
+
+
+# The add-on word a task starts with (how every task a user types is routed) and
+# the preview's line icon for it. Anything else is a plain document.
+_RUN_ICON = {
+    "boq": "sheet", "step": "cube", "gerber": "chip", "bom": "box",
+    "/reel": "film-box", "reel": "film-box", "/motion": "video", "motion": "video",
+    "email": "mail", "leads": "user", "inquiry": "inbox",
+}
+
+
+def _run_icon(run: dict) -> str:
+    """The line icon for a Home run row, by the add-on the task named first
+    (display only: the row opens the same record as before)."""
+    words = (run.get("title") or run.get("query") or "").strip().lower().split()
+    first = words[0].strip("—-:,.") if words else ""
+    if first in _RUN_ICON:
+        return _RUN_ICON[first]
+    if any("studio" in (t or "").lower() for t in (run.get("tools") or [])):
+        return "film-box"
+    return "file"
 
 
 class _Motto(QLabel):
@@ -287,6 +326,210 @@ class _Motto(QLabel):
         p = QPainter(self)
         p.fillRect(14, (self.height() - 6) // 2, 6, 6, QColor(theme.BRAND_RED))
         p.end()
+
+
+def _hl_pen(w: float, h: float, top_alpha: int) -> QPen:
+    """A 1px pen that is `top_alpha` white at the top of a w x h shape and gone
+    by 45% down: the preview's `inset 0 1px 0 rgba(255,255,255,a)`."""
+    g = QLinearGradient(0, 0, 0, h)
+    g.setColorAt(0.0, QColor(255, 255, 255, top_alpha))
+    g.setColorAt(0.45, QColor(255, 255, 255, 0))
+    g.setColorAt(1.0, QColor(255, 255, 255, 0))
+    return QPen(QBrush(g), 1)
+
+
+def _glow_gradient(cx: float, cy: float, r: float, blur: float, rgb, alpha: float) -> QRadialGradient:
+    """`0 0 <blur> rgba(rgb, alpha)` around a circle of radius r: a radial gradient
+    whose alpha follows the gaussian edge profile (sigma = blur / 2)."""
+    import math
+    sigma = blur / 2.0
+    reach = 2.5 * sigma
+    g = QRadialGradient(QPointF(cx, cy), r + reach)
+    for i in range(0, 13):
+        d = reach * i / 12.0
+        a = alpha * 0.5 * math.erfc(d / (sigma * math.sqrt(2)))
+        g.setColorAt((r + d) / (r + reach), QColor(rgb[0], rgb[1], rgb[2], int(round(a * 255))))
+    g.setColorAt(0.0, QColor(rgb[0], rgb[1], rgb[2], int(round(alpha * 0.5 * 255))))
+    return g
+
+
+def _pixel_glyph(p: QPainter, cx: float, cy: float, size: float, cells, colour="#FFFFFF"):
+    """The preview's 18-unit pixel glyphs (parrow / pplay): 2x2 squares."""
+    u = size / 18.0
+    ox, oy = cx - 9 * u, cy - 9 * u
+    p.setPen(Qt.NoPen)
+    p.setBrush(QColor(colour))
+    for x, y in cells:
+        p.drawRect(QRectF(ox + x * u, oy + y * u, 2 * u, 2 * u))
+
+
+PIXEL_ARROW = ((2, 8), (5, 8), (8, 8), (11, 8), (11, 5), (11, 11), (14, 8))
+PIXEL_PLAY = ((5, 3), (5, 6), (5, 9), (5, 12), (8, 5), (8, 8), (8, 11), (11, 7))
+
+
+def _pixel_play(size: int) -> QPixmap:
+    """The preview's pixel play glyph on a transparent pixmap (a demo tile's picture)."""
+    app = QApplication.instance()
+    dpr = app.devicePixelRatio() if app else 1.0
+    pm = QPixmap(int(size * dpr), int(size * dpr))
+    pm.setDevicePixelRatio(dpr)
+    pm.fill(Qt.transparent)
+    p = QPainter(pm)
+    _pixel_glyph(p, size / 2, size / 2, size, PIXEL_PLAY)
+    p.end()
+    return pm
+
+
+class _SendButton(QPushButton):
+    """The preview's `.send`: a 53x43 dark gradient pill carrying a 32px red dot
+    with the pixel ARROW, a red glow and a soft shadow under the pill. Painted;
+    clicked, tooltip, cursor and the objectName are the plain button's."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("promptSendBtn")
+        # the app sheet's QPushButton min-height/padding would override a fixed size
+        self.setStyleSheet("min-height: 43px; max-height: 43px; padding: 0px; border: none;")
+        self.setFixedSize(53, 43)
+        self.setCursor(Qt.PointingHandCursor)
+        C.attach_shadow(self, C.SH_SEND)
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        w, h = float(self.width()), float(self.height())
+        body = QRectF(0, 0, w, h)
+        if self.isDown():
+            top = bot = "#0c0c0b"
+        elif self.underMouse():
+            top, bot = "#4a4a48", "#1c1c1b"
+        else:
+            top, bot = "#3a3a38", "#0c0c0b"
+        g = QLinearGradient(0, 0, 0, h)
+        g.setColorAt(0, QColor(top))
+        g.setColorAt(1, QColor(bot))
+        p.setPen(QPen(QColor(0, 0, 0, 89), 1))          # 0 0 0 1px rgba(0,0,0,.35)
+        p.setBrush(QBrush(g))
+        p.drawRoundedRect(body.adjusted(.5, .5, -.5, -.5), h / 2, h / 2)
+        p.setPen(_hl_pen(w, h, 41))                      # inset 0 1px 0 .16
+        p.setBrush(Qt.NoBrush)
+        p.drawRoundedRect(body.adjusted(1.5, 1.5, -1.5, -1.5), h / 2 - 1, h / 2 - 1)
+        d = 32.0
+        cx, cy = w / 2, h / 2
+        clip = QPainterPath()
+        clip.addRoundedRect(body, h / 2, h / 2)
+        p.setClipPath(clip)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QBrush(_glow_gradient(cx, cy, d / 2, 14.7, (222, 48, 36), .4)))
+        p.drawEllipse(QPointF(cx, cy), d / 2 + 18.4, d / 2 + 18.4)
+        p.setClipping(False)
+        dot = QRectF(cx - d / 2, cy - d / 2, d, d)
+        rg = QLinearGradient(0, dot.top(), 0, dot.bottom())
+        rg.setColorAt(0, QColor("#F4523A"))
+        rg.setColorAt(1, QColor("#C81A1C"))
+        p.setBrush(QBrush(rg))
+        p.drawEllipse(dot)
+        p.setPen(QPen(QBrush(self._dot_highlight(dot)), 1))   # inset 0 1px 0 .5
+        p.setBrush(Qt.NoBrush)
+        p.drawEllipse(dot.adjusted(1.5, 1.5, -1.5, -1.5))
+        _pixel_glyph(p, cx, cy, 17.0, PIXEL_ARROW)
+
+    @staticmethod
+    def _dot_highlight(dot: QRectF) -> QLinearGradient:
+        g = QLinearGradient(0, dot.top(), 0, dot.bottom())
+        g.setColorAt(0.0, QColor(255, 255, 255, 128))
+        g.setColorAt(0.45, QColor(255, 255, 255, 0))
+        g.setColorAt(1.0, QColor(255, 255, 255, 0))
+        return g
+
+
+class _WatchDemoButton(QPushButton):
+    """The preview's `.btn.light.sm` with a dark `.ic` chip: white gradient pill,
+    25px near-black round chip carrying the pixel play glyph, then the label."""
+
+    def __init__(self, text: str, parent=None):
+        super().__init__(text, parent)
+        self.setObjectName("tourPlayBtn")
+        self.setStyleSheet("min-height: 33px; max-height: 33px; padding: 0px; border: none;")
+        self.setFixedHeight(33)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        C.attach_shadow(self, C.SH_LIGHT_BTN)
+
+    def _font(self) -> QFont:
+        f = QFont(theme.FONT_BODY)
+        f.setPixelSize(13)
+        f.setWeight(QFont.Medium)
+        return f
+
+    def sizeHint(self) -> QSize:
+        tw = QFontMetrics(self._font()).horizontalAdvance(self.text())
+        return QSize(int(4.4 + 25 + 8.8 + tw + 17 + .5), 33)
+
+    def minimumSizeHint(self) -> QSize:
+        return self.sizeHint()
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        w, h = float(self.width()), float(self.height())
+        body = QRectF(0, 0, w, h)
+        g = QLinearGradient(0, 0, 0, h)
+        g.setColorAt(0, QColor("#FFFFFF"))
+        g.setColorAt(1, QColor("#F8F7F4"))
+        if self.isDown():
+            g = QColor("#EFEEEA")
+        p.setPen(QPen(QColor(20, 20, 18, 56 if self.underMouse() else 20), 1))
+        p.setBrush(QBrush(g))
+        p.drawRoundedRect(body.adjusted(.5, .5, -.5, -.5), h / 2, h / 2)
+        d = 25.0
+        cx, cy = 4.4 + d / 2, h / 2
+        dot = QRectF(cx - d / 2, cy - d / 2, d, d)
+        rg = QLinearGradient(0, dot.top(), 0, dot.bottom())
+        rg.setColorAt(0, QColor("#3a3a38"))
+        rg.setColorAt(1, QColor("#111110"))
+        p.setPen(Qt.NoPen)
+        p.setBrush(QBrush(rg))
+        p.drawEllipse(dot)
+        hp = QPen(QBrush(_SendButton._dot_highlight(dot)), 1)
+        p.setPen(hp)
+        p.setBrush(Qt.NoBrush)
+        p.drawEllipse(dot.adjusted(.5, .5, -.5, -.5))
+        _pixel_glyph(p, cx, cy, 15.0, PIXEL_PLAY)
+        p.setFont(self._font())
+        p.setPen(QColor(theme.INK))
+        x0 = 4.4 + d + 8.8
+        p.drawText(QRectF(x0, 0, w - x0, h), Qt.AlignVCenter | Qt.AlignLeft, self.text())
+
+
+class _DemoPill(QLabel):
+    """`.demo .pill`: mono 10px caps in a 6px-radius chip, white 10% fill and a
+    22% ring; `live` adds the red square before the word."""
+
+    def __init__(self, text: str, live: bool = False, parent=None):
+        super().__init__(text, parent)
+        self._live = live
+        self.setFixedHeight(32)
+        pad_l = 8 + (11 if live else 0)
+        self.setStyleSheet(
+            f"font-family: '{theme.FONT_MONO}'; font-size: 10px; font-weight: 500; "
+            "color: #ffffff; background: transparent; border: none; "
+            f"padding: 0px 8px 0px {pad_l}px;")
+        C.track(self, 0.08)
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        r = QRectF(self.rect())
+        p.setPen(QPen(QColor(255, 255, 255, 56), 1))
+        p.setBrush(QColor(255, 255, 255, 26))
+        p.drawRoundedRect(r.adjusted(.5, .5, -.5, -.5), 6, 6)
+        if self._live:
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor(theme.BRAND_RED))
+            p.drawRect(QRectF(8, (r.height() - 5) / 2, 5, 5))
+        p.end()
+        super().paintEvent(event)
 
 
 class ShowcaseTourCard(QFrame):
@@ -306,74 +549,59 @@ class ShowcaseTourCard(QFrame):
         self.setCursor(Qt.PointingHandCursor)
         self.setMinimumHeight(250)
         C.elevate(self, theme.SHADOW_RAISED)
+        C.attach_shadow(self, C.SH_DEMO, 17)
 
         col = QVBoxLayout(self)
-        col.setContentsMargins(theme.SPACE_4, theme.SPACE_4,
-                               theme.SPACE_4, theme.SPACE_3)
-        col.setSpacing(theme.SPACE_2)
+        col.setContentsMargins(18, 16, 18, 15)
+        col.setSpacing(0)
 
         top_row = QHBoxLayout()
         top_row.setContentsMargins(0, 0, 0, 0)
-        demo_badge = QLabel("DEMO")
-        demo_badge.setStyleSheet(
-            f"font-family: '{theme.FONT_MONO}'; "
-            "background: rgba(255, 255, 255, 0.10); color: #ffffff; "
-            "border: 1px solid rgba(255, 255, 255, 0.22); "
-            "border-radius: 6px; padding: 4px 8px; font-size: 10px; "
-            "font-weight: 500;"
-        )
-        C.track(demo_badge, 0.08)
-        top_row.addWidget(demo_badge)
+        top_row.addWidget(_DemoPill("DEMO", live=True))
         top_row.addStretch(1)
-        time_lbl = QLabel("01:03 >")
-        time_lbl.setStyleSheet(
-            f"font-family: '{theme.FONT_MONO}'; "
-            "background: rgba(0, 0, 0, 0.55); color: #ffffff; "
-            "border: 1px solid rgba(255, 255, 255, 0.2); "
-            "border-radius: 6px; padding: 4px 8px; font-size: 10px; "
-            "font-weight: 500;"
-        )
-        top_row.addWidget(time_lbl)
+        top_row.addWidget(_DemoPill("01:03 ›"))
         col.addLayout(top_row)
 
+        col.addSpacing(14)
         title = QLabel(i18n.t("Ideas to outcomes."))
-        title.setStyleSheet(
-            f"font-family: '{theme.FONT_HEADING}'; font-size: 22px; "
-            "font-weight: 500; color: #ffffff;"
-        )
+        tf = QFont(theme.FONT_HEADING)              # -0.035em, as .demo h2
+        tf.setPixelSize(26)
+        tf.setWeight(QFont.Normal)
+        tf.setLetterSpacing(QFont.AbsoluteSpacing, -0.9)
+        title.setFont(tf)
+        title.setStyleSheet("color: #ffffff; background: transparent;")
         col.addWidget(title)
 
+        col.addSpacing(7)
         desc = QLabel(i18n.t("Prism combines AI, tools and automation — so you can focus on what matters."))
         desc.setWordWrap(True)
+        desc.setMaximumWidth(265)
         desc.setStyleSheet(
             f"font-family: '{theme.FONT_BODY}'; font-size: 13px; "
-            "color: rgba(255, 255, 255, 0.90); line-height: 1.4;"
+            "color: rgba(255, 255, 255, 0.78); background: transparent;"
         )
         col.addWidget(desc)
-        col.addSpacing(theme.SPACE_2)
+        col.addSpacing(15)
 
-        tour_btn = QPushButton(i18n.t('Watch demo video'))
-        tour_btn.setObjectName("tourPlayBtn")
-        tour_btn.setIcon(icons.icon("play", 13, "#09090b"))
-        tour_btn.setCursor(Qt.PointingHandCursor)
+        tour_btn = _WatchDemoButton(i18n.t('Watch demo video'))
         tour_btn.clicked.connect(self._play_demo)
-        tour_btn.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         col.addWidget(tour_btn)
 
         col.addStretch(1)
 
+        rule = QFrame()
+        rule.setFixedHeight(1)
+        rule.setStyleSheet("background: rgba(255, 255, 255, 0.22);")
+        col.addWidget(rule)
+        col.addSpacing(9)
         quote = QLabel(i18n.t("“Less work. More possibilities.”"))
         quote.setStyleSheet(
-            f"font-family: '{theme.FONT_MONO}'; font-size: 10px; "
-            "color: rgba(255, 255, 255, 0.85);"
+            f"font-family: '{theme.FONT_MONO}'; font-size: 11px; "
+            "color: rgba(255, 255, 255, 0.82); background: transparent;"
         )
+        C.track(quote, 0.05)
         quote.setAlignment(Qt.AlignRight)
         col.addWidget(quote)
-
-        prog = QFrame()
-        prog.setFixedHeight(2)
-        prog.setStyleSheet("background: rgba(255, 255, 255, 0.25); border-radius: 1px;")
-        col.addWidget(prog)
 
     def paintEvent(self, event):
         super().paintEvent(event)
@@ -383,47 +611,33 @@ class ShowcaseTourCard(QFrame):
         painter.setRenderHint(QPainter.Antialiasing, True)
         painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
         r = QRectF(self.rect())
-        radius = 18.0
+        radius = 17.0
 
         clip = QPainterPath()
         clip.addRoundedRect(r, radius, radius)
         painter.setClipPath(clip)
 
-        # 1. Dark foundation base
-        painter.fillRect(r, QBrush(QColor(11, 17, 32)))
+        # The preview's `.demo`: #0a0a09 under the brand painting (cover, 50% 22%),
+        # then a dark wash that is solid behind the text and clear over the colour.
+        painter.fillRect(r, QBrush(QColor(10, 10, 9)))
+        pix = QPixmap(paths.resource("assets", "prism-spectrum.jpg"))
+        if pix.isNull():
+            pix = QPixmap(os.path.join(os.path.dirname(__file__), "..", "assets", "prism-spectrum.jpg"))
+        if not pix.isNull():
+            tw, th = max(1, int(r.width())), max(1, int(r.height()))
+            scaled = pix.scaled(tw, th, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
+            sx = int((scaled.width() - tw) * 0.5)
+            sy = int((scaled.height() - th) * 0.22)
+            painter.drawPixmap(0, 0, scaled, sx, sy, tw, th)
 
-        # 2. Draw scenic mountain landscape if available
-        bg_path = paths.resource("assets", "demo_card_bg.jpg")
-        if not os.path.exists(bg_path):
-            bg_path = os.path.join(os.path.dirname(__file__), "..", "assets", "demo_card_bg.jpg")
+        wash = QLinearGradient(0.0, 0.0, 0.0, float(r.height()))
+        wash.setColorAt(0.00, QColor(10, 10, 9, 245))
+        wash.setColorAt(0.40, QColor(10, 10, 9, 214))
+        wash.setColorAt(0.68, QColor(10, 10, 9, 0))
+        wash.setColorAt(1.00, QColor(10, 10, 9, 140))
+        painter.fillRect(r, QBrush(wash))
 
-        if os.path.exists(bg_path):
-            pix = QPixmap(bg_path)
-            if not pix.isNull():
-                target_w = max(1, int(r.width()))
-                target_h = max(1, int(r.height()))
-                scaled = pix.scaled(target_w, target_h,
-                                    Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
-                sx = max(0, int((scaled.width() - target_w) * 0.75))
-                sy = max(0, (scaled.height() - target_h) // 2)
-                painter.drawPixmap(0, 0, scaled, sx, sy, target_w, target_h)
-
-        # 3. Horizontal gradient: dark on left for text readability, clear on right for mountain
-        grad = QLinearGradient(0.0, 0.0, float(r.width()), 0.0)
-        grad.setColorAt(0.00, QColor(8, 14, 26, 205))
-        grad.setColorAt(0.40, QColor(8, 14, 26, 155))
-        grad.setColorAt(0.70, QColor(8, 14, 26, 45))
-        grad.setColorAt(1.00, QColor(8, 14, 26, 15))
-        painter.fillRect(r, QBrush(grad))
-
-        # Bottom subtle gradient for quote
-        bot_grad = QLinearGradient(0.0, float(r.height() * 0.65), 0.0, float(r.height()))
-        bot_grad.setColorAt(0.0, QColor(0, 0, 0, 0))
-        bot_grad.setColorAt(1.0, QColor(0, 0, 0, 95))
-        painter.fillRect(QRectF(0.0, float(r.height() * 0.65), float(r.width()), float(r.height() * 0.35)), QBrush(bot_grad))
-
-        # 4. Subtle border
-        painter.setPen(QPen(QColor(255, 255, 255, 45), 1.0))
+        painter.setPen(QPen(QColor(0, 0, 0, 102), 1.0))      # 0 0 0 1px rgba(0,0,0,.4)
         painter.setBrush(Qt.NoBrush)
         painter.drawRoundedRect(r.adjusted(0.5, 0.5, -0.5, -0.5), radius, radius)
         painter.end()
@@ -601,8 +815,10 @@ class _DemoTile(C.Card):
         thumb = QLabel()
         thumb.setAlignment(Qt.AlignCenter)
         thumb.setFixedHeight(76)
-        thumb.setStyleSheet("background: #1B1B19; border-radius: 10px;")
-        thumb.setPixmap(icons.icon("play" if video else icon_name, 26, "#FFFFFF").pixmap(26, 26))
+        thumb.setStyleSheet(
+            "background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #3a3a38, stop:1 #111110);"
+            " border-radius: 10px;")
+        thumb.setPixmap(_pixel_play(26) if video else icons.icon(icon_name, 26, "#FFFFFF").pixmap(26, 26))
         col.addWidget(thumb)
         col.addWidget(_Elided(title, "CARD_TITLE"))
         col.addWidget(_Elided(caption if video else i18n.t("Not recorded yet"), "META", theme.MUTE))
@@ -848,6 +1064,7 @@ class HomePanel(QWidget):
             f"padding: 8px 14px 8px 28px;"
         )
         C.track(motto, 0.05)
+        C.attach_shadow(motto, C.SH_MOTTO)
         motto.setAlignment(Qt.AlignCenter)
         greet_row.addWidget(motto, alignment=Qt.AlignRight | Qt.AlignVCenter)
         left_col.addLayout(greet_row)
@@ -921,6 +1138,7 @@ class HomePanel(QWidget):
         yes_btn = C.button(i18n.t("Yes"), "secondary", small=True,
                            on_click=lambda *_, f=f, k=kind, p=prompt:
                                self._on_festival_answer(f, k, True, p))
+        C.attach_shadow(yes_btn, C.SH_LIGHT_BTN)
         row.addWidget(yes_btn)
         no_btn = C.button(i18n.t("No"), "tertiary", small=True,
                           on_click=lambda *_, f=f, k=kind:
@@ -941,12 +1159,10 @@ class HomePanel(QWidget):
             self._prompt_input.selectAll()
 
     def _prompt_card(self) -> QWidget:
-        card = QFrame()
-        card.setObjectName("heroPromptCard")
+        card = C.Card()
         card.setMinimumHeight(205)          # preview: 13.6rem (200px) + the 5px lip
         col = QVBoxLayout(card)
-        col.setContentsMargins(theme.SPACE_4, theme.SPACE_4,
-                               theme.SPACE_4, theme.SPACE_3)
+        col.setContentsMargins(17, 15, 15, 13 + C.CARD_LIP)
         col.setSpacing(theme.SPACE_3)
 
         input_row = QHBoxLayout()
@@ -981,38 +1197,42 @@ class HomePanel(QWidget):
 
         attach_btn = QPushButton(i18n.t('Attach'))
         attach_btn.setObjectName("promptChipBtn")
-        attach_btn.setIcon(icons.icon("paperclip", 13, theme.TEXT))
+        self._chip_icon(attach_btn, "paperclip")
         attach_btn.setCursor(Qt.PointingHandCursor)
         attach_btn.clicked.connect(self._on_attach_clicked)
         bar.addWidget(attach_btn)
 
         cmds_btn = QPushButton(i18n.t('Commands'))
         cmds_btn.setObjectName("promptChipBtn")
-        cmds_btn.setIcon(icons.icon("command", 13, theme.TEXT))
+        self._chip_icon(cmds_btn, "cmd")
         cmds_btn.setCursor(Qt.PointingHandCursor)
         cmds_btn.clicked.connect(self.open_history.emit)
         bar.addWidget(cmds_btn)
 
         tools_btn = QPushButton(i18n.t('Tools'))
         tools_btn.setObjectName("promptChipBtn")
-        tools_btn.setIcon(icons.icon("grid", 13, theme.TEXT))
+        self._chip_icon(tools_btn, "grid")
         tools_btn.setCursor(Qt.PointingHandCursor)
         tools_btn.clicked.connect(lambda: self.open_addon.emit("catalog"))
         bar.addWidget(tools_btn)
 
         bar.addStretch(1)
 
-        send_btn = QPushButton()
-        send_btn.setObjectName("promptSendBtn")
-        send_btn.setCursor(Qt.PointingHandCursor)
-        send_btn.setIcon(C.brand_dot_icon(24, "arrow"))
-        send_btn.setIconSize(QSize(24, 24))
+        send_btn = _SendButton()
         send_btn.setToolTip(i18n.t("Start task"))
         send_btn.clicked.connect(self._submit_home_task)
         bar.addWidget(send_btn)
 
         col.addLayout(bar)
         return card
+
+    @staticmethod
+    def _chip_icon(btn: QPushButton, name: str):
+        """The preview's chip glyph (14px, 1.7 stroke) and its ~7px gap to the
+        label, and the preview's hover shadow."""
+        btn.setIcon(icons.icon_gapped(name, 14, theme.INK))
+        btn.setIconSize(QSize(17, 14))
+        C.attach_shadow(btn, C.SH_CHIP_HOVER, hover_only=True)
 
     def _on_attach_clicked(self):
         menu = QMenu(self)
@@ -1125,15 +1345,15 @@ class HomePanel(QWidget):
 
         chips_data = [
             ("inquiry", i18n.t("Summarize a PDF"), "file"),
-            ("reel", i18n.t("Create a reel"), "film"),
-            ("boq", i18n.t("Analyze this BOQ"), "chart"),
-            ("artifacts", i18n.t("Clean up artifacts"), "sparkles"),
+            ("reel", i18n.t("Create a reel"), "film-box"),
+            ("boq", i18n.t("Analyze this BOQ"), "bars"),
+            ("artifacts", i18n.t("Clean up artifacts"), "spark"),
         ]
 
         for key, label, icon_name in chips_data:
             chip = QPushButton(label)
             chip.setObjectName("tryChip")
-            chip.setIcon(icons.icon(icon_name, 12, theme.NEUTRAL[600]))
+            self._chip_icon(chip, icon_name)
             chip.setCursor(Qt.PointingHandCursor)
             chip.clicked.connect(lambda _=False, k=key: self.open_addon.emit(k))
             row.addWidget(chip)
@@ -1271,46 +1491,56 @@ class HomePanel(QWidget):
         return card
 
     def _timeline_row(self, run: dict, is_first: bool, is_last: bool) -> QWidget:
-        wrap = _Row()
+        wrap = _TimelineRow()
         wrap.clicked.connect(
             lambda p=run.get("path", ""): p and self.open_run_record.emit(p))
 
-        row = QHBoxLayout(wrap)
-        row.setContentsMargins(0, theme.SPACE_2, theme.SPACE_2, theme.SPACE_2)
-        row.setSpacing(theme.SPACE_3)
+        outer = QHBoxLayout(wrap)
+        outer.setContentsMargins(0, 0, 0, 0)     # the wire runs the row's full height
+        outer.setSpacing(12)
 
         track = TimelineNode(is_first=is_first, is_last=is_last)
-        row.addWidget(track)
+        outer.addWidget(track)
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 9, 0, 9)
+        row.setSpacing(12)
+        outer.addLayout(row, 1)
 
         tools = run.get("tools") or []
-        primary = tools[0] if tools else "Task"
-        badge = C.ToolBadge(primary, 34, theme.R_CONTROL) if tools else \
-            C.IconPad("file", theme.NEUTRAL[400], 34, theme.R_CONTROL, 16)
-        row.addWidget(badge)
+        tile = C.IconPad(_run_icon(run), theme.INK, 34, 10, 14)
+        tile.setStyleSheet("background: #EFEEEA; border-radius: 10px;")
+        row.addWidget(tile)
 
         text_col = QVBoxLayout()
         text_col.setContentsMargins(0, 0, 0, 0)
         text_col.setSpacing(1)
 
-        title = _Elided(run.get("title", ""), "BODY", weight=500)
+        title = _Elided(run.get("title", ""), "BODY", weight=400)
+        title.setStyleSheet(title.styleSheet() + " font-size: 14px; color: #111110;")
         text_col.addWidget(title)
 
         source = tools[0] if tools else "Prism"
         when = run.get("when", "")
         detail_text = f"{source} · {when}" if when else source
         subtitle = _Elided(detail_text, "META")
-        subtitle.setStyleSheet(subtitle.styleSheet() + f" font-family: '{theme.FONT_MONO}';")
+        subtitle.setStyleSheet(subtitle.styleSheet()
+                               + f" font-family: '{theme.FONT_MONO}'; font-size: 11px;")
+        C.track(subtitle, 0.03)
         text_col.addWidget(subtitle)
         row.addLayout(text_col, stretch=1)
 
         is_ok = run.get("ok", True)
-        status_badge = C.StatusBadge("completed" if is_ok else "failed", focusable=False)
+        state = "completed" if is_ok else "failed"
+        status_badge = C.Pill(theme.status(state)[0], "st_ok" if is_ok else "st_err")
+        status_badge.setAccessibleName(theme.status(state)[0].title())
         row.addWidget(status_badge)
 
         menu_btn = QPushButton()
         menu_btn.setObjectName("recentMenuBtn")
-        menu_btn.setIcon(icons.icon("more-horizontal", 16, theme.NEUTRAL[400]))
-        menu_btn.setFixedSize(28, 28)
+        menu_btn.setIcon(icons.icon("more-dots", 18, theme.MUTE))
+        menu_btn.setIconSize(QSize(18, 18))
+        menu_btn.setFixedSize(30, 30)
+        menu_btn.setCursor(Qt.PointingHandCursor)
         menu_btn.clicked.connect(
             lambda: self.open_run_record.emit(run.get("path", "")))
         row.addWidget(menu_btn)
@@ -1355,6 +1585,7 @@ class HomePanel(QWidget):
 
         manage_btn = C.button(i18n.t("Manage"), "secondary", small=False,
                               on_click=lambda: self.open_addon.emit("catalog"))
+        C.attach_shadow(manage_btn, C.SH_LIGHT_BTN)
         head.addWidget(manage_btn)
         col.addLayout(head)
         col.addSpacing(theme.SPACE_3)
@@ -1388,7 +1619,8 @@ class HomePanel(QWidget):
         browse_btn = QPushButton(f"+ {i18n.t('Browse Add-ons')}")
         browse_btn.setObjectName("chipBtn")
         browse_btn.setCursor(Qt.PointingHandCursor)
-        browse_btn.setStyleSheet("font-size: 14px; font-weight: 600; padding: 6px 14px;")
+        browse_btn.setStyleSheet("font-size: 13px; font-weight: 500; padding: 6px 14px;")
+        C.attach_shadow(browse_btn, C.SH_LIGHT_BTN)
         browse_btn.clicked.connect(lambda: self.open_addon.emit("catalog"))
         foot.addWidget(browse_btn)
 
@@ -1396,7 +1628,6 @@ class HomePanel(QWidget):
 
         guide_link = C.button(f"{i18n.t('Explore all add-ons')} →", "link",
                               on_click=lambda: self.open_addon.emit("catalog"))
-        guide_link.setStyleSheet("font-size: 14px; font-weight: 600;")
         foot.addWidget(guide_link)
         col.addLayout(foot)
 
@@ -1416,7 +1647,7 @@ class _TileState(QLabel):
     def __init__(self, text: str, colour: str, parent=None):
         super().__init__(text.upper(), parent)
         self._colour = colour
-        self.setStyleSheet(f"font-family: '{theme.FONT_MONO}'; font-size: 9px; "
+        self.setStyleSheet(f"font-family: '{theme.FONT_MONO}'; font-size: 10px; "
                            f"color: {colour}; background: transparent; padding-left: 10px;")
         C.track(self, 0.08)
 
@@ -1427,8 +1658,47 @@ class _TileState(QLabel):
         p.end()
 
 
+# The line icon of each Home add-on tile: the rail's glyph for the add-on (so the
+# two agree) and the preview's own for the two the rail does not list.
+_TILE_ICON = {"reel": "film-box", "motion": "video"}
+
+
+def _tile_icon(glyph: str) -> str:
+    from widgets.sidebar import _RAIL_ICON
+    return _TILE_ICON.get(glyph) or _RAIL_ICON.get(glyph) or glyph
+
+
+class _AddonHolder(QWidget):
+    """`.ad .tile`: a 37px near-black squircle (gradient #3a3a38 to #111110, 12px
+    radius, inset top highlight, soft drop shadow) with a white 1.6px line icon."""
+
+    def __init__(self, icon_name: str, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(37, 37)
+        self._pm = icons.pixmap(icon_name, 17, "#FFFFFF", 1.6)
+        C.attach_shadow(self, ((0, 5.9, 11.8, -5.9, (0, 0, 0, .5)),), 12)
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        r = QRectF(self.rect())
+        g = QLinearGradient(0, 0, 0, r.height())
+        g.setColorAt(0, QColor("#3a3a38"))
+        g.setColorAt(1, QColor("#111110"))
+        p.setPen(Qt.NoPen)
+        p.setBrush(QBrush(g))
+        p.drawRoundedRect(r, 12, 12)
+        p.setPen(_hl_pen(r.width(), r.height(), 56))     # inset 0 1px 0 .22
+        p.setBrush(Qt.NoBrush)
+        p.drawRoundedRect(r.adjusted(.5, 1.5, -.5, -.5), 11, 11)
+        x = (r.width() - 17) / 2
+        p.drawPixmap(int(round(x)), int(round(x)), self._pm)
+
+
 class _ToolTile(QFrame):
-    """Tool launcher tile with full keyboard navigation and accessible state."""
+    """Tool launcher tile with full keyboard navigation and accessible state.
+    Painted as the preview's `.ad`: soft #F6F5F2 tile, 14px radius, ring, white
+    and a soft shadow on hover."""
 
     def __init__(self, host, name: str, glyph: str, builtin: bool, route: str, parent=None):
         super().__init__(parent)
@@ -1437,24 +1707,22 @@ class _ToolTile(QFrame):
         self.setObjectName("toolTile")
         self.setFocusPolicy(Qt.StrongFocus)
         self.setCursor(Qt.PointingHandCursor)
-        self.setMinimumHeight(86)
+        self.setMinimumHeight(106)
         status_text = "Built-in" if builtin else "Not connected"
         self.setAccessibleName(f"{name} ({status_text})")
+        C.attach_shadow(self, C.SH_TILE_HOVER, 14, hover_only=True)
 
         tile_col = QVBoxLayout(self)
-        tile_col.setContentsMargins(6, 10, 6, 8)
-        tile_col.setSpacing(theme.SPACE_1)
+        tile_col.setContentsMargins(7, 12, 7, 10)
+        tile_col.setSpacing(7)
         tile_col.setAlignment(Qt.AlignCenter)
 
-        icon_lbl = QLabel()
-        icon_lbl.setPixmap(icons.tool_logo(glyph, 28))
-        icon_lbl.setAlignment(Qt.AlignCenter)
-        tile_col.addWidget(icon_lbl)
+        tile_col.addWidget(_AddonHolder(_tile_icon(glyph)), alignment=Qt.AlignHCenter)
 
         name_lbl = QLabel(name)
         name_lbl.setStyleSheet(
-            f"font-family: '{theme.FONT_BODY}'; font-size: 13.5px; "
-            f"font-weight: 600; color: {theme.TEXT};"
+            f"font-family: '{theme.FONT_BODY}'; font-size: 14px; "
+            f"font-weight: 500; color: {theme.INK}; background: transparent;"
         )
         name_lbl.setAlignment(Qt.AlignCenter)
         tile_col.addWidget(name_lbl)
@@ -1462,6 +1730,20 @@ class _ToolTile(QFrame):
         state = _TileState(i18n.t("Ready") if builtin else i18n.t("Not connected"),
                            theme.BRAND_OK if builtin else theme.NEUTRAL[400])
         tile_col.addWidget(state, alignment=Qt.AlignCenter)
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        r = QRectF(self.rect())
+        hot = self.underMouse()
+        p.setPen(QPen(QColor("#D8D7D2" if hot else "#E6E5E1"), 1))
+        p.setBrush(QColor("#FFFFFF" if hot else "#F6F5F2"))
+        p.drawRoundedRect(r.adjusted(.5, .5, -.5, -.5), 14, 14)
+        if self.hasFocus():
+            p.setPen(QPen(QColor(theme.INK), 1.5))
+            p.setBrush(Qt.NoBrush)
+            p.drawRoundedRect(r.adjusted(1.5, 1.5, -1.5, -1.5), 13, 13)
+        p.end()
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:

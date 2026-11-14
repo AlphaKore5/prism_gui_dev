@@ -35,7 +35,7 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import (
     QAction, QPainter, QPen, QFont, QFontMetrics, QBrush, QColor, QPainterPath,
-    QLinearGradient, QRadialGradient, QPixmap, QIcon,
+    QLinearGradient, QRadialGradient, QPixmap, QIcon, QImage,
 )
 from PySide6.QtWidgets import (
     QAbstractButton, QButtonGroup, QFrame, QGraphicsDropShadowEffect,
@@ -99,16 +99,27 @@ CARD_LIP = 5                    # px of painted shadow under a resting card
 
 
 def paint_flat_card(widget, painter, rect: QRectF, radius: float,
-                    fill=None, edge=None, lip: int = None) -> bool:
+                    fill=None, edge=None, lip: int = None,
+                    outside_shadow: bool = False) -> bool:
     """Paint the flat card and return True, or return False when a wallpaper is
     set and the caller should paint its glass instead.
 
     `fill` (a QBrush, e.g. a gradient), `edge` (a QColor) and `lip` (px of
     painted shadow, 0 for none) let one surface, the rail, differ from the
-    default white card with its hairline and CARD_LIP."""
+    default white card with its hairline and CARD_LIP.
+
+    `outside_shadow` is set by a card whose ShadowUnder companion draws the
+    preview's soft shadow and 3.5% ring outside the body: the body is then just
+    the white fill, and the inline lip and hairline are not painted."""
     if has_wallpaper(widget):
         return False
     lip = CARD_LIP if lip is None else lip
+    if outside_shadow:
+        body = rect.adjusted(0, 0, 0, -lip) if lip and rect.height() > 4 * lip else rect
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(fill or QColor(theme.CARD))
+        painter.drawRoundedRect(body, radius, radius)
+        return True
     # The preview's resting-card shadow, painted (a QGraphicsEffect turns black
     # on some machines): a soft lip under the bottom edge, inside the widget's
     # own rect, so no layout or neighbour has to make room for it.
@@ -122,6 +133,187 @@ def paint_flat_card(widget, painter, rect: QRectF, radius: float,
     painter.setBrush(fill or QColor(theme.CARD))
     painter.drawRoundedRect(body.adjusted(0.5, 0.5, -0.5, -0.5), radius, radius)
     return True
+
+
+# ── painted soft shadows ────────────────────────────────────────────────────
+# The preview's box-shadows, as (dx, dy, blur, spread, (r, g, b, a)) in px at
+# 1366 wide (1rem = 14.73px), first layer on top as in CSS. A QGraphicsEffect is
+# not used (see shadows_enabled()): a ShadowUnder is a mouse-transparent sibling
+# stacked directly under its target that paints a cached pre-blurred pixmap
+# around the target's body, so nothing in any layout has to make room for it.
+SH_CARD = ((0, 1, 0, 0, (0, 0, 0, .03)),
+           (0, 10.3, 29.5, -22.1, (20, 20, 18, .28)),
+           (0, 0, 0, 1, (20, 20, 18, .035)))
+SH_DARK_BTN = ((0, 11.8, 23.5, -11.8, (0, 0, 0, .6)), (0, 2, 6, 0, (0, 0, 0, .18)))
+SH_LIGHT_BTN = ((0, 8.8, 20.6, -11.8, (20, 20, 18, .35)), (0, 1, 3, 0, (20, 20, 18, .06)))
+SH_SEND = ((0, 10.3, 20.6, -10.3, (0, 0, 0, .6)),)
+SH_MOTTO = ((0, 5.9, 14.7, -10.3, (20, 20, 18, .3)),)
+SH_DEMO = ((0, 17.7, 35.3, -23.6, (0, 0, 0, .6)), (0, 0, 0, 1, (0, 0, 0, .4)))
+SH_CHIP_HOVER = ((0, 4.4, 11.8, -7.4, (20, 20, 18, .3)),)
+SH_TILE_HOVER = ((0, 8.8, 17.7, -11.8, (20, 20, 18, .35)),)
+
+_shadow_cache: dict = {}
+
+
+def _shadow_pixmap(w: int, h: int, radius: float, layers, pads, dpr: float) -> QPixmap:
+    """The shadow of a w x h body (radius `radius`) drawn into a (w + pads) pixmap.
+    A gaussian layer is painted as concentric rounded rects whose alphas are
+    chosen so the accumulated alpha follows A * Q(d / sigma) exactly."""
+    key = (w, h, round(radius, 2), layers, pads, dpr)
+    hit = _shadow_cache.get(key)
+    if hit is not None:
+        return hit
+    pl, pt, pr, pb = pads
+    img = QImage(int((w + pl + pr) * dpr + .5), int((h + pt + pb) * dpr + .5),
+                 QImage.Format_RGBA64_Premultiplied)   # 16-bit: layers are < 1/255 each
+    img.fill(0)
+    p = QPainter(img)
+    p.setRenderHint(QPainter.Antialiasing, True)
+    p.scale(dpr, dpr)
+    p.translate(pl, pt)
+    body = QRectF(0, 0, w, h)
+    ring = QPainterPath()                       # everywhere except the body itself
+    ring.addRect(QRectF(-pl, -pt, w + pl + pr, h + pt + pb))
+    inner = QPainterPath()
+    inner.addRoundedRect(body, radius, radius)
+    ring = ring.subtracted(inner)
+    p.setClipPath(ring)
+    p.setPen(Qt.NoPen)
+
+    def rrect(rect, r):
+        r = max(0.0, min(r, rect.width() / 2, rect.height() / 2))
+        p.drawRoundedRect(rect, r, r)
+
+    for dx, dy, blur, spread, (cr, cg, cb, ca) in reversed(layers):
+        base = body.translated(dx, dy).adjusted(-spread, -spread, spread, spread)
+        r0 = max(0.0, radius + spread)
+        if blur <= 0:
+            p.setBrush(QColor.fromRgbF(cr / 255, cg / 255, cb / 255, ca))
+            rrect(base, r0)
+            continue
+        sigma = blur / 2.0
+        d_out, d_in = 2.5 * sigma, -1.0 * sigma
+        steps = max(8, int(d_out - d_in))
+        prev = 0.0
+        for i in range(steps + 1):
+            d = d_out - (d_out - d_in) * i / steps
+            cum = ca * 0.5 * math.erfc(d / (sigma * math.sqrt(2)))
+            a = (cum - prev) / (1 - prev) if prev < 1 else 0.0
+            if a > 0:
+                p.setBrush(QColor.fromRgbF(cr / 255, cg / 255, cb / 255, a))
+                rrect(base.adjusted(-d, -d, d, d), r0 + d)
+            prev = cum
+    p.end()
+    pm = QPixmap.fromImage(img)
+    pm.setDevicePixelRatio(dpr)
+    if len(_shadow_cache) > 96:
+        _shadow_cache.clear()
+    _shadow_cache[key] = pm
+    return pm
+
+
+def _shadow_pads(layers) -> tuple:
+    l = t = r = b = 0.0
+    for dx, dy, blur, spread, _c in layers:
+        reach = 1.25 * blur + max(spread, 0)
+        l = max(l, reach - dx)
+        r = max(r, reach + dx)
+        t = max(t, reach - dy)
+        b = max(b, reach + dy)
+    return tuple(int(math.ceil(v)) for v in (l, t, r, b))
+
+
+class ShadowUnder(QWidget):
+    """The preview's soft box-shadow for `target`: see the block comment above.
+    The shadow follows the target's geometry, parent, visibility and (optional)
+    hover state, and goes when the target does. `radius` None means a pill
+    (half the body height). `inset` = (l, t, r, b) px of the target's rect that
+    are not body (a Card's transparent lip). Nested cards, a Card inside a Card,
+    get none: their parent already supplies the surface."""
+
+    def __init__(self, target: QWidget, layers, radius=None,
+                 inset=(0, 0, 0, 0), hover_only: bool = False):
+        super().__init__()
+        self._t = target
+        self._layers = tuple(tuple(x) for x in layers)
+        self._radius = radius
+        self._inset = inset
+        self._hover_only = hover_only
+        self._hover = False
+        self._pads = _shadow_pads(self._layers)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        self.setAttribute(Qt.WA_NoSystemBackground, True)
+        self.setFocusPolicy(Qt.NoFocus)
+        self.hide()
+        target.installEventFilter(self)
+        target.destroyed.connect(self.deleteLater)
+        target._shadow_under = self
+        self._sync()
+
+    def active(self) -> bool:
+        """True while this shadow is drawing, so the target can leave its own
+        inline lip and edge unpainted."""
+        return self.parentWidget() is not None and not self._hover_only
+
+    def _nested(self, parent) -> bool:
+        w = parent
+        while w is not None:
+            if isinstance(w, Card):
+                return True
+            w = w.parentWidget()
+        return False
+
+    def _sync(self):
+        t = self._t
+        parent = t.parentWidget()
+        if parent is None or (isinstance(t, Card) and self._nested(parent)):
+            if self.parentWidget() is not None:
+                self.setParent(None)
+            self.hide()
+            return
+        if self.parentWidget() is not parent:
+            self.setParent(parent)
+        self.stackUnder(t)
+        il, it, ir, ib = self._inset() if callable(self._inset) else self._inset
+        pl, pt, pr, pb = self._pads
+        g = t.geometry()
+        self.setGeometry(g.x() + il - pl, g.y() + it - pt,
+                         g.width() - il - ir + pl + pr, g.height() - it - ib + pt + pb)
+        self.setVisible(t.isVisible() and (self._hover or not self._hover_only))
+        self.update()
+
+    def eventFilter(self, obj, ev):
+        if obj is self._t:
+            et = ev.type()
+            if et == QEvent.Enter:
+                self._hover = True
+            elif et == QEvent.Leave:
+                self._hover = False
+            if et in (QEvent.ParentChange, QEvent.Move, QEvent.Resize, QEvent.Show,
+                      QEvent.Hide, QEvent.Enter, QEvent.Leave, QEvent.EnabledChange):
+                self._sync()
+        return False
+
+    def paintEvent(self, event):
+        w = self.width() - self._pads[0] - self._pads[2]
+        h = self.height() - self._pads[1] - self._pads[3]
+        if w < 2 or h < 2:
+            return
+        rad = h / 2.0 if self._radius is None else float(self._radius)
+        dpr = self.devicePixelRatioF()
+        pm = _shadow_pixmap(w, h, rad, self._layers, self._pads, dpr)
+        p = QPainter(self)
+        if not self._t.isEnabled():             # .btn[disabled] { opacity: .45 } takes its shadow too
+            p.setOpacity(0.45)
+        p.drawPixmap(0, 0, pm)
+        p.end()
+
+
+def attach_shadow(widget: QWidget, layers, radius=None, inset=(0, 0, 0, 0),
+                  hover_only: bool = False) -> QWidget:
+    """Give `widget` the preview's painted soft shadow (see ShadowUnder)."""
+    ShadowUnder(widget, layers, radius, inset, hover_only)
+    return widget
 
 
 class DarkPill(QPushButton):
@@ -151,6 +343,9 @@ class DarkPill(QPushButton):
         self.setStyleSheet(f"min-height: {height}px; max-height: {height}px;"
                            " padding: 0px; border: none;")
         self.setFixedHeight(height)
+        # the preview's `.btn.dark` shadow; a collapsed (text-less) pill has no lip
+        attach_shadow(self, SH_DARK_BTN,
+                      inset=lambda: (0, 0, 0, self.LIP if self.text() else 0))
 
     def _font(self) -> QFont:
         font = QFont(theme.FONT_BODY)
@@ -184,7 +379,7 @@ class DarkPill(QPushButton):
         enabled = self.isEnabled()
         if not enabled:                                 # .btn[disabled] { opacity: .45 }
             p.setOpacity(0.45)
-        if self.LIP and not collapsed:                  # the painted drop shadow
+        if self.LIP and not collapsed and not self._shadow_under.active():   # inline fallback
             p.setPen(Qt.NoPen)
             p.setBrush(QColor(0, 0, 0, 16))
             for i in range(self.LIP, 0, -1):
@@ -579,6 +774,7 @@ class Card(QFrame):
             f"border: none; }}"
         )
         elevate(self, theme.SHADOW_RAISED if raised else theme.SHADOW_CARD)
+        attach_shadow(self, SH_CARD, radius, inset=(0, 0, 0, CARD_LIP))
 
     def body(self, margins=None, spacing: int = 0) -> QVBoxLayout:
         """The card's own column, inset past the stripe."""
@@ -597,7 +793,8 @@ class Card(QFrame):
 
         r = QRectF(self.rect())
         radius = float(self._radius)
-        if paint_flat_card(self, painter, r, radius):
+        soft = self._shadow_under.active()
+        if paint_flat_card(self, painter, r, radius, outside_shadow=soft):
             if self._stripe:
                 painter.setPen(Qt.NoPen)
                 painter.setBrush(QColor(theme.INK))
