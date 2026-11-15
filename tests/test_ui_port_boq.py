@@ -307,5 +307,19 @@ class TheUsageChip(unittest.TestCase):
             self.assertNotIn(word, src, word)
 
 
+class TheOtherBoqDialogsSayWhyTheyAreGreyed(unittest.TestCase):
+    def test_takeoff_and_elv_primaries_carry_a_reason(self):
+        from addons.boq.elv_dialog import ElvReadDialog
+        from addons.boq.takeoff import IndustryTakeoffDialog
+        t = IndustryTakeoffDialog("HVAC", None, {})
+        for b in (t.extract_btn, t.use_btn):
+            self.assertFalse(b.isEnabled())
+            self.assertTrue(b.toolTip())
+        e = ElvReadDialog("ELV", None, {})
+        for b in (e.read_btn, e.use_btn):
+            self.assertFalse(b.isEnabled())
+            self.assertTrue(b.toolTip())
+
+
 if __name__ == "__main__":
     unittest.main()
