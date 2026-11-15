@@ -122,28 +122,11 @@ class HomeCarriesThePreviewsPieces(unittest.TestCase):
         self.assertIsInstance(send, H._SendButton)      # painted (polish pass): gradient pill + red dot
         self.assertTrue(send.toolTip())                # says what it does
 
-    def test_the_motto_is_a_mono_pill_with_a_red_square(self):
-        motto = [w for w in self.home.findChildren(H._Motto)]
-        self.assertEqual(len(motto), 1)
-        self.assertIn("Geist Mono", motto[0].styleSheet())
-        img = motto[0].grab().toImage()
-        self.assertEqual(QColor(img.pixel(17, motto[0].height() // 2)).name().lower(),
-                         theme.BRAND_RED.lower())
-
     def test_the_lead_line_fades_its_second_half(self):
         lead = [w for w in self.home.findChildren(QLabel)
                 if "turn ideas" in w.text()]
         self.assertTrue(lead)
         self.assertIn(theme.FAINT, lead[0].text())
-
-    def test_add_on_tiles_say_ready_in_mono_caps(self):
-        states = self.home.findChildren(H._TileState)
-        self.assertTrue(states)
-        self.assertTrue(all(s.text() == "READY" for s in states))
-
-    def test_the_demo_button_is_a_light_gradient_pill(self):
-        btn = self.home.findChild(QPushButton, "tourPlayBtn")
-        self.assertIsInstance(btn, H._WatchDemoButton)   # painted: white gradient pill + dark play chip
 
 
 if __name__ == "__main__":

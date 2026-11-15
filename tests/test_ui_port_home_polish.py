@@ -249,159 +249,17 @@ class ComposerAndTryChips(unittest.TestCase):
         self.assertEqual([b.text() for b in self.composer][2], "Tools")
 
 
-class AddonTiles(unittest.TestCase):
-    def setUp(self):
-        self.home = H.HomePanel({})
-        self.home.resize(1100, 900)
-        self.home.show()
-        self.tiles = self.home.findChildren(H._ToolTile)
-
-    def test_nine_tiles_each_with_a_37px_dark_holder_and_a_ready_state(self):
-        self.assertEqual(len(self.tiles), 9)
-        for t in self.tiles:
-            holders = t.findChildren(H._AddonHolder)
-            self.assertEqual(len(holders), 1)
-            self.assertEqual((holders[0].width(), holders[0].height()), (37, 37))
-            states = t.findChildren(H._TileState)
-            self.assertEqual([s.text() for s in states], ["READY"])
-
-    def test_tiles_are_soft_grey_and_the_holder_is_near_black(self):
-        t = self.tiles[0]
-        img = t.grab().toImage()
-        self.assertEqual(QColor(img.pixel(10, t.height() // 2)).name().lower(), "#f6f5f2")
-        h = t.findChildren(H._AddonHolder)[0]
-        hp = h.mapTo(t, QPoint(18, 30))
-        self.assertLess(QColor(img.pixel(hp.x(), hp.y())).value(), 70)
-
-    def test_tiles_use_the_rails_line_icons_not_the_coloured_logos(self):
-        from widgets.sidebar import _RAIL_ICON
-        for key, want in (("inquiry", "inbox"), ("boq", "sheet"), ("gerber", "chip"),
-                          ("step", "cube"), ("bom", "box"), ("email", "mail"),
-                          ("leads", "user"), ("reel", "film-box"), ("motion", "video")):
-            self.assertEqual(H._tile_icon(key), want)
-            if key in _RAIL_ICON:
-                self.assertEqual(H._tile_icon(key), _RAIL_ICON[key])
-
-    def test_a_tile_click_still_opens_its_screen(self):
-        got = []
-        self.home.open_addon.connect(got.append)
-        QTest.mouseClick(self.tiles[1], Qt.LeftButton)
-        self.assertEqual(got, ["boq"])
-
-    def test_the_names_are_14px_ink_weight_500(self):
-        name = [l for l in self.tiles[0].findChildren(QLabel) if l.text() == "Email Inquiry"][0]
-        self.assertIn("font-size: 14px", name.styleSheet())
-        self.assertIn("font-weight: 500", name.styleSheet())
-
-
-class RecentActivityRows(unittest.TestCase):
-    def setUp(self):
-        self.home = H.HomePanel({})
-        self.home.resize(1100, 900)
-
-    def _row(self, run, first=False):
-        return self.home._timeline_row(run, first, False)
-
-    def test_the_tile_icon_follows_the_add_on_the_task_named(self):
-        cases = {"BOQ — HVAC ductwork": "sheet", "STEP — Edit holes": "cube",
-                 "Gerber — Reply": "chip", "BOM — Parts list": "box",
-                 "/reel A reel": "film-box", "ETH Global Research": "file", "": "file"}
-        for title, want in cases.items():
-            self.assertEqual(H._run_icon({"title": title}), want, title)
-        self.assertEqual(H._run_icon({"title": "x", "tools": ["Prism Studio"]}), "film-box")
-
-    def test_a_row_is_a_34px_soft_tile_a_wire_a_pill_and_a_dots_menu(self):
-        row = self._row({"title": "BOQ — x", "tools": ["Claude"], "when": "1 hour ago",
-                         "ok": True, "path": "p"}, True)
-        tiles = [w for w in row.findChildren(C.IconPad)]
-        self.assertEqual((tiles[0].width(), tiles[0].height()), (34, 34))
-        self.assertIn("#EFEEEA", tiles[0].styleSheet())
-        self.assertEqual(row.findChildren(H.TimelineNode)[0].width(), 8)
-        pills = row.findChildren(C.Pill)
-        self.assertEqual([p.text() for p in pills], ["COMPLETED"])
-        menu = row.findChild(QPushButton, "recentMenuBtn")
-        self.assertEqual((menu.width(), menu.height()), (30, 30))
-
-    def test_a_failed_run_says_failed_in_the_red_pill(self):
-        row = self._row({"title": "t", "ok": False, "path": "p"})
-        self.assertEqual([p.text() for p in row.findChildren(C.Pill)], ["FAILED"])
-
-    def test_the_row_and_its_menu_open_the_same_record_as_before(self):
-        got = []
-        self.home.open_run_record.connect(got.append)
-        row = self._row({"title": "t", "path": "rec.json"})
-        row.findChild(QPushButton, "recentMenuBtn").click()
-        row.clicked.emit()
-        self.assertEqual(got, ["rec.json", "rec.json"])
-
-    def test_the_wire_spans_the_whole_row_and_the_dot_is_ink(self):
-        row = self._row({"title": "t", "path": "p"})
-        row.resize(500, 52)
-        row.show()
-        node = row.findChildren(H.TimelineNode)[0]
-        self.assertEqual(node.height(), row.height())
-        img = node.grab().toImage()
-        self.assertEqual(QColor(img.pixel(4, 26)).name().lower(), theme.INK.lower())
-        self.assertEqual(QColor(img.pixel(4, 3)).name().lower(), "#cbcac4")
-
-
-class TheDemoCard(unittest.TestCase):
-    def test_the_card_paints_the_brand_painting_not_the_mountain(self):
-        self.assertTrue(os.path.exists(os.path.join(ROOT, "assets", "prism-spectrum.jpg")))
-        card = H.ShowcaseTourCard()
-        card.resize(330, 380)
-        card.show()
-        img = card.grab().toImage()
-        # the lower half is clear painting: some saturated colour (red, green or blue)
-        sat = sum(1 for x in range(20, 310, 6) for y in range(250, 360, 6)
-                  if QColor(img.pixel(x, y)).saturation() > 120)
-        self.assertGreater(sat, 60)
-        # the top stays near black behind the text
-        self.assertLess(QColor(img.pixel(165, 8)).value(), 40)
-
-    def test_the_demo_button_is_a_white_pill_with_a_dark_play_chip_and_still_plays(self):
-        with mock.patch.object(H.ShowcaseTourCard, "_play_demo") as play:
-            card = H.ShowcaseTourCard()
-            card.resize(330, 380)
-            card.show()
-            btn = card.findChild(QPushButton, "tourPlayBtn")
-            self.assertIsInstance(btn, H._WatchDemoButton)
-            self.assertEqual(btn.height(), 33)
-            img = btn.grab().toImage()
-            self.assertGreater(QColor(img.pixel(btn.width() - 8, 16)).value(), 240)   # white
-            self.assertLess(QColor(img.pixel(17, 6)).value(), 90)                     # dark chip
-            btn.click()
-            play.assert_called_once()
-
-    def test_the_pills_are_mono_caps_and_the_demo_tag_has_the_red_square(self):
-        pills = H.ShowcaseTourCard().findChildren(H._DemoPill)
-        self.assertEqual([p.text() for p in pills], ["DEMO", "01:03 ›"])
-        pills[0].resize(60, 32)
-        img = pills[0].grab().toImage()
-        self.assertEqual(QColor(img.pixel(10, 16)).name().lower(), theme.BRAND_RED.lower())
-
-
 class HomeCardsAndButtonsHaveShadows(unittest.TestCase):
     def test_every_home_card_has_a_soft_shadow_companion(self):
         home = H.HomePanel({})
         home.resize(1200, 1200)
         home.show()
         cards = [c for c in home.findChildren(C.Card)]
-        self.assertGreaterEqual(len(cards), 3)           # composer, recent, add-ons
+        self.assertGreaterEqual(len(cards), 1)           # the composer (run cards only with runs)
         for c in cards:
             nested = isinstance(c.parentWidget().parentWidget(), C.Card) or any(
                 isinstance(w, C.Card) for w in _ancestors(c))
             self.assertEqual(c._shadow_under.active(), not nested, type(c).__name__)
-        self.assertTrue(home.findChild(H.ShowcaseTourCard)._shadow_under.active())
-
-    def test_the_motto_manage_and_browse_pills_have_shadows(self):
-        home = H.HomePanel({})
-        home.show()
-        motto = home.findChild(H._Motto)
-        manage = [b for b in home.findChildren(QPushButton) if b.text() == "Manage"][0]
-        browse = [b for b in home.findChildren(QPushButton) if "Browse" in b.text()][0]
-        for w in (motto, manage, browse):
-            self.assertTrue(w._shadow_under.active())
 
 
 if __name__ == "__main__":

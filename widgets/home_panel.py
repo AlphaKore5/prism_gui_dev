@@ -76,7 +76,10 @@ RUN_WINDOW = 120
 
 # The number of recent runs listed. Five is what fits beside the two narrower
 # columns without either of them stretching to fill.
-RECENT_SHOWN = 6
+RECENT_SHOWN = 3
+
+# Width of the one centred column Home is built in.
+STAGE_W = 700
 
 # Stages shown in an active run's tool chain before it collapses to a count.
 # A nine-stage plan drawn in full is 800px of badges, which is wider than the
@@ -251,52 +254,6 @@ class _Row(QFrame):
         super().keyPressEvent(event)
 
 
-class _TimelineRow(_Row):
-    """A Recent activity row. No border (a 1px one would leave a gap in the
-    timeline wire at every row); keyboard focus paints its ring instead."""
-
-    def __init__(self, parent=None):
-        super().__init__(True, parent)
-        self.setStyleSheet(f"#rowFlat {{ border: none; }}"
-                           f"#rowFlat:focus {{ background: {theme.WELL}; }}")
-
-    def paintEvent(self, event):
-        super().paintEvent(event)
-        if self.hasFocus():
-            p = QPainter(self)
-            p.setRenderHint(QPainter.Antialiasing, True)
-            p.setPen(QPen(QColor(theme.ACCENT), 1))
-            p.setBrush(Qt.NoBrush)
-            p.drawRoundedRect(QRectF(self.rect()).adjusted(.5, .5, -.5, -.5), 8, 8)
-            p.end()
-
-
-class TimelineNode(QWidget):
-    """The preview's `.acts li::before/::after`: a 1.2px #CBCAC4 wire at the left
-    of the row (from the row's middle on the first row, full height otherwise)
-    and a 7.4px ink dot centred on the row."""
-
-    WIRE = "#CBCAC4"
-
-    def __init__(self, is_first: bool = False, is_last: bool = False, parent=None):
-        super().__init__(parent)
-        self.setFixedWidth(8)
-        self._is_first = is_first
-        self._is_last = is_last
-
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
-        h = float(self.height())
-        cy = h / 2.0
-        top_y = cy if self._is_first else 0.0
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor(self.WIRE))
-        painter.drawRect(QRectF(3.8, top_y, 1.2, h - top_y))
-        painter.setBrush(QColor(theme.INK))
-        painter.drawEllipse(QPointF(4.0, cy), 3.7, 3.7)
-
-
 # The add-on word a task starts with (how every task a user types is routed) and
 # the preview's line icon for it. Anything else is a plain document.
 _RUN_ICON = {
@@ -316,16 +273,6 @@ def _run_icon(run: dict) -> str:
     if any("studio" in (t or "").lower() for t in (run.get("tools") or [])):
         return "film-box"
     return "file"
-
-
-class _Motto(QLabel):
-    """The mono-caps pill with the AlphaKore red square (.motto)."""
-
-    def paintEvent(self, event):
-        super().paintEvent(event)
-        p = QPainter(self)
-        p.fillRect(14, (self.height() - 6) // 2, 6, 6, QColor(theme.BRAND_RED))
-        p.end()
 
 
 def _hl_pen(w: float, h: float, top_alpha: int) -> QPen:
@@ -365,19 +312,6 @@ def _pixel_glyph(p: QPainter, cx: float, cy: float, size: float, cells, colour="
 
 PIXEL_ARROW = ((2, 8), (5, 8), (8, 8), (11, 8), (11, 5), (11, 11), (14, 8))
 PIXEL_PLAY = ((5, 3), (5, 6), (5, 9), (5, 12), (8, 5), (8, 8), (8, 11), (11, 7))
-
-
-def _pixel_play(size: int) -> QPixmap:
-    """The preview's pixel play glyph on a transparent pixmap (a demo tile's picture)."""
-    app = QApplication.instance()
-    dpr = app.devicePixelRatio() if app else 1.0
-    pm = QPixmap(int(size * dpr), int(size * dpr))
-    pm.setDevicePixelRatio(dpr)
-    pm.fill(Qt.transparent)
-    p = QPainter(pm)
-    _pixel_glyph(p, size / 2, size / 2, size, PIXEL_PLAY)
-    p.end()
-    return pm
 
 
 class _SendButton(QPushButton):
@@ -441,210 +375,6 @@ class _SendButton(QPushButton):
         g.setColorAt(0.45, QColor(255, 255, 255, 0))
         g.setColorAt(1.0, QColor(255, 255, 255, 0))
         return g
-
-
-class _WatchDemoButton(QPushButton):
-    """The preview's `.btn.light.sm` with a dark `.ic` chip: white gradient pill,
-    25px near-black round chip carrying the pixel play glyph, then the label."""
-
-    def __init__(self, text: str, parent=None):
-        super().__init__(text, parent)
-        self.setObjectName("tourPlayBtn")
-        self.setStyleSheet("min-height: 33px; max-height: 33px; padding: 0px; border: none;")
-        self.setFixedHeight(33)
-        self.setCursor(Qt.PointingHandCursor)
-        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        C.attach_shadow(self, C.SH_LIGHT_BTN)
-
-    def _font(self) -> QFont:
-        f = QFont(theme.FONT_BODY)
-        f.setPixelSize(13)
-        f.setWeight(QFont.Medium)
-        return f
-
-    def sizeHint(self) -> QSize:
-        tw = QFontMetrics(self._font()).horizontalAdvance(self.text())
-        return QSize(int(4.4 + 25 + 8.8 + tw + 17 + .5), 33)
-
-    def minimumSizeHint(self) -> QSize:
-        return self.sizeHint()
-
-    def paintEvent(self, event):
-        p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing, True)
-        w, h = float(self.width()), float(self.height())
-        body = QRectF(0, 0, w, h)
-        g = QLinearGradient(0, 0, 0, h)
-        g.setColorAt(0, QColor("#FFFFFF"))
-        g.setColorAt(1, QColor("#F8F7F4"))
-        if self.isDown():
-            g = QColor("#EFEEEA")
-        p.setPen(QPen(QColor(20, 20, 18, 56 if self.underMouse() else 20), 1))
-        p.setBrush(QBrush(g))
-        p.drawRoundedRect(body.adjusted(.5, .5, -.5, -.5), h / 2, h / 2)
-        d = 25.0
-        cx, cy = 4.4 + d / 2, h / 2
-        dot = QRectF(cx - d / 2, cy - d / 2, d, d)
-        rg = QLinearGradient(0, dot.top(), 0, dot.bottom())
-        rg.setColorAt(0, QColor("#3a3a38"))
-        rg.setColorAt(1, QColor("#111110"))
-        p.setPen(Qt.NoPen)
-        p.setBrush(QBrush(rg))
-        p.drawEllipse(dot)
-        hp = QPen(QBrush(_SendButton._dot_highlight(dot)), 1)
-        p.setPen(hp)
-        p.setBrush(Qt.NoBrush)
-        p.drawEllipse(dot.adjusted(.5, .5, -.5, -.5))
-        _pixel_glyph(p, cx, cy, 15.0, PIXEL_PLAY)
-        p.setFont(self._font())
-        p.setPen(QColor(theme.INK))
-        x0 = 4.4 + d + 8.8
-        p.drawText(QRectF(x0, 0, w - x0, h), Qt.AlignVCenter | Qt.AlignLeft, self.text())
-
-
-class _DemoPill(QLabel):
-    """`.demo .pill`: mono 10px caps in a 6px-radius chip, white 10% fill and a
-    22% ring; `live` adds the red square before the word."""
-
-    def __init__(self, text: str, live: bool = False, parent=None):
-        super().__init__(text, parent)
-        self._live = live
-        self.setFixedHeight(32)
-        pad_l = 8 + (11 if live else 0)
-        self.setStyleSheet(
-            f"font-family: '{theme.FONT_MONO}'; font-size: 10px; font-weight: 500; "
-            "color: #ffffff; background: transparent; border: none; "
-            f"padding: 0px 8px 0px {pad_l}px;")
-        C.track(self, 0.08)
-
-    def paintEvent(self, event):
-        p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing, True)
-        r = QRectF(self.rect())
-        p.setPen(QPen(QColor(255, 255, 255, 56), 1))
-        p.setBrush(QColor(255, 255, 255, 26))
-        p.drawRoundedRect(r.adjusted(.5, .5, -.5, -.5), 6, 6)
-        if self._live:
-            p.setPen(Qt.NoPen)
-            p.setBrush(QColor(theme.BRAND_RED))
-            p.drawRect(QRectF(8, (r.height() - 5) / 2, 5, 5))
-        p.end()
-        super().paintEvent(event)
-
-
-class ShowcaseTourCard(QFrame):
-    """Featured demo video card on the right side of the hero section:
-    'Ideas to outcomes.'
-    'Prism combines AI, tools and automation — so you can focus on what matters.'
-    '▶ Watch demo video'
-    (The motto is the pill in the greeting row; it is not repeated here.)
-    """
-
-    tour_clicked = Signal()
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setObjectName("tourCard")
-        self.setAttribute(Qt.WA_StyledBackground, True)
-        self.setCursor(Qt.PointingHandCursor)
-        self.setMinimumHeight(250)
-        C.elevate(self, theme.SHADOW_RAISED)
-        C.attach_shadow(self, C.SH_DEMO, 17)
-
-        col = QVBoxLayout(self)
-        col.setContentsMargins(18, 16, 18, 15)
-        col.setSpacing(0)
-
-        top_row = QHBoxLayout()
-        top_row.setContentsMargins(0, 0, 0, 0)
-        top_row.addWidget(_DemoPill("DEMO", live=True))
-        top_row.addStretch(1)
-        top_row.addWidget(_DemoPill("01:03 ›"))
-        col.addLayout(top_row)
-
-        col.addSpacing(14)
-        title = QLabel(i18n.t("Ideas to outcomes."))
-        tf = QFont(theme.FONT_HEADING)              # -0.035em, as .demo h2
-        tf.setPixelSize(26)
-        tf.setWeight(QFont.Normal)
-        tf.setLetterSpacing(QFont.AbsoluteSpacing, -0.9)
-        title.setFont(tf)
-        title.setStyleSheet("color: #ffffff; background: transparent;")
-        col.addWidget(title)
-
-        col.addSpacing(7)
-        desc = QLabel(i18n.t("Prism combines AI, tools and automation — so you can focus on what matters."))
-        desc.setWordWrap(True)
-        desc.setMaximumWidth(265)
-        desc.setStyleSheet(
-            f"font-family: '{theme.FONT_BODY}'; font-size: 13px; "
-            "color: rgba(255, 255, 255, 0.78); background: transparent;"
-        )
-        col.addWidget(desc)
-        col.addSpacing(15)
-
-        tour_btn = _WatchDemoButton(i18n.t('Watch demo video'))
-        tour_btn.clicked.connect(self._play_demo)
-        col.addWidget(tour_btn)
-
-        col.addStretch(1)
-
-    def paintEvent(self, event):
-        super().paintEvent(event)
-        painter = QPainter(self)
-        if not painter.isActive():
-            return
-        painter.setRenderHint(QPainter.Antialiasing, True)
-        painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
-        r = QRectF(self.rect())
-        radius = 17.0
-
-        clip = QPainterPath()
-        clip.addRoundedRect(r, radius, radius)
-        painter.setClipPath(clip)
-
-        # The preview's `.demo`: #0a0a09 under the brand painting (cover, 50% 22%),
-        # then a dark wash that is solid behind the text and clear over the colour.
-        painter.fillRect(r, QBrush(QColor(10, 10, 9)))
-        pix = QPixmap(paths.resource("assets", "prism-spectrum.jpg"))
-        if pix.isNull():
-            pix = QPixmap(os.path.join(os.path.dirname(__file__), "..", "assets", "prism-spectrum.jpg"))
-        if not pix.isNull():
-            tw, th = max(1, int(r.width())), max(1, int(r.height()))
-            scaled = pix.scaled(tw, th, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
-            sx = int((scaled.width() - tw) * 0.5)
-            sy = int((scaled.height() - th) * 0.22)
-            painter.drawPixmap(0, 0, scaled, sx, sy, tw, th)
-
-        wash = QLinearGradient(0.0, 0.0, 0.0, float(r.height()))
-        wash.setColorAt(0.00, QColor(10, 10, 9, 245))
-        wash.setColorAt(0.40, QColor(10, 10, 9, 214))
-        wash.setColorAt(0.68, QColor(10, 10, 9, 0))
-        wash.setColorAt(1.00, QColor(10, 10, 9, 140))
-        painter.fillRect(r, QBrush(wash))
-
-        painter.setPen(QPen(QColor(0, 0, 0, 102), 1.0))      # 0 0 0 1px rgba(0,0,0,.4)
-        painter.setBrush(Qt.NoBrush)
-        painter.drawRoundedRect(r.adjusted(0.5, 0.5, -0.5, -0.5), radius, radius)
-        painter.end()
-
-    def mousePressEvent(self, event):
-        self._play_demo()
-        super().mousePressEvent(event)
-
-    def _play_demo(self):
-        candidates = [
-            os.path.join(os.path.dirname(__file__), "..", "..", "inspo.mp4"),
-            os.path.join(os.path.dirname(__file__), "..", "videos", "prism-creator-promo",
-                         "renders", "prism-creator-promo_2026-08-16_05-15-18.mp4"),
-            os.path.join(os.path.dirname(__file__), "..", "..", "inspo-final", "alphakore-run2-1080.mp4"),
-        ]
-        video_path = next((p for p in candidates if os.path.exists(p)), "")
-        if video_path:
-            from dialogs.preview_dialog import open_preview
-            open_preview(video_path, self, demo_mode=True)
-        else:
-            self.tour_clicked.emit()
 
 
 class ActiveRunCard(C.Card):
@@ -741,16 +471,51 @@ class ActiveRunCard(C.Card):
         return chain
 
 
-class _FlatCard(C.Card):
-    """An EmptyState's own card, drawn as nothing: on Home it already sits in
-    the Recent activity card, and a card inside a card was visual duplication."""
+class _RunCard(C.Card):
+    """One recent run as a small card: line-icon tile and status pill on top,
+    the title on one line, then mono "ADDON · time". Opens the saved record."""
 
-    def paintEvent(self, event):
-        pass
+    clicked = Signal()
 
+    def __init__(self, run: dict, parent=None):
+        super().__init__(radius=14, parent=parent)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setFocusPolicy(Qt.TabFocus)
+        col = self.body((12, 12, 12, 12 + C.CARD_LIP), spacing=theme.SPACE_2)
+        top = QHBoxLayout()
+        top.setContentsMargins(0, 0, 0, 0)
+        tile = C.IconPad(_run_icon(run), theme.INK, 30, 9, 14)
+        tile.setStyleSheet("background: #EFEEEA; border-radius: 9px;")
+        top.addWidget(tile)
+        top.addStretch(1)
+        is_ok = run.get("ok", True)
+        state = "completed" if is_ok else "failed"
+        pill = C.Pill(theme.status(state)[0], "st_ok" if is_ok else "st_err")
+        pill.setAccessibleName(theme.status(state)[0].title())
+        top.addWidget(pill)
+        col.addLayout(top)
+        title = _Elided(run.get("title", ""), "BODY", weight=400)
+        title.setStyleSheet(title.styleSheet() + " font-size: 13px; color: #111110;")
+        col.addWidget(title)
+        tools = run.get("tools") or []
+        source = tools[0] if tools else "Prism"
+        when = run.get("when", "")
+        meta = _Elided(f"{source} · {when}" if when else source, "META")
+        meta.setStyleSheet(meta.styleSheet()
+                           + f" font-family: '{theme.FONT_MONO}'; font-size: 10px;")
+        C.track(meta, 0.03)
+        col.addWidget(meta)
+        self.setAccessibleName(title.text_value())
 
-def _flatten(empty) -> None:
-    empty.card.__class__ = _FlatCard
+    def mousePressEvent(self, event):
+        self.clicked.emit()
+        super().mousePressEvent(event)
+
+    def keyPressEvent(self, event):
+        if event.key() in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Space):
+            self.clicked.emit()
+            return
+        super().keyPressEvent(event)
 
 
 class HomePanel(QWidget):
@@ -876,13 +641,14 @@ class HomePanel(QWidget):
 
     def refresh(self):
         self._refresh_identity()
+        # The run slot lives inside the page column; take it out before the
+        # old column is deleted, or it goes with it.
+        self._active_host.hide()
+        self._active_host.setParent(None)
         while self._col.count():
             item = self._col.takeAt(0)
             widget = item.widget()
-            if widget is self._active_host:
-                widget.hide()
-                widget.setParent(None)
-            elif widget:
+            if widget:
                 widget.hide()
                 widget.setParent(None)
                 widget.deleteLater()
@@ -893,15 +659,26 @@ class HomePanel(QWidget):
         runs = DATA.recent_runs(self.cfg, RUN_WINDOW)
         done, failed, stalled = _split(runs)
 
-        # 1. Hero row (Left: Greeting + Composer + Try chips; Right: Lumi)
-        self._col.addLayout(self._hero_section())
-
-        # 2. Active runs (if any)
-        self._col.addWidget(self._active_host)
+        # One centred column, vertically centred when the window is taller
+        # than it: headline, [festival notice], composer, quiet meta row,
+        # [active runs], [Recent activity].
+        stage = QWidget()
+        stage.setMaximumWidth(STAGE_W)
+        col = QVBoxLayout(stage)
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(theme.SPACE_3)
+        self._hero_section(col)
+        col.addWidget(self._active_host)
         self._fill_active()
+        self._recent_section(col, runs, stalled)
 
-        # 3. Bottom section (Left: Recent activity; Right: Add-ons)
-        self._col.addLayout(self._bottom_section(runs, stalled))
+        wrap = QHBoxLayout()
+        wrap.setContentsMargins(0, 0, 0, 0)
+        wrap.addStretch(1)
+        wrap.addWidget(stage, 1000)
+        wrap.addStretch(1)
+        self._col.addStretch(1)
+        self._col.addLayout(wrap)
         self._col.addStretch(1)
 
     def _drop(self, layout):
@@ -914,44 +691,34 @@ class HomePanel(QWidget):
             elif item.layout():
                 self._drop(item.layout())
 
-    # ── Section 1: Hero Section (Two Columns) ─────────────────────────────
-    def _hero_section(self) -> QHBoxLayout:
-        hero = QHBoxLayout()
-        hero.setSpacing(theme.CARD_GAP)
-
-        # Left Column (~62%)
-        left_col = QVBoxLayout()
-        left_col.setContentsMargins(0, 0, 0, 0)
-        left_col.setSpacing(theme.SPACE_3)
-
-        # Greeting row with script motto on the right
-        greet_row = QHBoxLayout()
-        greet_row.setContentsMargins(0, 0, 0, 0)
-        greet_row.setSpacing(theme.SPACE_2)
-
-        greet_stack = QVBoxLayout()
-        greet_stack.setContentsMargins(0, 0, 0, 0)
-        greet_stack.setSpacing(2)
+    # ── Headline, notice, composer, meta row ──────────────────────────────
+    def _hero_section(self, col: QVBoxLayout):
+        head = QVBoxLayout()
+        head.setContentsMargins(0, 0, 0, theme.SPACE_2)
+        head.setSpacing(2)
 
         salutation = QLabel(f"{_greeting()},")
+        salutation.setAlignment(Qt.AlignCenter)
         salutation.setStyleSheet(
             f"font-family: 'Geist Light', '{theme.FONT_BODY}'; font-size: 21px; "
             f"font-weight: 300; color: {theme.TEXT};"
         )
-        greet_stack.addWidget(salutation)
+        head.addWidget(salutation)
 
         who = (identity.display_name(self.cfg) or "").split(" ")[0]
         if not who:
             who = "there"
         name_lbl = QLabel(f"{who.upper()},")
+        name_lbl.setAlignment(Qt.AlignCenter)
         name_lbl.setStyleSheet(
             f"font-family: '{theme.FONT_DISPLAY}'; font-size: 52px; "
             f"font-weight: 700; color: {theme.INK};"
         )
         C.track(name_lbl, 0.02)
-        greet_stack.addWidget(name_lbl)
+        head.addWidget(name_lbl)
 
         sub_lbl = QLabel(i18n.t("Let's turn ideas into outcomes."))
+        sub_lbl.setAlignment(Qt.AlignCenter)
         _lead, _tail = "Let's turn ideas ", "into outcomes."
         if sub_lbl.text() == _lead + _tail:          # English: the tail is the faint clause
             sub_lbl.setTextFormat(Qt.RichText)
@@ -960,37 +727,44 @@ class HomePanel(QWidget):
             f"font-family: '{theme.FONT_BODY}'; font-size: 18px; "
             f"font-weight: 400; color: {theme.INK};"
         )
-        greet_stack.addWidget(sub_lbl)
-        greet_row.addLayout(greet_stack, stretch=1)
-
-        motto = _Motto(i18n.t("Less work. More possibilities.").upper())
-        motto.setStyleSheet(
-            f"font-family: '{theme.FONT_MONO}'; font-size: 11px; "
-            f"font-weight: 400; color: {theme.INK}; "
-            f"background: #ffffff; "
-            f"border: 1px solid {theme.HAIRLINE}; border-radius: 16px; "
-            f"padding: 8px 14px 8px 28px;"
-        )
-        C.track(motto, 0.05)
-        C.attach_shadow(motto, C.SH_MOTTO)
-        motto.setAlignment(Qt.AlignCenter)
-        greet_row.addWidget(motto, alignment=Qt.AlignRight | Qt.AlignVCenter)
-        left_col.addLayout(greet_row)
+        head.addWidget(sub_lbl)
+        col.addLayout(head)
 
         tips = self._festival_tips()
         if tips:
-            left_col.addWidget(tips)
-        left_col.addWidget(self._prompt_card())
-        left_col.addLayout(self._try_chips_row())
+            col.addWidget(tips)
+        col.addWidget(self._prompt_card())
+        col.addLayout(self._try_chips_row())
+        col.addLayout(self._meta_links_row())
 
-        hero.addLayout(left_col, stretch=62)
+    def _meta_links_row(self) -> QHBoxLayout:
+        """Two quiet links under the chips: the demo video and the add-on
+        catalogue (Home no longer carries either as a card)."""
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(theme.SPACE_3)
+        demo = C.button(f"▶ {i18n.t('Watch demo video')} · 01:03", "link",
+                        on_click=self._play_demo)
+        row.addWidget(demo)
+        row.addStretch(1)
+        manage = C.button(f"{i18n.t('Manage add-ons')} →", "link",
+                          on_click=lambda: self.open_addon.emit("catalog"))
+        row.addWidget(manage)
+        return row
 
-        # Right Column (~38%)
-        tour_card = ShowcaseTourCard()
-        tour_card.tour_clicked.connect(lambda: self.open_addon.emit("guide"))
-        hero.addWidget(tour_card, stretch=38)
-
-        return hero
+    def _play_demo(self):
+        candidates = [
+            os.path.join(os.path.dirname(__file__), "..", "..", "inspo.mp4"),
+            os.path.join(os.path.dirname(__file__), "..", "videos", "prism-creator-promo",
+                         "renders", "prism-creator-promo_2026-08-16_05-15-18.mp4"),
+            os.path.join(os.path.dirname(__file__), "..", "..", "inspo-final", "alphakore-run2-1080.mp4"),
+        ]
+        video_path = next((p for p in candidates if os.path.exists(p)), "")
+        if video_path:
+            from dialogs.preview_dialog import open_preview
+            open_preview(video_path, self, demo_mode=True)
+        else:
+            self.open_addon.emit("guide")
 
     # ── festival tip (27 Oct 2026) ─────────────────────────────────────────
     def _festival_tips(self, today=None) -> QFrame | None:
@@ -1018,10 +792,10 @@ class HomePanel(QWidget):
         banner = QFrame()
         banner.setObjectName("festivalBanner")
         banner.setStyleSheet(
-            f"QFrame#festivalBanner {{ background: {theme.WARN_BG}; "
-            f"border-radius: {theme.R_CONTROL}px; }}")
+            f"QFrame#festivalBanner {{ background: #FFFFFF; "
+            f"border: 1px solid {theme.HAIRLINE}; border-radius: 14px; }}")
         col = QVBoxLayout(banner)
-        col.setContentsMargins(0, 2, 0, 2)
+        col.setContentsMargins(0, 4, 0, 4)
         col.setSpacing(0)
         for row in rows:
             col.addWidget(row)
@@ -1030,7 +804,7 @@ class HomePanel(QWidget):
     def _festival_tip_row(self, f: dict, kind: str) -> QFrame:
         bar = QFrame()
         bar.setObjectName("festivalTip")
-        bar.setStyleSheet("QFrame#festivalTip { background: transparent; }")
+        bar.setStyleSheet("QFrame#festivalTip { background: transparent; border: none; }")
         row = QHBoxLayout(bar)
         row.setContentsMargins(theme.SPACE_3, 2, theme.SPACE_3, 2)
         row.setSpacing(theme.SPACE_2)
@@ -1042,7 +816,7 @@ class HomePanel(QWidget):
             kind=i18n.t("post") if kind == "post" else i18n.t("reel")))
         label = QLabel(question)
         label.setWordWrap(True)
-        label.setStyleSheet(f"color: {theme.WARN_INK}; font-weight: 600; background: transparent;")
+        label.setStyleSheet(f"color: {theme.INK}; font-size: 13px; background: transparent; border: none;")
         row.addWidget(label, stretch=1)
 
         yes_btn = C.button(i18n.t("Yes"), "secondary", small=True,
@@ -1070,7 +844,7 @@ class HomePanel(QWidget):
 
     def _prompt_card(self) -> QWidget:
         card = C.Card()
-        card.setMinimumHeight(205)          # preview: 13.6rem (200px) + the 5px lip
+        card.setMinimumHeight(140 + C.CARD_LIP)
         col = QVBoxLayout(card)
         col.setContentsMargins(17, 15, 15, 13 + C.CARD_LIP)
         col.setSpacing(theme.SPACE_3)
@@ -1284,122 +1058,6 @@ class HomePanel(QWidget):
             row.addWidget(hint)
         return row
 
-    def _bottom_section(self, runs, stalled) -> QHBoxLayout:
-        row = QHBoxLayout()
-        row.setSpacing(theme.CARD_GAP)
-        row.addWidget(self._recent_activity_card(runs, stalled), stretch=60)
-        row.addWidget(self._addons_card(), stretch=40)
-        return row
-
-    def _recent_activity_card(self, runs, stalled) -> QWidget:
-        card = C.Card()
-        col = card.body((theme.CARD_PAD, theme.CARD_PAD,
-                         theme.CARD_PAD, theme.CARD_PAD), spacing=0)
-
-        head = QHBoxLayout()
-        head.setContentsMargins(0, 0, 0, 0)
-        title = C.heading(i18n.t("Recent activity"), 4)
-        head.addWidget(title, stretch=1)
-
-        see_all = C.button(f"{i18n.t('See all')} →", "link",
-                           on_click=self.open_history.emit)
-        head.addWidget(see_all)
-        col.addLayout(head)
-        col.addSpacing(theme.SPACE_3)
-
-        if not runs:
-            empty = C.EmptyState(
-                "inbox", i18n.t("No runs yet"),
-                i18n.t("Every task you start is saved here, with the tools it "
-                       "used and what it produced."),
-                i18n.t("Describe a task"))
-            _flatten(empty)
-            empty.clicked.connect(self.describe_task.emit)
-            col.addWidget(empty, stretch=1)
-            return card
-
-        listed = [r for r in runs if not _never_started(r)][:RECENT_SHOWN]
-        if not listed:
-            empty = C.EmptyState(
-                "alert", i18n.t("Nothing has finished yet"),
-                i18n.t("Every recent run stopped before a tool was reached. "
-                       "Open History to see what each one recorded."),
-                i18n.t("Open History"))
-            _flatten(empty)
-            empty.clicked.connect(self.open_history.emit)
-            col.addWidget(empty, stretch=1)
-            return card
-
-        for i, run in enumerate(listed):
-            is_first = (i == 0)
-            is_last = (i == len(listed) - 1 and not stalled)
-            col.addWidget(self._timeline_row(run, is_first, is_last))
-
-        if stalled:
-            col.addSpacing(theme.SPACE_1)
-            col.addWidget(self._stalled_row(stalled))
-
-        col.addStretch(1)
-        return card
-
-    def _timeline_row(self, run: dict, is_first: bool, is_last: bool) -> QWidget:
-        wrap = _TimelineRow()
-        wrap.clicked.connect(
-            lambda p=run.get("path", ""): p and self.open_run_record.emit(p))
-
-        outer = QHBoxLayout(wrap)
-        outer.setContentsMargins(0, 0, 0, 0)     # the wire runs the row's full height
-        outer.setSpacing(12)
-
-        track = TimelineNode(is_first=is_first, is_last=is_last)
-        outer.addWidget(track)
-        row = QHBoxLayout()
-        row.setContentsMargins(0, 9, 0, 9)
-        row.setSpacing(12)
-        outer.addLayout(row, 1)
-
-        tools = run.get("tools") or []
-        tile = C.IconPad(_run_icon(run), theme.INK, 34, 10, 14)
-        tile.setStyleSheet("background: #EFEEEA; border-radius: 10px;")
-        row.addWidget(tile)
-
-        text_col = QVBoxLayout()
-        text_col.setContentsMargins(0, 0, 0, 0)
-        text_col.setSpacing(1)
-
-        title = _Elided(run.get("title", ""), "BODY", weight=400)
-        title.setStyleSheet(title.styleSheet() + " font-size: 14px; color: #111110;")
-        text_col.addWidget(title)
-
-        source = tools[0] if tools else "Prism"
-        when = run.get("when", "")
-        detail_text = f"{source} · {when}" if when else source
-        subtitle = _Elided(detail_text, "META")
-        subtitle.setStyleSheet(subtitle.styleSheet()
-                               + f" font-family: '{theme.FONT_MONO}'; font-size: 11px;")
-        C.track(subtitle, 0.03)
-        text_col.addWidget(subtitle)
-        row.addLayout(text_col, stretch=1)
-
-        is_ok = run.get("ok", True)
-        state = "completed" if is_ok else "failed"
-        status_badge = C.Pill(theme.status(state)[0], "st_ok" if is_ok else "st_err")
-        status_badge.setAccessibleName(theme.status(state)[0].title())
-        row.addWidget(status_badge)
-
-        menu_btn = QPushButton()
-        menu_btn.setObjectName("recentMenuBtn")
-        menu_btn.setIcon(icons.icon("more-dots", 18, theme.MUTE))
-        menu_btn.setIconSize(QSize(18, 18))
-        menu_btn.setFixedSize(30, 30)
-        menu_btn.setCursor(Qt.PointingHandCursor)
-        menu_btn.clicked.connect(
-            lambda: self.open_run_record.emit(run.get("path", "")))
-        row.addWidget(menu_btn)
-
-        wrap.setAccessibleName(title.text_value())
-        return wrap
-
     def _stalled_row(self, stalled: list[dict]) -> QWidget:
         wrap = _Row()
         wrap.clicked.connect(self.open_history.emit)
@@ -1425,186 +1083,30 @@ class HomePanel(QWidget):
         row.addWidget(C.Pill(str(len(stalled)), "warn"))
         return wrap
 
-    def _addons_card(self) -> QWidget:
-        card = C.Card()
-        col = card.body((theme.CARD_PAD, theme.CARD_PAD,
-                         theme.CARD_PAD, theme.CARD_PAD), spacing=0)
-
+    # ── Recent activity: the latest runs as a row of small cards ──────────
+    def _recent_section(self, col: QVBoxLayout, runs, stalled):
+        if not runs:
+            return
+        listed = [r for r in runs if not _never_started(r)][:RECENT_SHOWN]
+        col.addSpacing(theme.SPACE_3)
         head = QHBoxLayout()
         head.setContentsMargins(0, 0, 0, 0)
-        title = C.heading(i18n.t("Add-ons"), 3)
+        title = QLabel(i18n.t("Recent activity"))
+        title.setStyleSheet(f"font-family: '{theme.FONT_BODY}'; font-size: 13px; color: {theme.MUTE};")
         head.addWidget(title, stretch=1)
-
-        manage_btn = C.button(i18n.t("Manage"), "secondary", small=False,
-                              on_click=lambda: self.open_addon.emit("catalog"))
-        C.attach_shadow(manage_btn, C.SH_LIGHT_BTN)
-        head.addWidget(manage_btn)
+        head.addWidget(C.button(f"{i18n.t('See all')} →", "link",
+                                on_click=self.open_history.emit))
         col.addLayout(head)
-        col.addSpacing(theme.SPACE_3)
-
-        grid = QGridLayout()
-        grid.setSpacing(theme.SPACE_2)
-
-        addon_specs = [
-            ("Email Inquiry", "inquiry", "inquiry"),
-            ("BOQ", "boq", "boq"),
-            ("Gerber", "gerber", "gerber"),
-            ("STEP", "step", "step"),
-            ("BOM & Stock", "bom", "bom"),
-            ("Email", "email", "email"),
-            ("Leads", "leads", "leads"),
-            ("Reel", "reel", "reel"),
-            ("Motion", "motion", "motion"),
-        ]
-
-        for i, (name, logo_key, nav_key) in enumerate(addon_specs):
-            tile = self._make_addon_tile(name, logo_key, nav_key)
-            row_idx = i // 3
-            col_idx = i % 3
-            grid.addWidget(tile, row_idx, col_idx)
-
-        col.addLayout(grid)
-        col.addSpacing(theme.SPACE_3)
-
-        foot = QHBoxLayout()
-        foot.setContentsMargins(0, 0, 0, 0)
-        browse_btn = QPushButton(f"+ {i18n.t('Browse Add-ons')}")
-        browse_btn.setObjectName("chipBtn")
-        browse_btn.setCursor(Qt.PointingHandCursor)
-        browse_btn.setStyleSheet("font-size: 13px; font-weight: 500; padding: 6px 14px;")
-        C.attach_shadow(browse_btn, C.SH_LIGHT_BTN)
-        browse_btn.clicked.connect(lambda: self.open_addon.emit("catalog"))
-        foot.addWidget(browse_btn)
-
-        foot.addStretch(1)
-
-        guide_link = C.button(f"{i18n.t('Explore all add-ons')} →", "link",
-                              on_click=lambda: self.open_addon.emit("catalog"))
-        foot.addWidget(guide_link)
-        col.addLayout(foot)
-
-        return card
-
-    @staticmethod
-    def _make_tool_tile(host, name: str, glyph: str, builtin: bool, route: str) -> QWidget:
-        return _ToolTile(host, name, glyph, builtin, route)
-
-    def _make_addon_tile(self, name: str, logo_key: str, nav_key: str) -> QWidget:
-        return self._make_tool_tile(self, name, logo_key, True, nav_key)
-
-
-class _TileState(QLabel):
-    """Mono caps state under an add-on tile: a small square, then READY."""
-
-    def __init__(self, text: str, colour: str, parent=None):
-        super().__init__(text.upper(), parent)
-        self._colour = colour
-        self.setStyleSheet(f"font-family: '{theme.FONT_MONO}'; font-size: 10px; "
-                           f"color: {colour}; background: transparent; padding-left: 10px;")
-        C.track(self, 0.08)
-
-    def paintEvent(self, event):
-        super().paintEvent(event)
-        p = QPainter(self)
-        p.fillRect(0, (self.height() - 5) // 2, 5, 5, QColor(self._colour))
-        p.end()
-
-
-# The line icon of each Home add-on tile: the rail's glyph for the add-on (so the
-# two agree) and the preview's own for the two the rail does not list.
-_TILE_ICON = {"reel": "film-box", "motion": "video"}
-
-
-def _tile_icon(glyph: str) -> str:
-    from widgets.sidebar import _RAIL_ICON
-    return _TILE_ICON.get(glyph) or _RAIL_ICON.get(glyph) or glyph
-
-
-class _AddonHolder(QWidget):
-    """`.ad .tile`: a 37px near-black squircle (gradient #3a3a38 to #111110, 12px
-    radius, inset top highlight, soft drop shadow) with a white 1.6px line icon."""
-
-    def __init__(self, icon_name: str, parent=None):
-        super().__init__(parent)
-        self.setFixedSize(37, 37)
-        self._pm = icons.pixmap(icon_name, 17, "#FFFFFF", 1.6)
-        C.attach_shadow(self, ((0, 5.9, 11.8, -5.9, (0, 0, 0, .5)),), 12)
-
-    def paintEvent(self, event):
-        p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing, True)
-        r = QRectF(self.rect())
-        g = QLinearGradient(0, 0, 0, r.height())
-        g.setColorAt(0, QColor("#3a3a38"))
-        g.setColorAt(1, QColor("#111110"))
-        p.setPen(Qt.NoPen)
-        p.setBrush(QBrush(g))
-        p.drawRoundedRect(r, 12, 12)
-        p.setPen(_hl_pen(r.width(), r.height(), 56))     # inset 0 1px 0 .22
-        p.setBrush(Qt.NoBrush)
-        p.drawRoundedRect(r.adjusted(.5, 1.5, -.5, -.5), 11, 11)
-        x = (r.width() - 17) / 2
-        p.drawPixmap(int(round(x)), int(round(x)), self._pm)
-
-
-class _ToolTile(QFrame):
-    """Tool launcher tile with full keyboard navigation and accessible state.
-    Painted as the preview's `.ad`: soft #F6F5F2 tile, 14px radius, ring, white
-    and a soft shadow on hover."""
-
-    def __init__(self, host, name: str, glyph: str, builtin: bool, route: str, parent=None):
-        super().__init__(parent)
-        self.host = host
-        self.route = route
-        self.setObjectName("toolTile")
-        self.setFocusPolicy(Qt.StrongFocus)
-        self.setCursor(Qt.PointingHandCursor)
-        self.setMinimumHeight(106)
-        status_text = "Built-in" if builtin else "Not connected"
-        self.setAccessibleName(f"{name} ({status_text})")
-        C.attach_shadow(self, C.SH_TILE_HOVER, 14, hover_only=True)
-
-        tile_col = QVBoxLayout(self)
-        tile_col.setContentsMargins(7, 12, 7, 10)
-        tile_col.setSpacing(7)
-        tile_col.setAlignment(Qt.AlignCenter)
-
-        tile_col.addWidget(_AddonHolder(_tile_icon(glyph)), alignment=Qt.AlignHCenter)
-
-        name_lbl = QLabel(name)
-        name_lbl.setStyleSheet(
-            f"font-family: '{theme.FONT_BODY}'; font-size: 14px; "
-            f"font-weight: 500; color: {theme.INK}; background: transparent;"
-        )
-        name_lbl.setAlignment(Qt.AlignCenter)
-        tile_col.addWidget(name_lbl)
-
-        state = _TileState(i18n.t("Ready") if builtin else i18n.t("Not connected"),
-                           theme.BRAND_OK if builtin else theme.NEUTRAL[400])
-        tile_col.addWidget(state, alignment=Qt.AlignCenter)
-
-    def paintEvent(self, event):
-        p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing, True)
-        r = QRectF(self.rect())
-        hot = self.underMouse()
-        p.setPen(QPen(QColor("#D8D7D2" if hot else "#E6E5E1"), 1))
-        p.setBrush(QColor("#FFFFFF" if hot else "#F6F5F2"))
-        p.drawRoundedRect(r.adjusted(.5, .5, -.5, -.5), 14, 14)
-        if self.hasFocus():
-            p.setPen(QPen(QColor(theme.INK), 1.5))
-            p.setBrush(Qt.NoBrush)
-            p.drawRoundedRect(r.adjusted(1.5, 1.5, -1.5, -1.5), 13, 13)
-        p.end()
-
-    def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            self.host.open_addon.emit(self.route)
-        super().mousePressEvent(event)
-
-    def keyPressEvent(self, event):
-        if event.key() in (Qt.Key_Space, Qt.Key_Return, Qt.Key_Enter):
-            self.host.open_addon.emit(self.route)
-            event.accept()
-            return
-        super().keyPressEvent(event)
+        if listed:
+            cards = QHBoxLayout()
+            cards.setSpacing(theme.CARD_GAP)
+            for run in listed:
+                card = _RunCard(run)
+                card.clicked.connect(
+                    lambda p=run.get("path", ""): p and self.open_run_record.emit(p))
+                cards.addWidget(card, 1)
+            for _ in range(RECENT_SHOWN - len(listed)):
+                cards.addStretch(1)
+            col.addLayout(cards)
+        if stalled:
+            col.addWidget(self._stalled_row(stalled))
