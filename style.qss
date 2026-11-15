@@ -2522,3 +2522,24 @@ QCheckBox::indicator:checked { border: 1.5px solid #111110; }
 #choiceCardTitle[off="true"], #choiceCardHint[off="true"] {
     color: #A9A8A3;
 }
+
+/* ── priced rows (addons/boq/pricing.py): calm rows, no grid ── */
+QTableWidget#priceTable {
+    background: #ffffff;
+    border: 1px solid #E6E5E1;
+    border-radius: 12px;
+    gridline-color: transparent;
+    alternate-background-color: #ffffff;
+}
+QTableWidget#priceTable::item {
+    padding: 0px 12px;
+    border: none;
+}
+QTableWidget#priceTable QHeaderView::section {
+    background: #F6F5F2;
+    font-family: "Geist Mono";
+    font-size: 11px;
+    font-weight: 500;
+    padding: 10px 12px;
+    border-bottom: 1px solid #E6E5E1;
+}

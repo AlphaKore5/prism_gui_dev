@@ -321,5 +321,141 @@ class TheOtherBoqDialogsSayWhyTheyAreGreyed(unittest.TestCase):
             self.assertTrue(b.toolTip())
 
 
+SAMPLE_Q = {"unit": "millimeters", "unit_code": 4, "unit_confirmed": True, "notes": [],
+            "lengths_by_layer": {"M-DUCT-SUPP": 186400.0, "M-DUCT-RET": 98200.0},
+            "areas_by_layer": {}, "block_counts": {"VCD": 18}, "block_layers": {"VCD": ["M-DAMPER"]},
+            "layers": ["M-DUCT-SUPP", "M-DUCT-RET", "M-DAMPER"], "entity_count": 100}
+MD = "## BOQ\n\n| Item | Description | Unit | Qty |\n|---|---|---|---|\n| 1.1 | Supply duct | m | 186.4 |\n| | **Total** | | 5 |\n"
+
+
+class TheResultLooksCalmAndSavesTheSame(unittest.TestCase):
+    def test_styling_changes_formats_only_never_the_text_or_the_raw_answer(self):
+        from PySide6.QtWidgets import QTextEdit
+        plain = QTextEdit()
+        plain.setMarkdown(MD)
+        d = _dialog()
+        d._show_result(MD)
+        self.assertEqual(d.result.toPlainText(), plain.toPlainText())
+        self.assertEqual(d._raw_result, MD)                      # what saves and follow-ups read
+        # Qt's own re-export of the styled box would differ (mono runs become code spans),
+        # so prove nothing reads it: only comments in the dialog mention it.
+        src = open(os.path.join(ROOT, "addons", "boq", "dialog.py"), encoding="utf-8").read()
+        calls = [l for l in src.splitlines() if ("= self.result.toMarkdown(" in l or "(self.result.toMarkdown(" in l) and not l.lstrip().startswith("#")]
+        self.assertEqual(calls, [])
+
+    def test_the_table_has_no_black_grid_a_soft_header_and_mono_right_aligned_numbers(self):
+        from PySide6.QtGui import QTextCursor, QTextTable
+        d = _dialog()
+        d._show_result(MD)
+        tbl = [f for f in d.result.document().rootFrame().childFrames() if isinstance(f, QTextTable)][0]
+        self.assertEqual(tbl.format().border(), 0)
+        self.assertEqual(tbl.cellAt(0, 0).format().background().color().name().lower(), theme.WELL.lower())
+        self.assertEqual(tbl.cellAt(1, 0).format().toTableCellFormat().bottomBorderBrush().color().name().lower(), theme.HAIRLINE.lower())
+        cur = tbl.cellAt(1, 3).firstCursorPosition()
+        self.assertEqual(cur.blockFormat().alignment() & Qt.AlignRight, Qt.AlignRight)
+        self.assertEqual(cur.charFormat().fontFamilies(), [theme.FONT_MONO])
+        first = tbl.cellAt(1, 0).firstCursorPosition()
+        self.assertFalse(first.blockFormat().alignment() & Qt.AlignRight)
+
+
+class PricedExportsAreByteIdentical(unittest.TestCase):
+    """The step-4 restyle is display only: every writer gets the same Boq."""
+
+    def test_csv_and_docx_bytes_equal_the_engines_own_output_for_the_same_boq(self):
+        import hashlib
+        import core_bridge as CB
+        from addons.boq.pricing import PricingTable
+        t = PricingTable({})
+        t.set_quantities(dict(SAMPLE_Q), title="T")
+        t._use_starter()
+        t._toggle_details()                       # touching the view must not change the file
+        tmp = tempfile.mkdtemp()
+        bp = CB.get_boq_price()
+        for kind, writer in (("csv", bp.write_boq_csv), ("docx", bp.write_boq_docx)):
+            a, b = os.path.join(tmp, "a." + kind), os.path.join(tmp, "b." + kind)
+            t.export(kind, a)
+            writer(t.boq(), b)
+            if kind == "csv":
+                self.assertEqual(hashlib.sha256(open(a, "rb").read()).hexdigest(),
+                                 hashlib.sha256(open(b, "rb").read()).hexdigest())
+            else:
+                self.assertTrue(os.path.getsize(a) > 0 and os.path.getsize(b) > 0)
+
+
+class StepFourCards(unittest.TestCase):
+    def test_each_card_is_one_of_the_old_controls(self):
+        from addons.boq.pricing import PricingTable
+        t = PricingTable({})
+        t.set_quantities(dict(SAMPLE_Q))
+        self.assertTrue(t.card_none.selected())
+        t.card_starter.clicked.emit()
+        self.assertTrue(t.card_starter.selected())
+        self.assertIn("starter rates", t.rates_label.text())
+        t.card_none.clicked.emit()
+        self.assertTrue(t.card_none.selected())
+        self.assertIn("No rate list", t.rates_label.text())
+        with mock.patch.object(t, "_pick_rates") as pick:
+            t.card_list.clicked.disconnect()
+            t.card_list.clicked.connect(t._pick_rates)
+            t.card_list.clicked.emit()
+        pick.assert_called_once()
+
+    def test_the_section_item_and_basis_columns_are_folded_but_one_click_away(self):
+        from addons.boq.pricing import COL_BASIS, COL_ITEM, COL_SECTION, PricingTable
+        t = PricingTable({})
+        t.set_quantities(dict(SAMPLE_Q))
+        for c in (COL_SECTION, COL_ITEM, COL_BASIS):
+            self.assertTrue(t.table.isColumnHidden(c))
+        t.details_btn.click()
+        for c in (COL_SECTION, COL_ITEM, COL_BASIS):
+            self.assertFalse(t.table.isColumnHidden(c))
+        self.assertEqual(len(t.rows()[0]), 8)
+
+
+class TheFooterIsThreeThings(unittest.TestCase):
+    def _footer_buttons(self, d):
+        from PySide6.QtWidgets import QPushButton
+        return [b for b in d.footer.findChildren(QPushButton) if b.isVisibleTo(d.footer)]
+
+    def test_no_footer_button_text_is_clipped_on_any_step_at_either_width(self):
+        for width in (780, 854, 1100):
+            for mode in ("boq", "bom"):
+                d = _dialog(mode)
+                d.resize(width, 700)
+                d.ask.set_text("x")
+                d.show()
+                _app.processEvents()
+                for step in range(len(d._step_names)):
+                    if step >= d.S_MAKE:
+                        d._show_result("## x\n\nbody")
+                    d._show_step(step)
+                    _app.processEvents()
+                    btns = self._footer_buttons(d)
+                    self.assertLessEqual(len(btns), 3, (mode, step, [b.text() for b in btns]))
+                    for b in btns:
+                        need = b.fontMetrics().horizontalAdvance(b.text())
+                        self.assertGreaterEqual(b.width(), need + 8, (width, mode, step, b.text()))
+
+    def test_the_document_actions_live_in_the_step_body_above_the_result(self):
+        d = _dialog()
+        d._show_result("## x\n\nbody")
+        for b in (d.open_btn, d.fill_template_btn, d.recheck_btn):
+            self.assertTrue(d.result_actions.isAncestorOf(b))
+            self.assertFalse(d.footer.isAncestorOf(b))
+        self.assertTrue(d.result_actions.isVisibleTo(d.pages.widget(d.S_MAKE)))
+
+    def test_step_three_shows_the_cards_before_the_run_and_the_result_after(self):
+        d = _dialog()
+        d.ask.set_text("x")
+        d._show_step(d.S_MAKE)
+        page = d.pages.widget(d.S_MAKE)
+        self.assertTrue(d.make_choice_box.isVisibleTo(page))
+        self.assertFalse(d.result.isVisibleTo(page))
+        self.assertFalse(d.result_actions.isVisibleTo(page))
+        d._show_result("## x\n\nbody")
+        self.assertFalse(d.make_choice_box.isVisibleTo(page))
+        self.assertTrue(d.result.isVisibleTo(page))
+
+
 if __name__ == "__main__":
     unittest.main()

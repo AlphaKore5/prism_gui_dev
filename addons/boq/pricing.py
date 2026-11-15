@@ -22,7 +22,7 @@ import os
 from decimal import Decimal, InvalidOperation
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QDoubleSpinBox, QFileDialog, QHBoxLayout,
     QHeaderView, QLabel, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
@@ -33,6 +33,7 @@ import i18n
 import theme
 from addons.boq.measured import _TintDelegate
 from widgets import controls as C
+from widgets.stepper import ChoiceCard
 
 # Column order in the grid. Rate, Unit, Description and Section are editable;
 # Qty is the measurement and Amount is arithmetic, so neither takes typing.
@@ -60,6 +61,18 @@ def _qty(value) -> str:
     return f"{d:,.2f}" if d != d.to_integral() else f"{int(d):,}"
 
 
+class _RuleDelegate(_TintDelegate):
+    """The tinted delegate, plus the hairline under every row that the preview's
+    calm price rows have (the style sheet's grid is switched off)."""
+
+    def paint(self, painter, option, index):
+        super().paint(painter, option, index)
+        painter.save()
+        painter.setPen(QColor(theme.HAIRLINE))
+        painter.drawLine(option.rect.bottomLeft(), option.rect.bottomRight())
+        painter.restore()
+
+
 class PricingTable(QWidget):
     """Rate list, the priced grid, the totals, and the three exports."""
 
@@ -83,6 +96,23 @@ class PricingTable(QWidget):
             "and totals are arithmetic. No AI touches a number here."),
             level="SUPPORT", wrap=True))
 
+        # ── how to price it: three cards, each one the old control ──────────
+        self.card_list = ChoiceCard("file", i18n.t("Use my price list"),
+                                    i18n.t("Pick your rate sheet (Excel, PDF or Word)."))
+        self.card_starter = ChoiceCard("spark", i18n.t("Use typical prices"),
+                                       i18n.t("Good for a first estimate. Check them before you send a quote."))
+        self.card_none = ChoiceCard("x", i18n.t("No prices"),
+                                    i18n.t("Leave the price columns empty for you to fill."))
+        cards = QHBoxLayout()
+        cards.setContentsMargins(0, 0, 0, 0)
+        cards.setSpacing(theme.SPACE_3)
+        for card in (self.card_list, self.card_starter, self.card_none):
+            cards.addWidget(card)
+        col.addLayout(cards)
+        self.card_list.clicked.connect(self._pick_rates)
+        self.card_starter.clicked.connect(self._use_starter)
+        self.card_none.clicked.connect(self._use_no_prices)
+
         # ── rate list ────────────────────────────────────────────────────
         rates_row = QHBoxLayout()
         rates_row.setContentsMargins(0, 0, 0, 0)
@@ -91,9 +121,11 @@ class PricingTable(QWidget):
                                   icon_name="paperclip", small=True,
                                   on_click=self._pick_rates)
         rates_row.addWidget(self.rates_btn)
+        self.rates_btn.setVisible(False)        # the "Use my price list" card is this button
         self.starter_btn = C.button(i18n.t("Use starter rates"), "tertiary",
                                     small=True, on_click=self._use_starter)
         rates_row.addWidget(self.starter_btn)
+        self.starter_btn.setVisible(False)      # the "Use typical prices" card is this button
         self.rates_label = C.label(i18n.t("No rate list yet — every line is unpriced."),
                                    level="SUPPORT", wrap=True)
         rates_row.addWidget(self.rates_label, stretch=1)
@@ -110,13 +142,15 @@ class PricingTable(QWidget):
 
         # ── the grid ─────────────────────────────────────────────────────
         self.table = QTableWidget(0, 8)
+        self.table.setObjectName("priceTable")
+        self.table.setShowGrid(False)
         self.table.setHorizontalHeaderLabels([
             i18n.t("Section"), i18n.t("Item"), i18n.t("Description"),
             i18n.t("Unit"), i18n.t("Qty"), i18n.t("Rate (₹)"),
             i18n.t("Amount (₹)"), i18n.t("Basis")])
         self.table.verticalHeader().setVisible(False)
         self.table.setSelectionBehavior(QAbstractItemView.SelectItems)
-        self.table.setAlternatingRowColors(True)
+        self.table.setAlternatingRowColors(False)
         self.table.setSortingEnabled(False)
         # Same fix as addons/boq/measured.py's own table (item 16): the
         # real style.qss forces `QTableWidget::item { color: #09090b; }`,
@@ -126,8 +160,12 @@ class PricingTable(QWidget):
         # silently invisible in the real running app, exactly like item
         # 16's Trust dots were, unless something bypasses style.qss's own
         # paint path. _TintDelegate does.
-        self.table.setItemDelegate(_TintDelegate(self.table))
+        self.table.setItemDelegate(_RuleDelegate(self.table))
+        self.table.verticalHeader().setDefaultSectionSize(40)
         head = self.table.horizontalHeader()
+        head.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        for column in (COL_QTY, COL_RATE, COL_AMOUNT):
+            self.table.horizontalHeaderItem(column).setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
         head.setSectionResizeMode(COL_DESC, QHeaderView.Stretch)
         for column in (COL_SECTION, COL_ITEM, COL_UNIT, COL_QTY, COL_RATE,
                        COL_AMOUNT, COL_BASIS):
@@ -137,7 +175,15 @@ class PricingTable(QWidget):
         self.table.setMinimumHeight(head_h + 6 * row_h + 4)
         self.table.setMaximumHeight(head_h + 12 * row_h + 4)
         self.table.itemChanged.connect(self._on_edited)
+        # Section, item code and basis are real columns (still in rows() and the
+        # exports) but folded away, so the rows read item / unit / qty / rate / amount.
+        self._detail_cols = (COL_SECTION, COL_ITEM, COL_BASIS)
+        for column in self._detail_cols:
+            self.table.setColumnHidden(column, True)
         col.addWidget(self.table)
+        self.details_btn = C.button(i18n.t("Show section, item code and basis"), "tertiary",
+                                    small=True, on_click=self._toggle_details)
+        col.addWidget(self.details_btn, alignment=Qt.AlignLeft)
 
         # ── the bottom of the sheet ──────────────────────────────────────
         tail = QHBoxLayout()
@@ -175,7 +221,7 @@ class PricingTable(QWidget):
         exports = QHBoxLayout()
         exports.setContentsMargins(0, 0, 0, 0)
         exports.setSpacing(theme.SPACE_2)
-        self.xlsx_btn = C.button(i18n.t("Save as Excel…"), "primary",
+        self.xlsx_btn = C.button(i18n.t("Save as Excel…"), "secondary",
                                  icon_name="file", small=True,
                                  on_click=lambda: self._export("xlsx"))
         self.docx_btn = C.button(i18n.t("Save as Word…"), "secondary", small=True,
@@ -197,6 +243,7 @@ class PricingTable(QWidget):
         self.saved_label.setVisible(False)
         col.addWidget(self.saved_label)
 
+        self._mark(self.card_none)
         self._set_have_lines(False)
         # The price list Inquiry already has is the obvious first rate list.
         known = rate_list_path(self.cfg)
@@ -219,6 +266,7 @@ class PricingTable(QWidget):
                                             name=os.path.basename(path)))
         self._say_warn("")
         self._rebuild()
+        self._mark(self.card_list)
         return True
 
     def _use_starter(self):
@@ -228,6 +276,27 @@ class PricingTable(QWidget):
             n=len(self._rates)))
         self._say_warn(self._rates_note)
         self._rebuild()
+        self._mark(self.card_starter)
+
+    def _use_no_prices(self):
+        """Back to the state a fresh table starts in: no rate list, every line unpriced."""
+        self._rates = []
+        self._rates_note = ""
+        self.rates_label.setText(i18n.t("No rate list yet — every line is unpriced."))
+        self._say_warn("")
+        self._rebuild()
+        self._mark(self.card_none)
+
+    def _mark(self, card):
+        for c in (self.card_list, self.card_starter, self.card_none):
+            c.set_selected(c is card)
+
+    def _toggle_details(self):
+        show = self.table.isColumnHidden(COL_SECTION)
+        for column in self._detail_cols:
+            self.table.setColumnHidden(column, not show)
+        self.details_btn.setText(i18n.t("Hide section, item code and basis") if show
+                                 else i18n.t("Show section, item code and basis"))
 
     def _pick_rates(self):
         import paths
@@ -279,9 +348,10 @@ class PricingTable(QWidget):
                 cell.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
             if c not in _EDITABLE:
                 cell.setFlags(cell.flags() & ~Qt.ItemIsEditable)
-            if c == COL_AMOUNT:
-                font = cell.font()
-                font.setBold(True)
+            if c in (COL_QTY, COL_RATE, COL_AMOUNT):
+                font = QFont(theme.FONT_MONO)
+                font.setPixelSize(13)
+                font.setBold(c == COL_AMOUNT)
                 cell.setFont(font)
             if tint is not None:
                 cell.setBackground(tint)

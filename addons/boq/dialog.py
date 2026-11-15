@@ -19,7 +19,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel, QPushButton,
     QPlainTextEdit, QTextEdit, QLineEdit, QMessageBox, QCheckBox, QFileDialog,
-    QComboBox, QWidget, QStackedWidget, QGridLayout,
+    QComboBox, QWidget, QStackedWidget, QGridLayout, QSizePolicy,
 )
 
 import core_bridge as CB
@@ -38,6 +38,7 @@ from addons.boq import agents as boq_agents
 from addons.boq import industries
 from addons.boq import cad_render
 from addons.boq import openrouter_writer
+from addons.boq import result_view
 from addons.boq.measured import MeasuredTable
 from addons.boq.pricing import PricingTable
 from addons.boq.elv_dialog import ElvReadDialog
@@ -778,6 +779,7 @@ class BoqDialog(PrismDialog):
         mbox.setSpacing(theme.ROW_GAP)
         mbox.addWidget(make_title)
         mbox.addWidget(self.make_choice)
+        self.make_choice_box.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
         root.addWidget(self.make_choice_box)
         self._with_drawing = False
 
@@ -793,13 +795,21 @@ class BoqDialog(PrismDialog):
         self.result.setReadOnly(True)
         self.result.setPlaceholderText(f"Your {self._noun} will appear here.")
         self.result.setMinimumHeight(120)
+        # Once a document exists, what you can do with it sits right above it
+        # as pill buttons, not in the footer (which keeps Back, Close and the
+        # one primary so nothing is clipped).
+        self.result_actions = QWidget()
+        self._actions = QHBoxLayout(self.result_actions)
+        self._actions.setContentsMargins(0, 0, 0, 0)
+        self._actions.setSpacing(theme.SPACE_2)
+        root.addWidget(self.result_actions)
         root.addWidget(self.result, stretch=1)
 
         self.open_btn = self.button(i18n.t("Open in browser"), "secondary",
                                     icon_name="external", small=True,
                                     on_click=self._open_link)
         self.open_btn.setEnabled(False)
-        self.footer.add_utility(self.open_btn)
+        self._actions.addWidget(self.open_btn)
         # item 66: fill the CLIENT'S OWN template (their logo, letterhead,
         # column widths) with this result's line items, instead of handing
         # them Prism's own generic docx and leaving them to copy the
@@ -810,7 +820,7 @@ class BoqDialog(PrismDialog):
             i18n.t("Fill into template…"), "secondary", icon_name="paperclip",
             small=True, on_click=self._fill_template)
         self.fill_template_btn.setEnabled(False)
-        self.footer.add_utility(self.fill_template_btn)
+        self._actions.addWidget(self.fill_template_btn)
         # Same job "Verify and remake" (the follow-up window's quick action)
         # already does -- read the drawing itself, not just the measured
         # figures -- so one button now covers both: pressed before any BOQ
@@ -823,7 +833,8 @@ class BoqDialog(PrismDialog):
                                        icon_name="eye", small=True,
                                        on_click=self._ask_recheck)
         self.recheck_btn.setEnabled(False)
-        self.footer.add_utility(self.recheck_btn)
+        self._actions.addWidget(self.recheck_btn)
+        self._actions.addStretch(1)
         self.back_btn = self.button(i18n.t("Back"), icon_name="chevron-left",
                                     on_click=self._back)
         self.footer.add_utility(self.back_btn)
@@ -946,13 +957,12 @@ class BoqDialog(PrismDialog):
         # Utilities that only mean something once there is something to act
         # on: re-checking against the drawing once a document exists, and the
         # browser link and the template once it is made.
-        self.recheck_btn.setVisible(self._step == self.S_MAKE and has_result)
+        self.result_actions.setVisible(self._step == self.S_MAKE and has_result)
         self.recheck_btn.setToolTip("" if can_draw else i18n.t(
             "Add a drawing in step 1 to use this."))
-        self.open_btn.setVisible(self._step >= self.S_MAKE and has_result)
         self.open_btn.setToolTip("" if self.open_btn.isEnabled() else i18n.t(
             "The tool that wrote it gave no web link for this one."))
-        self.fill_template_btn.setVisible(self._step >= self.S_MAKE and has_result)
+
         self.usage_chip.refresh()
 
     # ── files ───────────────────────────────────────────────────────────
@@ -1622,6 +1632,7 @@ class BoqDialog(PrismDialog):
         that was never missing in its own first answer, because the copy
         it was shown already had it mangled by the inbetween render."""
         self.result.setMarkdown(text)
+        result_view.style_document(self.result.document())   # looks only, text unchanged
         self._raw_result = text
         self.fill_template_btn.setEnabled(True)
         # The document lands on the "make it" step, wherever it was asked for.
