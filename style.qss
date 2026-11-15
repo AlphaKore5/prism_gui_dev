@@ -2138,9 +2138,13 @@ QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
 }
 
 #fileCard {
+    background: #F6F5F2;
+    border: 2px dashed #D8D7D2;
+    border-radius: 16px;
+}
+#fileCard:hover, #fileCard[dragging="true"] {
     background: #ffffff;
-    border: 1px dashed #D8D7D2;
-    border-radius: 12px;
+    border: 2px dashed #111110;
 }
 #fileCard[added="true"] {
     background: #E4EFE7;
@@ -2448,4 +2452,73 @@ QCheckBox::indicator:checked { border: 1.5px solid #111110; }
     background: #fbfbf9;
     border-color: rgba(20, 20, 18, 0.05);
     color: rgba(17, 17, 16, 0.40);
+}
+
+/* ── usage chip (widgets/usage_chip.py): credits left, this run's cost ── */
+#usageChip {
+    background: #ffffff;
+    border: 1px solid #E6E5E1;
+    border-radius: 12px;
+}
+#usageChip[low="true"] {
+    border: 1px solid #E3C77A;
+}
+#usageChipNumber {
+    background: transparent;
+    font-family: "Geist Mono";
+    font-size: 16px;
+    font-weight: 600;
+    color: #111110;
+}
+#usageChipCaption {
+    background: transparent;
+    font-size: 12px;
+    color: #6B6A65;
+}
+#usageChipBar {
+    background: #E6E5E1;
+    border: none;
+    border-radius: 2px;
+}
+#usageChipBar::chunk {
+    background: #111110;
+    border-radius: 2px;
+}
+#usageChipBar[low="true"]::chunk {
+    background: #ca8a04;
+}
+
+/* ── pick-one cards (widgets/stepper.py ChoiceCard) ── */
+#choiceCard {
+    background: #ffffff;
+    border: 1px solid #E6E5E1;
+    border-radius: 14px;
+}
+#choiceCard:hover {
+    border: 1px solid #D8D7D2;
+}
+#choiceCard[selected="true"] {
+    background: #F6F5F2;
+    border: 2px solid #111110;
+}
+#choiceCard[off="true"] {
+    background: #F6F5F2;
+}
+#choiceCardIcon {
+    background: #F6F5F2;
+    border-radius: 10px;
+}
+#choiceCardTitle {
+    background: transparent;
+    font-size: 16px;
+    font-weight: 500;
+    color: #111110;
+}
+#choiceCardHint {
+    background: transparent;
+    font-size: 13px;
+    color: #6B6A65;
+}
+#choiceCardTitle[off="true"], #choiceCardHint[off="true"] {
+    color: #A9A8A3;
 }

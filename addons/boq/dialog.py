@@ -19,7 +19,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel, QPushButton,
     QPlainTextEdit, QTextEdit, QLineEdit, QMessageBox, QCheckBox, QFileDialog,
-    QComboBox, QWidget,
+    QComboBox, QWidget, QStackedWidget, QGridLayout,
 )
 
 import core_bridge as CB
@@ -31,6 +31,8 @@ from dialogs.base import PrismDialog
 from workers import AutomationWorker, MeasureWorker, RecordWorker
 from widgets import controls as C
 from widgets.loader import Loader
+from widgets.stepper import ChoiceCard, FileCard, StepTabs
+from widgets.usage_chip import UsageChip
 from widgets.ask_panel import AskPanel, MoreOptions
 from addons.boq import agents as boq_agents
 from addons.boq import industries
@@ -42,6 +44,29 @@ from addons.boq.elv_dialog import ElvReadDialog
 from addons.boq.takeoff import IndustryTakeoffDialog
 from addons.boq.workers import OpenRouterWriteWorker
 from widgets.output_panel import short_duration
+
+
+class _Pager:
+    """Routes the dialog's `root.addWidget(...)` calls onto one of its step
+    pages. The dialog used to be one long column; the widgets are the same
+    objects with the same handlers, they are only dealt out to four pages."""
+
+    def __init__(self, layouts: list):
+        self._layouts = layouts
+        self._i = 0
+
+    def page(self, i: int):
+        self._i = i
+
+    def addWidget(self, *args, **kwargs):
+        self._layouts[self._i].addWidget(*args, **kwargs)
+
+    def addLayout(self, *args, **kwargs):
+        self._layouts[self._i].addLayout(*args, **kwargs)
+
+    def setSpacing(self, n: int):
+        for lay in self._layouts:
+            lay.setSpacing(n)
 
 
 # item 67 (11 Nov 2026), found live on a real pharma-client job: an SS
@@ -261,8 +286,9 @@ class BoqDialog(PrismDialog):
         self._run_prefix = registry.by_key(self.mode).run_prefixes[0]
         super().__init__(
             i18n.t(self._doc),
-            i18n.t("Attach a drawing and it is measured here, on this "
-                   "machine. Nothing is measured by an AI."),
+            i18n.t("Make a {noun} from your drawing in {n} easy steps. It is "
+                   "measured here, on this machine, never by an AI.").format(
+                       noun=self._noun, n=3 if self.mode == "bom" else 4),
             icon="file", parent=parent, closable=False, scrollable=True)
         self.setWindowTitle(self._doc)
         self.resize(780, 700)
@@ -341,15 +367,42 @@ class BoqDialog(PrismDialog):
 
         # The base class owns the header and the footer; `root` is its body
         # column, which already carries the page padding and the card gutter.
-        root = self.body
+        #
+        # Four steps (three for a BOM, which has nothing to price): what you
+        # have, check the count, make it, add prices. Every widget below is
+        # the same object it always was; `root` just deals them onto pages.
+        self._step_names = ([i18n.t("What you have"), i18n.t("Check the count"),
+                             i18n.t("Make the BOM")] if self.mode == "bom" else
+                            [i18n.t("What you have"), i18n.t("Check the count"),
+                             i18n.t("Make the BOQ"), i18n.t("Add prices")])
+        self.tabs = StepTabs(self._step_names)
+        self.tabs.step_clicked.connect(self._show_step)
+        self.body.addWidget(self.tabs)
+        # Display only: hidden until Prism has a server to ask (widgets/usage_chip.py).
+        self.usage_chip = UsageChip()
+        self.body.addWidget(self.usage_chip, alignment=Qt.AlignRight)
+        self.pages = QStackedWidget()
+        page_layouts = []
+        for _ in self._step_names:
+            page = QWidget()
+            lay = QVBoxLayout(page)
+            lay.setContentsMargins(0, theme.SPACE_3, 0, 0)
+            self.pages.addWidget(page)
+            page_layouts.append(lay)
+        self._page_layouts = page_layouts
+        root = _Pager(page_layouts)
+        self.body.addWidget(self.pages, stretch=1)
         # A stacked form, not a grid of cards: the 16px card gutter
         # between every row of a single column is what turns a short
         # form into a tall one with bands of canvas through it.
         root.setSpacing(theme.ROW_GAP)
 
-        title = QLabel(f"What do you need a {self._noun} for?")
+        title = QLabel(i18n.t("What is this {noun} for?").format(noun=self._noun))
         title.setObjectName("h4")
         root.addWidget(title)
+        root.addWidget(C.label(
+            i18n.t("Say it in your own words. One line is enough."),
+            level="SUPPORT", wrap=True))
 
         if self.mode == "bom":
             placeholder = (
@@ -365,6 +418,43 @@ class BoqDialog(PrismDialog):
         self.ask.speak_clicked.connect(self._toggle_record)
         self.ask.files_added.connect(self._on_files_added)
         root.addWidget(self.ask)
+
+        # "Or pick one": the two example jobs the add-on's front door already
+        # offers, one click to fill the box. Gone once something is typed.
+        examples = ([i18n.t("Parts list to fabricate this over-band magnetic separator"),
+                     i18n.t("BOM for one 36x24 jaw crusher, 100 TPH")]
+                    if self.mode == "bom" else
+                    [i18n.t("BOQ for CCTV, cabling and fibre for this site"),
+                     i18n.t("Materials to build one 36x24 jaw crusher, 100 TPH")])
+        self.example_row = QWidget()
+        erow = QHBoxLayout(self.example_row)
+        erow.setContentsMargins(0, 0, 0, 0)
+        erow.setSpacing(theme.SPACE_2)
+        elab = QLabel(i18n.t("Or pick one:"))
+        elab.setObjectName("meta")
+        erow.addWidget(elab)
+        for text in examples:
+            chip = QPushButton(text)
+            chip.setObjectName("tryChip")
+            chip.setCursor(Qt.PointingHandCursor)
+            chip.clicked.connect(lambda _=False, t=text: self.ask.set_text(t))
+            erow.addWidget(chip)
+        erow.addStretch(1)
+        root.addWidget(self.example_row)
+
+        # The drawing, as a drop zone: drag a file onto it or press the button.
+        # Both go through AskPanel's own add_paths, the same door "Add file"
+        # uses, so a drop can do nothing a click does not. Empty until one is
+        # attached, then "Drawing added" with its name and a way to swap it.
+        self.drawing_card = FileCard(
+            i18n.t("Add your drawing (optional)"),
+            i18n.t("Drag a DXF, DWG or PDF here, or choose one. No drawing? "
+                   "Describe the job above and Prism lists the items."),
+            i18n.t("Drawing added"), i18n.t("Choose drawing"),
+            i18n.t("Change drawing"), on_click=self.ask._pick_file,
+            button_kind="secondary", accept_drops=True)
+        self.drawing_card.files_dropped.connect(self.ask.add_paths)
+        root.addWidget(self.drawing_card)
 
         # Say which format works BEFORE a drawing is attached, not in an error
         # afterwards.
@@ -479,6 +569,15 @@ class BoqDialog(PrismDialog):
             f" padding: {theme.SPACE_2}px {theme.SPACE_3}px; font-size: 13px;")
         ext_l.addWidget(self.ext_meas_label)
         self.ext_meas_box.setVisible(False)
+        # ── step 2: check the count ──────────────────────────────────────
+        root.page(1)
+        # Said only when there is nothing to count, so the page is never a
+        # blank: a BOQ can be made from words alone.
+        self.count_hint = C.label(i18n.t(
+            "Nothing to count yet. With a drawing, Prism counts it here for "
+            "you to check. Without one, it lists the items from your words "
+            "in the next step."), level="SUPPORT", wrap=True)
+        root.addWidget(self.count_hint)
         root.addWidget(self.ext_meas_box)
 
         # Only appears once a drawing has actually been measured.
@@ -514,7 +613,15 @@ class BoqDialog(PrismDialog):
         self.price_table = PricingTable(self.cfg)
         price_l.addWidget(self.price_table)
         self.price_box.setVisible(False)
+        # ── step 4: add prices (a BOQ only; a BOM has no step for it) ────
+        root.page(3 if self.mode == "boq" else 2)
+        self.price_hint = C.label(i18n.t(
+            "Prices are optional. Once your {noun} is made, the rates you "
+            "bring go here and Prism adds them up.").format(noun=self._noun),
+            level="SUPPORT", wrap=True)
+        root.addWidget(self.price_hint)
         root.addWidget(self.price_box)
+        root.page(0)
 
         # Which AIs run the BOQ. Re-pickable per BOQ: the write-up tool
         # (Prism Agent Claude vs ChatGPT vs …) and the standards-research
@@ -543,17 +650,22 @@ class BoqDialog(PrismDialog):
         # A person who wants a browser agent, or research back on, still
         # picks it from the dropdown same as always -- this only changes
         # what a fresh BOQ starts on.
+        # One label + control per row, in a grid: the old single row of
+        # four label/combo pairs was wider than the dialog.
         picker = QWidget()
-        prow = QHBoxLayout(picker)
-        prow.setContentsMargins(0, 0, 0, 0)
-        prow.setSpacing(theme.SPACE_2)
-        wlab = QLabel(i18n.t("Write with")); wlab.setObjectName("meta")
-        rlab = QLabel(i18n.t("· Research with")); rlab.setObjectName("meta")
-        prow.addWidget(wlab)
-        prow.addWidget(self.writer_combo)
-        prow.addWidget(rlab)
-        prow.addWidget(self.research_combo)
-        prow.addStretch(1)
+        pgrid = QGridLayout(picker)
+        pgrid.setContentsMargins(0, 0, 0, 0)
+        pgrid.setHorizontalSpacing(theme.SPACE_3)
+        pgrid.setVerticalSpacing(theme.SPACE_2)
+        pgrid.setColumnStretch(1, 1)
+
+        def pick_row(r: int, text: str, widget):
+            lab = QLabel(i18n.t(text)); lab.setObjectName("meta")
+            pgrid.addWidget(lab, r, 0)
+            pgrid.addWidget(widget, r, 1)
+
+        pick_row(0, "Write with", self.writer_combo)
+        pick_row(1, "Research with", self.research_combo)
         # item 30d: "someone made 3 BOQs today, needs to follow up on the
         # first one this afternoon" — a new job's own dialog instance has
         # no memory of a PAST one (each open of this add-on is a fresh
@@ -561,7 +673,7 @@ class BoqDialog(PrismDialog):
         # continuing the live screen.
         self.history_btn = C.button(i18n.t("History"), "tertiary", small=True,
                                     icon_name="clock", on_click=self._open_history)
-        prow.addWidget(self.history_btn)
+        pgrid.addWidget(self.history_btn, 3, 0, 1, 2, Qt.AlignLeft)
         # What file the write-up, "Verify and remake" and a follow-up should
         # hand back — the owner's own ask: "a dedicated button just to
         # select in which file format does the user want the file", after
@@ -572,15 +684,13 @@ class BoqDialog(PrismDialog):
         # core/contract.py), which re-asks once and, worst case, writes the
         # document out of the tool's own words itself — so a format, once
         # chosen, is a promise, not just a request.
-        flab = QLabel(i18n.t("· File format")); flab.setObjectName("meta")
         self.format_combo = QComboBox()
         self.format_combo.addItem(i18n.t("Let the tool decide"), "")
         self.format_combo.addItem(i18n.t("Word document (.docx)"), "docx")
         self.format_combo.addItem(i18n.t("Excel spreadsheet (.xlsx)"), "xlsx")
         self.format_combo.addItem(i18n.t("CSV"), "csv")
         self.format_combo.addItem(i18n.t("PDF"), "pdf")
-        prow.addWidget(flab)
-        prow.addWidget(self.format_combo)
+        pick_row(2, "File format", self.format_combo)
         # Which industry this job is for -- item 26: BOQ is sold across
         # industries, and each one reads its own drawings by its own
         # rules, so the rule-set that runs (HVAC_DRAWING_RULES.md's
@@ -588,17 +698,27 @@ class BoqDialog(PrismDialog):
         # itself) is this explicit choice, never guessed from the request
         # text or from an uploaded file's own content -- see
         # addons/boq/industries.py and self._on_industry_changed.
-        ilab = QLabel(i18n.t("· Industry")); ilab.setObjectName("meta")
+        ilab = QLabel(i18n.t("Industry")); ilab.setObjectName("meta")
         self.industry_combo = QComboBox()
         self.industry_combo.addItems(industries.NAMES)
         self.industry_combo.currentTextChanged.connect(self._on_industry_changed)
-        prow.addWidget(ilab)
-        prow.addWidget(self.industry_combo)
-        prow.addStretch(1)
-        root.addWidget(picker)
+        # Visible on step 1, not folded away: it decides which drawing rules
+        # run, so a person has to be able to see it before measuring.
+        ind_row = QWidget()
+        irow = QHBoxLayout(ind_row)
+        irow.setContentsMargins(0, 0, 0, 0)
+        irow.setSpacing(theme.SPACE_3)
+        irow.addWidget(ilab)
+        irow.addWidget(self.industry_combo)
+        irow.addStretch(1)
+        root.addWidget(ind_row)
 
         # Everything technical lives here, shut by default.
         self.more = MoreOptions("More options")
+        # Who writes and researches, the file format and a way back to an
+        # earlier job: each changes the result, so they stay one click away,
+        # but a first-time person never has to read them.
+        self.more.add(picker)
         self.unit_edit = QLineEdit()
         self.unit_edit.setPlaceholderText("Drawing unit, if you know it — e.g. meters")
         self.more.add(self.unit_edit)
@@ -618,13 +738,48 @@ class BoqDialog(PrismDialog):
         self.more.add(self.derive_cb)
         root.addWidget(self.more)
 
+        # Progress and status sit under the tabs, outside the pages, so
+        # "reading your drawing..." is seen whichever step you are on.
         self.progress = Loader("stages", [i18n.t(n) for n in ['Measure', 'Check', 'Write']])
         self.progress.setRange(0, 0)
         self.progress.setVisible(False)
-        root.addWidget(self.progress)
+        self.body.insertWidget(2, self.progress)
         self.status = QLabel("")
         self.status.setWordWrap(True)
-        root.addWidget(self.status)
+        self.body.insertWidget(3, self.status)
+
+        # ── step 3: make the BOQ ─────────────────────────────────────────
+        root.page(2)
+        # Two ways to make it, one button below. Both existed before as
+        # "Make my BOQ" and "Make with drawing"; the cards just say what each
+        # one does with the drawing, in plain words, before anything is sent.
+        self.make_choice = QWidget()
+        mrow = QHBoxLayout(self.make_choice)
+        mrow.setContentsMargins(0, 0, 0, 0)
+        mrow.setSpacing(theme.SPACE_3)
+        self.choice_count = ChoiceCard(
+            "list", i18n.t("From the count (recommended)"),
+            i18n.t("Your drawing stays on this computer. Only the checked "
+                   "numbers go to AI to write the {noun}.").format(noun=self._noun))
+        self.choice_drawing = ChoiceCard(
+            "eye", i18n.t("With the drawing"),
+            i18n.t("AI reads the drawing itself as well. Prism asks you first: "
+                   "the drawing leaves this computer only if you say yes."))
+        self.choice_count.clicked.connect(lambda: self._pick_make_way(False))
+        self.choice_drawing.clicked.connect(lambda: self._pick_make_way(True))
+        mrow.addWidget(self.choice_count)
+        mrow.addWidget(self.choice_drawing)
+        make_title = QLabel(i18n.t("How should Prism make your {noun}?").format(
+            noun=self._noun))
+        make_title.setObjectName("h4")
+        self.make_choice_box = QWidget()
+        mbox = QVBoxLayout(self.make_choice_box)
+        mbox.setContentsMargins(0, 0, 0, 0)
+        mbox.setSpacing(theme.ROW_GAP)
+        mbox.addWidget(make_title)
+        mbox.addWidget(self.make_choice)
+        root.addWidget(self.make_choice_box)
+        self._with_drawing = False
 
         # QTextEdit, not QPlainTextEdit: the writing AI returns markdown
         # (**bold**, > notices, tables) -- QPlainTextEdit shows that literally,
@@ -669,14 +824,136 @@ class BoqDialog(PrismDialog):
                                        on_click=self._ask_recheck)
         self.recheck_btn.setEnabled(False)
         self.footer.add_utility(self.recheck_btn)
+        self.back_btn = self.button(i18n.t("Back"), icon_name="chevron-left",
+                                    on_click=self._back)
+        self.footer.add_utility(self.back_btn)
         self.footer.add_secondary(self.button(i18n.t("Close"), on_click=self.reject))
-        self.run_btn = self.button(f"Make my {self._noun}", "primary", icon_name="check",
-                                   on_click=self._run)
+        # One primary whose job follows the step: Next, Next, Make, Next/Finish.
+        # Making the document is `_run` (or `_ask_recheck` when "With the
+        # drawing" is picked), exactly the two handlers the old "Make my BOQ"
+        # and "Make with drawing" buttons had.
+        self.run_btn = self.button("", "primary", on_click=self._primary)
         self.footer.set_primary(self.run_btn)
+        self._why = QLabel("")
+        self._why.setObjectName("note")
+        self._why.setWordWrap(True)
+        self._why.setVisible(False)
+        self.footer.add_note(self._why)
+        for lay in self._page_layouts:
+            lay.addStretch(0)
+        self._step = 0
+        self.ask.edit.textChanged.connect(self._refresh_primary)
+        self.ask.edit.textChanged.connect(
+            lambda: self.example_row.setVisible(not self.ask.text()))
+        self.ask.files_added.connect(self._refresh_primary)
+        self.ask.file_removed.connect(self._refresh_primary)
+        self._show_step(0)
 
         # Files already attached on the home screen come along automatically.
         if attachments:
             self._absorb([a["path"] for a in attachments])
+
+    # ── the steps ────────────────────────────────────────────────────────
+
+    S_HAVE, S_COUNT, S_MAKE, S_PRICE = range(4)
+
+    def _last_step(self) -> int:
+        return len(self._step_names) - 1
+
+    def _busy(self) -> bool:
+        return self.progress.isVisibleTo(self)
+
+    def _have_a_result(self) -> bool:
+        return bool(self.result.toPlainText().strip())
+
+    def _pick_make_way(self, with_drawing: bool):
+        if with_drawing and not self.cad_path:
+            return              # the card is disabled and says why; nothing to pick
+        self._with_drawing = with_drawing
+        self._refresh_primary()
+
+    def _show_step(self, index: int):
+        index = max(0, min(index, self._last_step()))
+        self._step = index
+        self.pages.setCurrentIndex(index)
+        self.tabs.set_current(index)
+        self.back_btn.setVisible(index > 0)
+        self._refresh_primary()
+
+    def _back(self):
+        self._show_step(self._step - 1)
+
+    def _primary(self):
+        if self._step == self.S_HAVE:
+            self._show_step(self.S_COUNT)
+        elif self._step == self.S_COUNT:
+            self._show_step(self.S_MAKE)
+        elif self._step == self.S_MAKE and not self._have_a_result():
+            if self._with_drawing and self.cad_path:
+                self._ask_recheck()
+            else:
+                self._run()
+        elif self._step == self._last_step():
+            self.reject()
+        else:
+            self._show_step(self._step + 1)
+
+    def _primary_state(self) -> tuple:
+        """(text, enabled, why-not): what the one primary button says and
+        whether it works on this step. A greyed button always says why."""
+        busy = self._busy()
+        noun = self._noun
+        if self._step == self.S_HAVE:
+            ok = bool(self.ask.text() or self.q or self.cad_path)
+            return (i18n.t("Next: count it"), ok and not busy,
+                    "" if ok else i18n.t(
+                        "Say what the {noun} is for, or attach a drawing.").format(noun=noun))
+        if self._step == self.S_COUNT:
+            return (i18n.t("Next: make the {noun}").format(noun=noun), not busy, "")
+        if self._step == self.S_MAKE:
+            if not self._have_a_result():
+                ok = bool(self.ask.text() or self.q or self.cad_path)
+                return (i18n.t("Make my {noun}").format(noun=noun), ok and not busy,
+                        "" if ok else i18n.t(
+                            "Say what the {noun} is for, or attach a drawing.").format(noun=noun))
+            return (i18n.t("Finish") if self._last_step() == self.S_MAKE
+                    else i18n.t("Next: add prices"), not busy, "")
+        return (i18n.t("Finish"), True, "")
+
+    def _refresh_primary(self, *_):
+        text, ok, why = self._primary_state()
+        self.run_btn.setText(text)
+        self.run_btn.setEnabled(ok)
+        self.run_btn.setToolTip(why)
+        self._why.setText(why)
+        self._why.setVisible(bool(why) and not ok)
+        # The count page says so when there is nothing to count.
+        has_count = self.meas_box.isVisibleTo(self) or self.ext_meas_box.isVisibleTo(self)
+        self.count_hint.setVisible(not has_count)
+        self.price_hint.setVisible(not self.price_box.isVisibleTo(self))
+        # The two ways to make it, until there is something made.
+        has_result = self._have_a_result()
+        self.make_choice_box.setVisible(not has_result)
+        self.result.setVisible(has_result)
+        can_draw = bool(self.cad_path)
+        self.choice_drawing.setEnabled(can_draw)
+        self.choice_drawing.setToolTip("" if can_draw else i18n.t(
+            "Add a drawing in step 1 to use this."))
+        if not can_draw:
+            self._with_drawing = False
+        self.choice_count.set_selected(not self._with_drawing)
+        self.choice_drawing.set_selected(self._with_drawing)
+        # Utilities that only mean something once there is something to act
+        # on: re-checking against the drawing once a document exists, and the
+        # browser link and the template once it is made.
+        self.recheck_btn.setVisible(self._step == self.S_MAKE and has_result)
+        self.recheck_btn.setToolTip("" if can_draw else i18n.t(
+            "Add a drawing in step 1 to use this."))
+        self.open_btn.setVisible(self._step >= self.S_MAKE and has_result)
+        self.open_btn.setToolTip("" if self.open_btn.isEnabled() else i18n.t(
+            "The tool that wrote it gave no web link for this one."))
+        self.fill_template_btn.setVisible(self._step >= self.S_MAKE and has_result)
+        self.usage_chip.refresh()
 
     # ── files ───────────────────────────────────────────────────────────
 
@@ -707,6 +984,7 @@ class BoqDialog(PrismDialog):
             self._update_template_hint()
         if cad:
             self.cad_path = cad[0]["path"]
+            self.drawing_card.set_file(os.path.basename(self.cad_path))
             if os.path.splitext(self.cad_path)[1].lower() in (".dwg", ".dxf"):
                 self.pdf_drawing_hint.setVisible(False)
                 self._measure()
@@ -904,6 +1182,7 @@ class BoqDialog(PrismDialog):
         # longer waits for "Make my BOQ" to be pressed first.
         self.recheck_btn.setEnabled(bool(self.cad_path))
         self._set_busy(False, "Measured from the drawing itself — not by an AI.")
+        self._refresh_primary()
         # If the user already pressed "Make my BOQ" while this was measuring,
         # start it now — with the measured quantities it was waiting for.
         if self._run_pending:
@@ -1345,6 +1624,11 @@ class BoqDialog(PrismDialog):
         self.result.setMarkdown(text)
         self._raw_result = text
         self.fill_template_btn.setEnabled(True)
+        # The document lands on the "make it" step, wherever it was asked for.
+        if self._step < self.S_MAKE:
+            self._show_step(self.S_MAKE)
+        else:
+            self._refresh_primary()
 
     def _fill_template(self):
         """item 66: open a copy of the CLIENT'S OWN BOQ template -- their
@@ -1420,12 +1704,14 @@ class BoqDialog(PrismDialog):
                 + "Check the numbers against the saved file above.")
         self._save_deliverable(self._write_made_files, "format")
         self.open_btn.setEnabled(bool(self._links.get("format")))
+        self._refresh_primary()
         self.recheck_btn.setEnabled(bool(self.cad_path))
         # "Price it" becomes available once there is a BOQ to price, not
         # before — the box's data has been ready since _on_measured, only
         # its visibility was moved here.
         if self.mode == "boq" and texts:
             self.price_box.setVisible(True)
+            self._refresh_primary()
         task_label = getattr(self, "_task_name", "") or f"{self._noun} — {self.request}"
         # item 30d: "addon" is what lets History's own list (addons/boq/
         # history.py) find BOQ's runs without guessing from the title
@@ -1454,9 +1740,9 @@ class BoqDialog(PrismDialog):
         if busy:
             self.progress.set_message(message)
         self.progress.setVisible(busy)
-        self.run_btn.setEnabled(not busy)
         self.recheck_btn.setEnabled(not busy and bool(self.cad_path))
         self.status.setText("" if busy else message)   # the loader carries it while busy
+        self._refresh_primary()
 
     def _drawing_consent(self) -> bool:
         """The drawing leaves this computer only after this explicit yes."""
@@ -1865,9 +2151,11 @@ class BoqDialog(PrismDialog):
             "Opened from History: {when}. Type a follow-up below to carry "
             "it on.").replace("{when}", when_label(record.get("_path", ""))))
         self.open_btn.setEnabled(bool(self._deliverable_path or self._links))
+        self._refresh_primary()
         self.recheck_btn.setEnabled(bool(self.cad_path))
         if self.mode == "boq" and text:
             self.price_box.setVisible(True)
+            self._refresh_primary()
         if text:
             self._offer_followup()
 
@@ -2215,12 +2503,14 @@ class BoqDialog(PrismDialog):
         else:
             self.status.setText(i18n.t("Nothing came back. The previous answer is still shown."))
         self.open_btn.setEnabled(bool(self._links.get(stage) or self._links.get("format")))
+        self._refresh_primary()
         # "Make with drawing" pressed before any BOQ existed (item 8) is
         # also a real first BOQ, produced through this handler rather than
         # _on_written -- "Price it" must become available here too, not
         # only after the ordinary "Make my BOQ" path.
         if self.mode == "boq" and texts:
             self.price_box.setVisible(True)
+            self._refresh_primary()
         # item 30d: update the SAME History record a follow-up belongs
         # to, rather than leaving it stuck at whatever the first write-up
         # said — save_run's own `path=` does an in-place update
