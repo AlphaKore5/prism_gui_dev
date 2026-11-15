@@ -1223,7 +1223,7 @@ class EmailComposeDialog(PrismDialog):
         avail = [s for s in ("research", "brains", "content") if agents.get(s)]
         if not avail:
             self.status.setText(i18n.t(
-                "No writing tool is set up (Settings → AI tools), so Prism "
+                "No writing tool is set up (Settings → Agents), so Prism "
                 "cannot write this. Type the message yourself instead."))
             return
         draft_stage = avail[-1]

@@ -91,7 +91,7 @@ ACTION_BUTTON = {
 }
 
 # (cfg value, label) — who answers Ask/Edit's question. Both are a direct
-# OpenRouter API call (the user's own key, Settings → AI tools) — never a
+# OpenRouter API call (the user's own key, Settings → Agents) — never a
 # browser tab. Groq was dropped 2026-11-06 (the owner's own call — "remove
 # groq for now instead use claude haiku and claude sonnet5.5"); Haiku is
 # the default (DEFAULT_MODEL below), Sonnet the stronger, slower, pricier
@@ -1799,7 +1799,7 @@ class StepDialog(PrismDialog):
             if not self.cfg.get("openrouter_api_key"):
                 self._notify_error(i18n.t(
                     "{model} needs an OpenRouter key — add one in "
-                    "Settings → AI tools.")
+                    "Settings → Agents.")
                     .replace("{model}", self._chosen_model()))
                 return
         if not self._ensure_root():
@@ -2060,7 +2060,7 @@ class StepDialog(PrismDialog):
 
     def _no_key_message(self, model: str) -> str:
         return i18n.t("{model} needs an OpenRouter key — add one in "
-                      "Settings → AI tools.").replace("{model}", model)
+                      "Settings → Agents.").replace("{model}", model)
 
     def _ask(self, m: dict):
         report = m["report"]

@@ -1957,7 +1957,7 @@ class BoqDialog(PrismDialog):
         if not api_key:
             QMessageBox.warning(self, "BOQ", i18n.t(
                 "No OpenRouter key set for {agent}. Add one in Settings → "
-                "AI tools, or pick a different agent.").replace("{agent}", agent))
+                "Agents, or pick a different agent.").replace("{agent}", agent))
             self._set_busy(False, "")
             return
         files, attachment = self._prepare_drawing_attachment(stage, agent, files)

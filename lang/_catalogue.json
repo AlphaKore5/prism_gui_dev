@@ -9265,7 +9265,7 @@
   "No one matches": [
    "addons/whatsapp/contacts.py"
   ],
-  "No OpenRouter key set for {agent}. Add one in Settings → AI tools, or pick a different agent.": [
+  "No OpenRouter key set for {agent}. Add one in Settings → Agents, or pick a different agent.": [
    "addons/boq/dialog.py"
   ],
   "No orders match.": [
@@ -9448,7 +9448,7 @@
    "addons/motion/dialog.py",
    "addons/reel/dialog.py"
   ],
-  "No writing tool is set up (Settings → AI tools), so Prism cannot write this. Type the message yourself instead.": [
+  "No writing tool is set up (Settings → Agents), so Prism cannot write this. Type the message yourself instead.": [
    "addons/email/dialog.py"
   ],
   "No {quote} has been sent for this inquiry yet.": [
@@ -9948,7 +9948,7 @@
    "addons/whatsapp/settings_acquire.py",
    "addons/whatsapp/settings_book.py"
   ],
-  "OCR always runs locally. If an OpenRouter key is set in Settings → AI tools, a second, AI-based read also runs to catch tags OCR missed -- the whole drawing is never sent; only small cropped pieces are, each time, and only after you confirm. No key set: this box runs OCR only.": [
+  "OCR always runs locally. If an OpenRouter key is set in Settings → Agents, a second, AI-based read also runs to catch tags OCR missed -- the whole drawing is never sent; only small cropped pieces are, each time, and only after you confirm. No key set: this box runs OCR only.": [
    "addons/boq/takeoff.py"
   ],
   "Off": [
@@ -12240,7 +12240,7 @@
   "Reading": [
    "addons/boq/takeoff.py"
   ],
-  "Reading a PDF drawing needs an OpenRouter key — add one in Settings → AI tools.": [
+  "Reading a PDF drawing needs an OpenRouter key — add one in Settings → Agents.": [
    "addons/boq/elv_dialog.py"
   ],
   "Reading a PO needs the free key Prism plans with, and there isn't one saved. Type the fields in, or add the key under Settings.": [
@@ -18983,7 +18983,7 @@
   "{model} is turning the answer into an exact change plan for {file}…": [
    "addons/step/dialog.py"
   ],
-  "{model} needs an OpenRouter key — add one in Settings → AI tools.": [
+  "{model} needs an OpenRouter key — add one in Settings → Agents.": [
    "addons/step/dialog.py"
   ],
   "{m} min": [

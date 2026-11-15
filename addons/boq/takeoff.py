@@ -424,7 +424,7 @@ class IndustryTakeoffDialog(QDialog):
         if industries.has_ai_tag_recheck(self.industry):
             self.ocr_cb.setToolTip(i18n.t(
                 "OCR always runs locally. If an OpenRouter key is set in "
-                "Settings → AI tools, a second, AI-based read also runs to "
+                "Settings → Agents, a second, AI-based read also runs to "
                 "catch tags OCR missed -- the whole drawing is never sent; "
                 "only small cropped pieces are, each time, and only after "
                 "you confirm. No key set: this box runs OCR only."))

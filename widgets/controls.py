@@ -283,7 +283,7 @@ class ShadowUnder(QWidget):
         self.update()
 
     def eventFilter(self, obj, ev):
-        if obj is self._t:
+        if obj is getattr(self, "_t", None):
             et = ev.type()
             if et == QEvent.Enter:
                 self._hover = True

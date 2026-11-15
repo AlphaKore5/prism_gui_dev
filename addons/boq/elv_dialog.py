@@ -134,7 +134,7 @@ class ElvReadDialog(QDialog):
                 QMessageBox.information(self, i18n.t(
                     "{industry} drawing reading").format(industry=self.industry),
                     i18n.t("Reading a PDF drawing needs an OpenRouter key — "
-                           "add one in Settings → AI tools."))
+                           "add one in Settings → Agents."))
                 return
             if not self._consent():
                 return
