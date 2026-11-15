@@ -171,7 +171,7 @@ class ChatFirstHome(unittest.TestCase):
         demo = next(b for t, b in btns.items() if "Watch demo video" in t)
         manage = next(b for t, b in btns.items() if t.startswith("Manage add-ons"))
         manage.click()
-        self.assertEqual(got, ["catalog"])
+        self.assertEqual(got, ["licence"])     # Settings -> Licence lists the add-ons that come with this copy
         with mock.patch.object(H.HomePanel, "_play_demo") as play:
             q = self._home()
             next(b for b in q.findChildren(QPushButton) if "Watch demo video" in b.text()).click()

@@ -108,7 +108,6 @@ class TheStackIsInTheDeclaredOrder(GateTest):
         "inquiry": "inquiry_panel",
         "config": "settings_panel",
         "guide": "guide_panel",
-        "catalog": "catalog_panel",
         "runs": "history_panel",
         "boq": "boq_panel",
         "email": "email_panel",

@@ -73,15 +73,13 @@ from widgets.controls import Card as _BaseCard, Pill as _BasePill
 # spend a permanent row on each.
 MORE_LINKS = [
     ("runs", "History", "Every past run, re-rendered from its record"),
-    ("catalog", "AI tools", "Every tool Prism can drive, and whether you're "
-     "signed in to it"),
     ("guide", "How to use Prism", "What Prism can do, and what to type"),
     ("support", "Lumi", "Prism help, answers and a route to our team"),
 ]
 
 # The glyph each door wears, kept out of MORE_LINKS so that table stays the
 # three-column shape tests/test_support.py reads.
-MORE_ICONS = {"runs": "clock", "catalog": "grid", "guide": "book",
+MORE_ICONS = {"runs": "clock", "guide": "book",
               "support": "help"}
 
 # (key, label, group, blurb). The group is the kicker the section sits under
@@ -1296,8 +1294,6 @@ class SettingsPanel(QDialog):
             col.addWidget(self._sites_card(sites))
 
         col.addWidget(self._buttons([
-            C.button(i18n.t("Open the AI tools screen"), "secondary",
-                     on_click=lambda: self.navigate.emit("catalog")),
             C.button(i18n.t("Open login tabs"), "secondary",
                      on_click=self.login_tabs.emit)]))
 

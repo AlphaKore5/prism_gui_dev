@@ -129,15 +129,9 @@ MORE = [
 # Lumi's working help surface is on Home, where it can be found when a customer
 # needs it without spending a permanent navigation slot.
 #
-# AI tools stays here rather than coming back to the rail with History, and the
-# reason is the budget: the rail is at twelve of twelve. Of the two, History is
-# the one the rail cannot do without — it is a *stage of the work*, and nothing
-# else in the rail reports on finished runs. AI tools is a catalogue of what
-# Prism can drive and whether you are signed in to each: setup, consulted when
-# something will not log in, which is exactly what Settings is for.
+# (The AI tools catalogue screen used to sit here; it was removed in UI port
+# stage 11. The pipeline it showed is Settings → Agents.)
 SECONDARY = [
-    ("catalog", "AI tools", "grid", "Every tool Prism can drive, and whether "
-     "you're signed in to it"),
     ("guide", "How to use Prism", "help",
      "What Prism can do and what to type"),
 ]

@@ -748,7 +748,7 @@ class HomePanel(QWidget):
         row.addWidget(demo)
         row.addStretch(1)
         manage = C.button(f"{i18n.t('Manage add-ons')} →", "link",
-                          on_click=lambda: self.open_addon.emit("catalog"))
+                          on_click=lambda: self.open_addon.emit("licence"))
         row.addWidget(manage)
         return row
 
@@ -897,7 +897,7 @@ class HomePanel(QWidget):
         tools_btn.setObjectName("promptChipBtn")
         self._chip_icon(tools_btn, "grid")
         tools_btn.setCursor(Qt.PointingHandCursor)
-        tools_btn.clicked.connect(lambda: self.open_addon.emit("catalog"))
+        tools_btn.clicked.connect(lambda: self.open_addon.emit("agents"))
         bar.addWidget(tools_btn)
 
         bar.addStretch(1)

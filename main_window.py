@@ -49,7 +49,6 @@ from widgets.wizard_panel import WizardPanel
 from widgets.tour import TourOverlay
 from addons.bom.panel import BomPanel
 from addons.boq.panel import BoqPanel
-from widgets.catalog_panel import CatalogPanel
 from addons.email.panel import EmailPanel
 from addons.gerber.panel import GerberPanel
 from addons.step.panel import StepPanel
@@ -73,7 +72,6 @@ from workers import (RouteWorker, AutomationWorker, RecordWorker,
                      ReelWorker)
 import wakeword
 from wakeword import WakeWordListener
-from dialogs.ai_directory_dialog import AIDirectoryDialog
 from addons.email.dialog import EmailComposeDialog, EmailSetupDialog
 from addons.boq.dialog import BoqDialog
 from addons.gerber.dialog import GerberDialog
@@ -106,7 +104,7 @@ COMPOSE, RUNNING = 0, 1        # pages of the workbench's own inner stack
 # inserting renumbers everything after it -- but nothing has to be renumbered
 # BY HAND any more.
 SCREENS = (
-    "home", "workbench", "inquiry", "config", "guide", "catalog",
+    "home", "workbench", "inquiry", "config", "guide",
     "runs", "boq", "email", "support", "gerber",
     "wizard",           # reached only from _first_run(), never by name
     "artifacts",
@@ -131,7 +129,6 @@ WORKBENCH = _INDEX["workbench"]
 INQUIRY = _INDEX["inquiry"]
 SETTINGS = _INDEX["config"]
 GUIDE = _INDEX["guide"]
-CATALOG = _INDEX["catalog"]
 HISTORY = _INDEX["runs"]
 BOQ = _INDEX["boq"]
 EMAIL = _INDEX["email"]
@@ -592,8 +589,6 @@ class MainWindow(QMainWindow):
         self.screens.addWidget(self.settings_panel)       # SETTINGS
         self.guide_panel = GuidePanel(self.cfg)
         self.screens.addWidget(self.guide_panel)          # GUIDE
-        self.catalog_panel = CatalogPanel(self.cfg)
-        self.screens.addWidget(self.catalog_panel)        # CATALOG
         self.history_panel = HistoryPanel(self.cfg)
         self.screens.addWidget(self.history_panel)        # HISTORY
         self.boq_panel = BoqPanel(self.cfg)
@@ -697,7 +692,6 @@ class MainWindow(QMainWindow):
         # settings_panel.navigate — the payload is a _handle_command key, so
         # every screen reaches every other through the one router rather than
         # each learning about the others.
-        self.catalog_panel.navigate.connect(self._handle_command)
         self.history_panel.navigate.connect(self._handle_command)
         self.guide_panel.navigate.connect(self._handle_command)
         for panel in (self.boq_panel, self.bom_panel, self.gerber_panel,
@@ -766,9 +760,6 @@ class MainWindow(QMainWindow):
             self.history_panel.refresh()
         elif index == ARTIFACTS:
             self.artifacts_panel.refresh()
-        elif index == CATALOG:
-            self.catalog_panel.cfg = self.cfg
-            self.catalog_panel.refresh()
         elif index == SUPPORT:
             # The assistant runs on the customer's own planning key, and a
             # copy taken at launch would miss a key they saved thirty seconds
@@ -1501,8 +1492,6 @@ class MainWindow(QMainWindow):
                 self._reset_for_new_task()
             self.work_stack.setCurrentIndex(COMPOSE)
             self._show_screen("workbench")
-        elif key == "catalog":
-            self._show_screen("catalog")
         elif key == "reel":
             self._open_reel()
         elif key == "motion":

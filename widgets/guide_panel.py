@@ -65,8 +65,6 @@ class GuidePanel(Page):
     DIRECT = [
         ("workbench", "plus", "Start a task",
          "Describe a job and let Prism plan it."),
-        ("catalog", "grid", "AI tools",
-         "Every tool Prism can drive, and which stage each one runs."),
         ("runs", "clock", "History",
          "Everything you have run, and what came back."),
         ("inquiry", "inbox", "Email inquiry automation",

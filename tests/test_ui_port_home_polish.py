@@ -239,7 +239,7 @@ class ComposerAndTryChips(unittest.TestCase):
             b.click()
         self.assertEqual(got, ["inquiry", "reel", "boq", "artifacts"])
         self.composer[2].click()
-        self.assertEqual(got[-1], "catalog")
+        self.assertEqual(got[-1], "agents")      # Settings -> Agents; the AI tools screen is gone
 
     def test_chips_have_a_hover_only_shadow(self):
         for b in self.composer + self.tries:
