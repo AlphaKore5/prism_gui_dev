@@ -651,5 +651,62 @@ class TheFrontDoorLeadsWithTheDropZone(unittest.TestCase):
         self.assertEqual(d.drawing_card.title.text(), "Drawing added")
 
 
+class StepFourShowsFourRowsAndShortTotals(unittest.TestCase):
+    def _dlg(self, width=854):
+        q = dict(SAMPLE_Q)
+        q["lengths_by_layer"] = {f"L{i}": 1000.0 * (i + 1) for i in range(6)}
+        q["layers"] = list(q["lengths_by_layer"]) + ["M-DAMPER"]
+        d = _dialog()
+        d.resize(width, 700)
+        d.move(300, 0)
+        d.price_table.set_quantities(q)
+        d.price_box.setVisible(True)
+        d._show_result("## x\n\nbody")
+        d._show_step(d.S_PRICE)
+        d.show()
+        _app.processEvents()
+        return d
+
+    def test_four_rows_fit_in_the_list_and_the_totals_stay_on_screen(self):
+        from PySide6.QtWidgets import QScrollArea
+        for width in (780, 854):
+            d = self._dlg(width)
+            t = d.price_table
+            port = t.rows_scroll.viewport()
+            fully = [w for w in t._row_widgets
+                     if w.mapTo(port, w.rect().bottomLeft()).y() <= port.height()]
+            self.assertGreaterEqual(len(fully), 4, width)
+            area = t.summary_box.parentWidget()
+            while not isinstance(area, QScrollArea):
+                area = area.parentWidget()
+            bottom = t.summary_box.mapTo(area.viewport(), t.summary_box.rect().bottomLeft()).y()
+            self.assertLessEqual(bottom, area.viewport().height(), width)
+            d.close()
+
+    def test_two_short_total_lines_with_the_rest_behind_details(self):
+        from addons.boq.pricing import COL_RATE
+        t = self._dlg().price_table
+        t.table.item(0, COL_RATE).setText("100")
+        self.assertTrue(t.subtotal_line.text().startswith("Sub-total ₹"))
+        self.assertIn("Grand total ₹", t.grand_line.text())
+        self.assertIn(t.grand_line.text().split("₹")[1].split(" ")[0], t.totals.text())
+        self.assertTrue(t.totals_more.isHidden())
+        t.totals_btn.click()
+        self.assertFalse(t.totals_more.isHidden())
+        self.assertTrue(t.gst_spin.isVisibleTo(t))
+        self.assertIn("Rupees", t.totals.text())
+
+    def test_the_measured_line_shows_on_steps_one_and_two_only(self):
+        d = _dialog()
+        d.ask.set_text("x")
+        d._set_busy(False, "Measured from the drawing itself — not by an AI.")
+        for step, shown in ((0, True), (1, True), (2, False), (3, False)):
+            d._show_step(step)
+            self.assertEqual(not d.status.isHidden(), shown, step)
+        d.status.setText("Done. Check the numbers.")
+        d._show_step(2)
+        self.assertFalse(d.status.isHidden())       # other messages still show on step 3
+
+
 if __name__ == "__main__":
     unittest.main()

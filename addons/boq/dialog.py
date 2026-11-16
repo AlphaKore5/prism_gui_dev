@@ -47,6 +47,11 @@ from addons.boq.workers import OpenRouterWriteWorker
 from widgets.output_panel import short_duration
 
 
+# Said once a drawing is measured. Shown on steps 1-2 only: from "make" on it is
+# old news taking a line the page needs.
+_MEASURED_MSG = "Measured from the drawing itself — not by an AI."
+
+
 class _Pager:
     """Routes the dialog's `root.addWidget(...)` calls onto one of its step
     pages. The dialog used to be one long column; the widgets are the same
@@ -980,6 +985,8 @@ class BoqDialog(PrismDialog):
         # on: re-checking against the drawing once a document exists, and the
         # browser link and the template once it is made.
         self.result_actions.setVisible(self._step == self.S_MAKE and has_result)
+        self.status.setVisible(not (self._step >= self.S_MAKE
+                                    and self.status.text() == _MEASURED_MSG))
         self.recheck_btn.setToolTip("" if can_draw else i18n.t(
             "Add a drawing in step 1 to use this."))
         self.open_btn.setToolTip("" if self.open_btn.isEnabled() else i18n.t(
@@ -1213,7 +1220,7 @@ class BoqDialog(PrismDialog):
         # "Make with drawing" needs nothing but the drawing itself -- it no
         # longer waits for "Make my BOQ" to be pressed first.
         self.recheck_btn.setEnabled(bool(self.cad_path))
-        self._set_busy(False, "Measured from the drawing itself — not by an AI.")
+        self._set_busy(False, _MEASURED_MSG)
         self._refresh_primary()
         # If the user already pressed "Make my BOQ" while this was measuring,
         # start it now — with the measured quantities it was waiting for.

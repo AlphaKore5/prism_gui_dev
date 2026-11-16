@@ -107,7 +107,7 @@ class _PriceRow(QFrame):
         self.setObjectName("priceRow")
         self.setAttribute(Qt.WA_StyledBackground, True)
         row = QHBoxLayout(self)
-        row.setContentsMargins(14, 8, 14, 8)
+        row.setContentsMargins(14, 6, 14, 6)
         row.setSpacing(theme.SPACE_2)
         left = QVBoxLayout()
         left.setSpacing(1)
@@ -247,7 +247,7 @@ class PricingTable(QWidget):
         self.rows_scroll.setWidgetResizable(True)
         self.rows_scroll.setFrameShape(QFrame.NoFrame)
         self.rows_scroll.setWidget(self._rows_box)
-        self.rows_scroll.setMaximumHeight(106)      # two lines; the rest scroll inside
+        self.rows_scroll.setMaximumHeight(194)      # four lines; the rest scroll inside
         card.addWidget(self.rows_scroll)
         col.addWidget(self.prices_card)
 
@@ -303,8 +303,32 @@ class PricingTable(QWidget):
         summary.setObjectName("priceSummary")
         summary.setAttribute(Qt.WA_StyledBackground, True)
         sum_col = QVBoxLayout(summary)
-        sum_col.setContentsMargins(14, 6, 14, 8)
+        sum_col.setContentsMargins(14, 6, 14, 6)
         sum_col.setSpacing(4)
+        # Always on screen: sub-total and grand total, one line each, plus a
+        # small "details" toggle. Contingency, GST/IGST and the full totals
+        # text (CGST/SGST split, amount in words, unpriced count) sit behind it.
+        brief = QHBoxLayout()
+        brief.setContentsMargins(0, 0, 0, 0)
+        brief.setSpacing(theme.SPACE_3)
+        brief_col = QVBoxLayout()
+        brief_col.setSpacing(0)
+        self.subtotal_line = QLabel("")
+        self.subtotal_line.setObjectName("priceTotals")
+        self.grand_line = QLabel("")
+        self.grand_line.setObjectName("priceGrand")
+        brief_col.addWidget(self.subtotal_line)
+        brief_col.addWidget(self.grand_line)
+        brief.addLayout(brief_col, stretch=1)
+        self.totals_btn = C.button(i18n.t("Details"), "tertiary", small=True,
+                                   on_click=self._toggle_totals)
+        brief.addWidget(self.totals_btn, alignment=Qt.AlignVCenter)
+        sum_col.addLayout(brief)
+        self.totals_more = QWidget()
+        more_col = QVBoxLayout(self.totals_more)
+        more_col.setContentsMargins(0, 4, 0, 0)
+        more_col.setSpacing(4)
+        self.totals_more.setVisible(False)
         tail = QHBoxLayout()
         tail.setContentsMargins(0, 0, 0, 0)
         tail.setSpacing(theme.SPACE_2)
@@ -330,7 +354,7 @@ class PricingTable(QWidget):
             "The total tax is the same."))
         tail.addWidget(self.interstate_check)
         tail.addStretch(1)
-        sum_col.addLayout(tail)
+        more_col.addLayout(tail)
         for w in (self.contingency_spin, self.gst_spin):
             w.setFixedSize(96, 28)
             w.valueChanged.connect(self._refresh_totals)
@@ -339,7 +363,8 @@ class PricingTable(QWidget):
         self.totals = QLabel("")
         self.totals.setWordWrap(True)
         self.totals.setObjectName("priceTotals")
-        sum_col.addWidget(self.totals)
+        more_col.addWidget(self.totals)
+        sum_col.addWidget(self.totals_more)
         card.addWidget(summary)
         col.addWidget(self.details_btn, alignment=Qt.AlignLeft)
         col.addWidget(self.table)
@@ -570,10 +595,17 @@ class PricingTable(QWidget):
         return out
 
     # ── totals ───────────────────────────────────────────────────────────
+    def _toggle_totals(self):
+        show = self.totals_more.isHidden()
+        self.totals_more.setVisible(show)
+        self.totals_btn.setText(i18n.t("Hide details") if show else i18n.t("Details"))
+
     def _refresh_totals(self, *_):
         boq = self.boq()
         if boq is None or not boq.items:
             self.totals.setText("")
+            self.subtotal_line.setText("")
+            self.grand_line.setText("")
             return
         unpriced = len(boq.unpriced())
         parts = [
@@ -594,6 +626,12 @@ class PricingTable(QWidget):
                 "⚠ {n} of {of} lines have no rate and are not in the total.").format(
                 n=unpriced, of=len(boq.items))
         self.totals.setText(text)
+        # The two lines that stay on screen: same Boq figures, shorter words.
+        self.subtotal_line.setText(i18n.t("Sub-total ₹{v}").format(v=_money(boq.subtotal()))
+                                   + (i18n.t("  ·  {n} of {of} lines have no rate yet").format(
+                                       n=unpriced, of=len(boq.items)) if unpriced else ""))
+        self.grand_line.setText(i18n.t("Grand total ₹{v} incl. tax").format(
+            v=_money(boq.grand_total())))
 
     # ── exports ──────────────────────────────────────────────────────────
     def export(self, kind: str, path: str) -> str:
