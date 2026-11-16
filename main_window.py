@@ -679,6 +679,7 @@ class MainWindow(QMainWindow):
         # same handler History uses — same record, same viewer.
         self.home_panel.open_run_record.connect(self._open_run_record)
         self.boq_panel.opened.connect(self._open_boq_dialog)
+        self.boq_panel.files_chosen.connect(self._open_boq_dialog)
         self.bom_panel.opened.connect(self._open_bom_dialog)
         self.step_panel.opened.connect(self._open_step_dialog)
         self.step_work = None           # built on first visit — see _step_screen
@@ -1708,7 +1709,7 @@ class MainWindow(QMainWindow):
         # runs first; the screen's button opens the working dialog.
         self._authorized_then("boq", "addon", lambda: self._show_screen("boq"))
 
-    def _open_boq_dialog(self):
+    def _open_boq_dialog(self, paths=None):
         # Dependency probe comes AFTER the licence check: a customer who
         # hasn't bought BOQ should be told that, not sent off to install ezdxf
         # for a feature they still won't be able to open.
@@ -1723,7 +1724,10 @@ class MainWindow(QMainWindow):
                 "`brew install libredwg` on macOS. A .dxf needs neither."
                 f"\n\nDetail: {err}")
             return
-        dlg = BoqDialog(self.cfg, [], self)
+        # Paths dropped on (or chosen from) the BOQ front page arrive already
+        # attached: the dialog's own `attachments` path (_absorb), the same
+        # one Inquiry's hand-off uses.
+        dlg = BoqDialog(self.cfg, [{"path": p} for p in (paths or [])], self)
         dlg.exec()
         if getattr(dlg, "owns_followup", False):
             return

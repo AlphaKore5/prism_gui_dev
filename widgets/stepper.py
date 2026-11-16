@@ -94,7 +94,47 @@ class StepTabs(QWidget):
             tab.num.setText("✓" if i < self._current else str(i + 1))
 
 
-class FileCard(QFrame):
+class _DropTarget:
+    """Drag-and-drop of local files onto a frame: lights the frame (the
+    `dragging` property) while a file is over it and hands the local paths to
+    `files_dropped`. Text and remote URLs are refused. What a drop MEANS is
+    the owner's business, normally the same thing as its own file chooser."""
+
+    @staticmethod
+    def _local_paths(event) -> list:
+        md = event.mimeData()
+        if not md.hasUrls():
+            return []
+        return [u.toLocalFile() for u in md.urls() if u.isLocalFile()]
+
+    def _set_dragging(self, on: bool):
+        self.setProperty("dragging", on)
+        self.style().unpolish(self)
+        self.style().polish(self)
+
+    def dragEnterEvent(self, event):
+        if self._local_paths(event):
+            self._set_dragging(True)
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event):
+        if self._local_paths(event):
+            event.acceptProposedAction()
+
+    def dragLeaveEvent(self, event):
+        self._set_dragging(False)
+
+    def dropEvent(self, event):
+        self._set_dragging(False)
+        paths = self._local_paths(event)
+        if paths:
+            event.acceptProposedAction()
+            self.files_dropped.emit(paths)
+
+
+class FileCard(_DropTarget, QFrame):
     """The big card that says what the person has given Prism so far: an empty
     prompt ("Add your tender PDF") until a file lands, then a green "PDF added"
     card with the file's name and a button to change it.
@@ -153,41 +193,6 @@ class FileCard(QFrame):
         self.title.setText(self._added_title if added else self._empty[0])
         self.hint.setText(name if added else self._empty[1])
         self.button.setText(self._change_text if added else self._add_text)
-
-    # ── drag and drop ────────────────────────────────────────────────────
-    @staticmethod
-    def _local_paths(event) -> list:
-        md = event.mimeData()
-        if not md.hasUrls():
-            return []
-        return [u.toLocalFile() for u in md.urls() if u.isLocalFile()]
-
-    def _set_dragging(self, on: bool):
-        self.setProperty("dragging", on)
-        self.style().unpolish(self)
-        self.style().polish(self)
-
-    def dragEnterEvent(self, event):
-        if self._local_paths(event):
-            self._set_dragging(True)
-            event.acceptProposedAction()
-        else:
-            event.ignore()
-
-    def dragMoveEvent(self, event):
-        if self._local_paths(event):
-            event.acceptProposedAction()
-
-    def dragLeaveEvent(self, event):
-        self._set_dragging(False)
-
-    def dropEvent(self, event):
-        self._set_dragging(False)
-        paths = self._local_paths(event)
-        if paths:
-            event.acceptProposedAction()
-            self.files_dropped.emit(paths)
-
 
 class ChoiceCard(QFrame):
     """One of a few big "pick one" cards: an icon tile, a title, a sentence.
@@ -268,3 +273,45 @@ class ChoiceCard(QFrame):
             self.clicked.emit()
         else:
             super().keyPressEvent(event)
+
+
+class DropZone(_DropTarget, QFrame):
+    """The big centred "drop your drawing here" area of a front page: an icon
+    tile, a title, one plain line and a light pill to choose a file instead.
+    Same look and drop behaviour as FileCard."""
+
+    files_dropped = Signal(list)
+
+    def __init__(self, title: str, hint: str, button_text: str, on_click=None,
+                 parent=None):
+        super().__init__(parent)
+        self.setObjectName("fileCard")
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setAcceptDrops(True)
+        self.setProperty("dragging", False)
+        col = QVBoxLayout(self)
+        col.setContentsMargins(theme.SPACE_5, theme.SPACE_6, theme.SPACE_5, theme.SPACE_6)
+        col.setSpacing(theme.SPACE_2)
+        self.icon = QLabel()
+        self.icon.setObjectName("fileCardIcon")
+        self.icon.setFixedSize(46, 46)
+        self.icon.setAlignment(Qt.AlignCenter)
+        try:
+            from widgets import icons
+            self.icon.setPixmap(icons.pixmap("file", 20, theme.INK))
+        except Exception:                                   # noqa: BLE001
+            pass
+        self.title = QLabel(title)
+        self.title.setObjectName("fileCardTitle")
+        self.title.setAlignment(Qt.AlignCenter)
+        self.hint = QLabel(hint)
+        self.hint.setObjectName("fileCardHint")
+        self.hint.setAlignment(Qt.AlignCenter)
+        self.hint.setWordWrap(True)
+        self.button = C.button(button_text, "secondary", icon_name="paperclip",
+                               on_click=on_click)
+        col.addWidget(self.icon, alignment=Qt.AlignHCenter)
+        col.addWidget(self.title)
+        col.addWidget(self.hint)
+        col.addSpacing(theme.SPACE_2)
+        col.addWidget(self.button, alignment=Qt.AlignHCenter)

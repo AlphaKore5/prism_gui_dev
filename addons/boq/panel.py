@@ -6,12 +6,14 @@ two front doors differ only in their copy and their run prefix.
 from __future__ import annotations
 
 
-from PySide6.QtWidgets import QHBoxLayout, QWidget
+from PySide6.QtCore import Signal
+from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QWidget
 
 import i18n
 import theme
 from addons.boq import history
 from widgets import controls as C
+from widgets.stepper import DropZone
 from widgets.panel_base import (
     AddonFrontDoor,
 )
@@ -45,10 +47,35 @@ class BoqPanel(AddonFrontDoor):
          "Generates an itemized Bill of Quantities directly from your prompt."),
     ]
 
+    # A drawing dropped on (or chosen from) the front page: the dialog opens
+    # on step 1 with these paths already attached, through its own attach path.
+    files_chosen = Signal(list)
+
     def build(self):
         self.HUE = theme.ACCENT
+        # The front page leads with the drop zone (owner, 16 Nov 2026); the
+        # counter, how-it-works, examples and recent runs stay below it.
+        self.drop_zone = DropZone(
+            i18n.t("Drop your drawing here"),
+            i18n.t("DXF, DWG or PDF. Measured on this computer, never sent to "
+                   "AI unless you say yes."),
+            i18n.t("Choose a drawing"), on_click=self._choose_drawing)
+        self.drop_zone.files_dropped.connect(self.files_chosen.emit)
+        self.drop_zone.setMaximumWidth(720)     # a centred zone, as in the preview
+        zone_row = QWidget()
+        zrow = QHBoxLayout(zone_row)
+        zrow.setContentsMargins(0, 0, 0, 0)
+        zrow.addStretch(1)
+        zrow.addWidget(self.drop_zone, stretch=12)
+        zrow.addStretch(1)
+        self._col.addWidget(zone_row)
         self._col.addWidget(self._counter_row())
         super().build()
+
+    def _choose_drawing(self):
+        paths, _ = QFileDialog.getOpenFileNames(self, i18n.t("Choose a drawing"))
+        if paths:
+            self.files_chosen.emit(paths)
 
     # item 70 (12 Nov 2026): "a small BOQ counter... how many were made
     # in a day, a month, a year... and token utilization for each" --

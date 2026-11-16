@@ -579,5 +579,77 @@ class StepOneIsShort(unittest.TestCase):
         self.assertTrue(d.rules_line.isHidden())
 
 
+class TheFrontDoorLeadsWithTheDropZone(unittest.TestCase):
+    def _panel(self):
+        from addons.boq.panel import BoqPanel
+        p = BoqPanel({})
+        p.resize(1000, 700)
+        p.move(300, 0)
+        p.show()
+        _app.processEvents()
+        return p
+
+    def test_the_drop_zone_is_the_first_thing_on_the_page(self):
+        p = self._panel()
+        self.assertTrue(p._col.itemAt(0).widget().isAncestorOf(p.drop_zone))
+        self.assertLessEqual(p.drop_zone.width(), 720)
+        self.assertGreaterEqual(p.drop_zone.width(), 600)
+        self.assertTrue(p.drop_zone.acceptDrops())
+        from widgets import controls as C
+        self.assertNotIsInstance(p.drop_zone.button, C.DarkPill)   # light pill: one dark primary per screen
+
+    def test_a_real_drop_hands_the_file_paths_on(self):
+        p = self._panel()
+        f = os.path.join(tempfile.mkdtemp(), "site.dxf")
+        open(f, "w").write("0\nEOF\n")
+        got = []
+        p.files_chosen.connect(got.append)
+        ev = _drop(p.drop_zone, [f])
+        p.drop_zone.dropEvent(ev)
+        self.assertEqual(got, [[f]])
+
+    def test_choose_a_drawing_hands_the_picked_files_on_and_cancel_does_nothing(self):
+        p = self._panel()
+        got = []
+        p.files_chosen.connect(got.append)
+        with mock.patch("addons.boq.panel.QFileDialog.getOpenFileNames", return_value=([], "")):
+            p.drop_zone.button.click()
+        self.assertEqual(got, [])
+        with mock.patch("addons.boq.panel.QFileDialog.getOpenFileNames", return_value=(["/x/a.dxf"], "")):
+            p.drop_zone.button.click()
+        self.assertEqual(got, [["/x/a.dxf"]])
+
+    def test_everything_else_is_still_below_it(self):
+        from PySide6.QtWidgets import QPushButton
+        p = self._panel()
+        texts = [b.text() for b in p.findChildren(QPushButton)]
+        self.assertIn("Reset", texts)                   # the counter row
+        self.assertGreater(p._col.count(), 3)
+
+    def test_the_main_window_opens_the_dialog_with_the_files_attached(self):
+        import main_window as MW
+        fake = mock.Mock(cfg={})
+        with mock.patch.object(MW.CB, "boq_available", return_value=(True, "")), \
+                mock.patch.object(MW, "BoqDialog") as dlg:
+            dlg.return_value.owns_followup = True
+            MW.MainWindow._open_boq_dialog(fake, ["/x/a.dxf", "/x/b.pdf"])
+        args = dlg.call_args[0]
+        self.assertEqual(args[1], [{"path": "/x/a.dxf"}, {"path": "/x/b.pdf"}])
+        with mock.patch.object(MW.CB, "boq_available", return_value=(True, "")), \
+                mock.patch.object(MW, "BoqDialog") as dlg:
+            dlg.return_value.owns_followup = True
+            MW.MainWindow._open_boq_dialog(fake)
+        self.assertEqual(dlg.call_args[0][1], [])
+
+    def test_the_dialog_given_those_paths_lands_on_step_one_with_the_drawing_attached(self):
+        f = os.path.join(tempfile.mkdtemp(), "site.dxf")
+        open(f, "w").write("0\nEOF\n")
+        with mock.patch.object(BoqDialog, "_measure"):
+            d = BoqDialog(CFG, [{"path": f}], None)
+        self.assertEqual(d._step, d.S_HAVE)
+        self.assertEqual(d.cad_path, os.path.abspath(f))
+        self.assertEqual(d.drawing_card.title.text(), "Drawing added")
+
+
 if __name__ == "__main__":
     unittest.main()
