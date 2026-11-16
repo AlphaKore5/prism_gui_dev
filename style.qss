@@ -2543,3 +2543,84 @@ QTableWidget#priceTable QHeaderView::section {
     padding: 10px 12px;
     border-bottom: 1px solid #E6E5E1;
 }
+
+/* ── step 4 Prices card (addons/boq/pricing.py) ── */
+#pricesCard {
+    background: #ffffff;
+    border: 1px solid #E6E5E1;
+    border-radius: 14px;
+}
+#pricesTitle {
+    background: transparent;
+    font-size: 15px;
+    font-weight: 500;
+    color: #111110;
+}
+#priceRowsScroll, #priceRows {
+    background: #ffffff;
+    border: none;
+}
+#priceRow {
+    background: #ffffff;
+    border: none;
+    border-top: 1px solid #E6E5E1;
+}
+#priceRowName {
+    background: transparent;
+    font-size: 14px;
+    color: #111110;
+}
+#priceRowQty {
+    background: transparent;
+    font-family: "Geist Mono";
+    font-size: 11px;
+    color: #6B6A65;
+}
+#priceRowUnit, #priceQuiet {
+    background: transparent;
+    font-size: 12px;
+    color: #6B6A65;
+}
+#priceWarn {
+    background: transparent;
+    font-size: 12px;
+    color: #a16207;
+}
+QLineEdit#priceRowRate {
+    font-family: "Geist Mono";
+    font-size: 13px;
+    background: #F6F5F2;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    padding: 4px 8px;
+    min-height: 22px;
+}
+QLineEdit#priceRowRate:focus {
+    background: #ffffff;
+    border: 1px solid #111110;
+}
+#priceRowAmount {
+    background: transparent;
+    font-family: "Geist Mono";
+    font-size: 13px;
+    font-weight: 600;
+    color: #111110;
+}
+#priceRowAmount[empty="true"] {
+    font-family: "Geist";
+    font-weight: 400;
+    font-size: 12px;
+    color: #A9A8A3;
+}
+#priceSummary {
+    background: #F6F5F2;
+    border: none;
+    border-top: 1px solid #E6E5E1;
+    border-bottom-left-radius: 14px;
+    border-bottom-right-radius: 14px;
+}
+#priceTotals {
+    background: transparent;
+    font-size: 12px;
+    color: #111110;
+}

@@ -197,7 +197,8 @@ class ChoiceCard(QFrame):
 
     clicked = Signal()
 
-    def __init__(self, icon_name: str, title: str, hint: str, parent=None):
+    def __init__(self, icon_name: str, title: str, hint: str, parent=None,
+                 compact: bool = False):
         super().__init__(parent)
         self.setObjectName("choiceCard")
         self.setAttribute(Qt.WA_StyledBackground, True)
@@ -209,7 +210,7 @@ class ChoiceCard(QFrame):
         col.setSpacing(theme.SPACE_2)
         tile = QLabel()
         tile.setObjectName("choiceCardIcon")
-        tile.setFixedSize(34, 34)
+        tile.setFixedSize(28 if compact else 34, 28 if compact else 34)
         tile.setAlignment(Qt.AlignCenter)
         try:
             from widgets import icons
@@ -222,8 +223,19 @@ class ChoiceCard(QFrame):
         self.hint = QLabel(hint)
         self.hint.setObjectName("choiceCardHint")
         self.hint.setWordWrap(True)
-        col.addWidget(tile, alignment=Qt.AlignLeft)
-        col.addWidget(self.title)
+        if compact:
+            # Icon beside the title, not above it: a shorter card for a page
+            # that also has to show a list under the cards.
+            col.setContentsMargins(theme.SPACE_3, theme.SPACE_3, theme.SPACE_3, theme.SPACE_3)
+            col.setSpacing(theme.SPACE_1)
+            top = QHBoxLayout()
+            top.setSpacing(theme.SPACE_2)
+            top.addWidget(tile)
+            top.addWidget(self.title, stretch=1)
+            col.addLayout(top)
+        else:
+            col.addWidget(tile, alignment=Qt.AlignLeft)
+            col.addWidget(self.title)
         col.addWidget(self.hint)
         col.addStretch(1)
         self.setAccessibleName(title)

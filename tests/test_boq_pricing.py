@@ -132,6 +132,10 @@ class TheGridFollowsTheMeasurement(unittest.TestCase):
             t.set_quantities(Q)       # no rate list loaded -- every row unpriced
             t.resize(900, 300)
             t.show()
+            # Step 4 shows calm rows first; the grid this test is about is
+            # one click behind "Show the full table". Open it as a person does.
+            t._toggle_details()
+            self.assertTrue(t.table.isVisibleTo(t))
             app.processEvents()
             rect = t.table.visualItemRect(t.table.item(0, pricing.COL_RATE))
             local_pt = t.mapFromGlobal(

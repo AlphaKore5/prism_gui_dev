@@ -457,5 +457,127 @@ class TheFooterIsThreeThings(unittest.TestCase):
         self.assertTrue(d.result.isVisibleTo(page))
 
 
+class StepFourRows(unittest.TestCase):
+    def _table(self):
+        from addons.boq.pricing import PricingTable
+        t = PricingTable({})
+        t.set_quantities(dict(SAMPLE_Q))
+        return t
+
+    def test_one_calm_row_per_line_with_name_mono_qty_rate_field_and_amount(self):
+        t = self._table()
+        self.assertEqual(len(t._row_widgets), len(t.rows()))
+        row = t._row_widgets[0]
+        self.assertEqual(row.name.text(), t.boq().items[0].description)
+        self.assertIn(t.boq().items[0].unit, row.qty.text())
+        self.assertEqual(row.amount.text(), "no rate yet")
+        self.assertTrue(row.amount.property("empty"))
+
+    def test_a_rate_typed_in_a_row_is_the_same_as_typing_it_in_the_grid(self):
+        from addons.boq.pricing import COL_AMOUNT, COL_RATE
+        a, b = self._table(), self._table()
+        a._row_widgets[0].rate.setText("1350")
+        a._row_widgets[0].rate.editingFinished.emit()
+        b.table.item(0, COL_RATE).setText("1350")
+        self.assertEqual(a.rows(), b.rows())
+        self.assertEqual(a.boq().subtotal(), b.boq().subtotal())
+        self.assertEqual(a.totals.text(), b.totals.text())
+        self.assertEqual(a._row_widgets[0].amount.text(), "₹" + a.rows()[0][COL_AMOUNT])
+        self.assertFalse(a._row_widgets[0].amount.property("empty"))
+
+    def test_typing_in_the_full_table_updates_the_row(self):
+        from addons.boq.pricing import COL_RATE
+        t = self._table()
+        t.table.item(1, COL_RATE).setText("200")
+        self.assertEqual(t._row_widgets[1].rate.text(), t.rows()[1][COL_RATE])
+        self.assertNotEqual(t._row_widgets[1].amount.text(), "no rate yet")
+
+    def test_a_second_render_leaves_no_stale_rows_on_screen(self):
+        from PySide6.QtWidgets import QFrame
+        t = self._table()
+        t._use_starter()                       # renders the rows a second time, same event-loop turn
+        t._rate_typed(0, "1350")
+        shown = [w for w in t._rows_box.findChildren(QFrame, "priceRow") if not w.isHidden()]
+        self.assertEqual(len(shown), len(t.rows()))
+        self.assertTrue(shown[0].amount.text().startswith("₹"))
+
+    def test_unpriced_rows_are_not_tinted(self):
+        t = self._table()
+        t.resize(760, 400)
+        t.move(400, 400)
+        t.show()
+        _app.processEvents()
+        row = t._row_widgets[0]
+        px = row.grab().toImage().pixelColor(row.width() // 3, row.height() // 2)
+        self.assertEqual(px.name().lower(), "#ffffff")
+
+    def test_the_indicative_note_is_one_quiet_line_with_the_full_text_kept(self):
+        t = self._table()
+        t._use_starter()
+        self.assertIn("INDICATIVE", t.warn.text())
+        self.assertIn("INDICATIVE", t.warn.toolTip())
+        self.assertLessEqual(t.warn.sizeHint().height(), 24)
+
+    def test_the_full_table_is_one_click_away(self):
+        t = self._table()
+        self.assertTrue(t.table.isHidden())
+        t.details_btn.click()
+        self.assertFalse(t.table.isHidden())
+
+
+class StepFourFitsAndHasNoFrame(unittest.TestCase):
+    def test_no_titled_group_frame_around_the_prices(self):
+        from PySide6.QtWidgets import QGroupBox
+        self.assertNotIsInstance(_dialog().price_box, QGroupBox)
+
+    def test_the_totals_are_visible_without_scrolling(self):
+        from PySide6.QtWidgets import QScrollArea
+        for width in (780, 854):
+            d = _dialog()
+            d.resize(width, 700)
+            d.move(300, 0)
+            d.price_table.set_quantities(dict(SAMPLE_Q))
+            d.price_table._use_starter()
+            d.price_box.setVisible(True)
+            d._show_result("## x\n\nbody")
+            d._show_step(d.S_PRICE)
+            d.show()
+            _app.processEvents()
+            box = d.price_table.summary_box
+            area = box.parentWidget()
+            while area is not None and not isinstance(area, QScrollArea):
+                area = area.parentWidget()
+            port = area.viewport()
+            bottom = box.mapTo(port, box.rect().bottomLeft()).y()
+            self.assertLessEqual(bottom, port.height(), (width, bottom, port.height()))
+            d.close()
+
+
+class StepOneIsShort(unittest.TestCase):
+    def test_template_hint_input_measurements_and_favourites_are_in_more_options(self):
+        d = _dialog()
+        for w in (d.template_hint, d.input_meas_btn, d.ask.fav_btn):
+            self.assertTrue(d.more.body.isAncestorOf(w), w)
+            self.assertFalse(w.isVisibleTo(d.pages.widget(0)))
+        d.more.toggle.click()
+        for w in (d.template_hint, d.input_meas_btn, d.ask.fav_btn):
+            self.assertTrue(w.isVisibleTo(d.pages.widget(0)))
+
+    def test_favourites_still_opens_its_menu(self):
+        d = _dialog()
+        with mock.patch("widgets.ask_panel.QMenu") as menu:
+            d.ask.fav_btn.click()
+        menu.assert_called()
+
+    def test_the_rules_line_says_so_for_hvac_only(self):
+        from addons.boq import industries
+        d = _dialog()
+        self.assertTrue(d.rules_line.isHidden())
+        d.industry_combo.setCurrentText(industries.HVAC)
+        self.assertFalse(d.rules_line.isHidden())
+        d.industry_combo.setCurrentText(industries.GENERAL)
+        self.assertTrue(d.rules_line.isHidden())
+
+
 if __name__ == "__main__":
     unittest.main()

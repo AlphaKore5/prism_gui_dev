@@ -509,7 +509,8 @@ class BoqDialog(PrismDialog):
             "after you say so, in \"Make with drawing\"."))
         self.template_hint.setObjectName("note")
         self.template_hint.setWordWrap(True)
-        root.addWidget(self.template_hint)
+        # (placed in More options below: step 1 shows only the request, the
+        # drawing and the industry.)
 
         # item 38 (2 Nov 2026): a scanned/vector-less PDF drawing has no
         # geometry Prism can measure itself — classify_inputs() files it as
@@ -537,7 +538,7 @@ class BoqDialog(PrismDialog):
         self.input_meas_btn = self.button(
             i18n.t("Input measurements…"), "secondary", icon_name="paperclip",
             small=True, on_click=self._open_input_measurements)
-        meas_row.addWidget(self.input_meas_btn)
+        # (placed in More options below, next to Favourites.)
         # Only ever shown for an industry that actually has its own
         # PDF-takeoff tool (today, only HVAC) -- picked explicitly from
         # the Industry dropdown above, never guessed from a file. See
@@ -609,8 +610,11 @@ class BoqDialog(PrismDialog):
         # half (core.boq_price) prices by arithmetic from a rate list the
         # customer brings; this card is its window. Appears with the
         # measurement, because there is nothing to price before it.
-        self.price_box = QGroupBox(i18n.t("Price it (optional)"))
+        # A plain container, not a titled group frame: the step tab already
+        # says "Add prices", and the cards inside say how.
+        self.price_box = QWidget()
         price_l = QVBoxLayout(self.price_box)
+        price_l.setContentsMargins(0, 0, 0, 0)
         self.price_table = PricingTable(self.cfg)
         price_l.addWidget(self.price_table)
         self.price_box.setVisible(False)
@@ -713,6 +717,14 @@ class BoqDialog(PrismDialog):
         irow.addWidget(self.industry_combo)
         irow.addStretch(1)
         root.addWidget(ind_row)
+        # Says out loud which drawing rules will run, the preview's one line.
+        self.rules_line = C.label(i18n.t(
+            "HVAC drawing rules are on, because your industry is HVAC."),
+            level="SUPPORT", wrap=True, colour=theme.OK_INK)
+        self.rules_line.setVisible(False)
+        self.industry_combo.currentTextChanged.connect(
+            lambda name: self.rules_line.setVisible(name == industries.HVAC))
+        root.addWidget(self.rules_line)
 
         # Everything technical lives here, shut by default.
         self.more = MoreOptions("More options")
@@ -720,6 +732,16 @@ class BoqDialog(PrismDialog):
         # earlier job: each changes the result, so they stay one click away,
         # but a first-time person never has to read them.
         self.more.add(picker)
+        # Extra files: a sample/template BOQ, measurements made elsewhere and
+        # starred files. Same buttons and handlers, moved out of step 1.
+        self.more.add(self.template_hint)
+        extra_row = QHBoxLayout()
+        extra_row.setContentsMargins(0, 0, 0, 0)
+        extra_row.setSpacing(theme.SPACE_2)
+        extra_row.addWidget(self.input_meas_btn)
+        extra_row.addWidget(self.ask.fav_btn)
+        extra_row.addStretch(1)
+        self.more.add_layout(extra_row)
         self.unit_edit = QLineEdit()
         self.unit_edit.setPlaceholderText("Drawing unit, if you know it — e.g. meters")
         self.more.add(self.unit_edit)

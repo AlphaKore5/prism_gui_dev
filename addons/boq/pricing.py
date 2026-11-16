@@ -24,8 +24,9 @@ from decimal import Decimal, InvalidOperation
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import (
-    QAbstractItemView, QCheckBox, QDoubleSpinBox, QFileDialog, QHBoxLayout,
-    QHeaderView, QLabel, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
+    QAbstractItemView, QCheckBox, QDoubleSpinBox, QFileDialog, QFrame, QHBoxLayout,
+    QHeaderView, QLabel, QLineEdit, QScrollArea, QTableWidget, QTableWidgetItem,
+    QVBoxLayout, QWidget,
 )
 
 import core_bridge as CB
@@ -73,6 +74,85 @@ class _RuleDelegate(_TintDelegate):
         painter.restore()
 
 
+class _QuietLine(QLabel):
+    """One line of muted text that elides instead of wrapping; the whole text
+    stays in text() and the tooltip."""
+
+    def setText(self, text: str):
+        super().setText(text)
+        self.setToolTip(text)
+
+    def minimumSizeHint(self):
+        hint = super().minimumSizeHint()
+        hint.setWidth(40)
+        return hint
+
+    def paintEvent(self, event):
+        from PySide6.QtGui import QPainter
+        painter = QPainter(self)
+        painter.setPen(self.palette().windowText().color())
+        painter.setFont(self.font())
+        shown = self.fontMetrics().elidedText(self.text(), Qt.ElideRight, self.width())
+        painter.drawText(self.rect(), Qt.AlignLeft | Qt.AlignVCenter, shown)
+
+
+class _PriceRow(QFrame):
+    """One line of the Prices card: the item and its measured quantity, a rate
+    field, and the amount. It holds no numbers of its own: the rate is typed
+    into the grid's own rate cell (same handler as typing in the grid) and
+    everything shown is read back from the line the grid holds."""
+
+    def __init__(self, on_rate, parent=None):
+        super().__init__(parent)
+        self.setObjectName("priceRow")
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        row = QHBoxLayout(self)
+        row.setContentsMargins(14, 8, 14, 8)
+        row.setSpacing(theme.SPACE_2)
+        left = QVBoxLayout()
+        left.setSpacing(1)
+        self.name = QLabel("")
+        self.name.setObjectName("priceRowName")
+        self.qty = QLabel("")
+        self.qty.setObjectName("priceRowQty")
+        left.addWidget(self.name)
+        left.addWidget(self.qty)
+        row.addLayout(left, stretch=1)
+        cur = QLabel("₹")
+        cur.setObjectName("priceRowUnit")
+        row.addWidget(cur)
+        self.rate = QLineEdit()
+        self.rate.setObjectName("priceRowRate")
+        self.rate.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.rate.setFixedWidth(92)
+        self.rate.setPlaceholderText(i18n.t("rate"))
+        self.rate.editingFinished.connect(lambda: on_rate(self.rate.text()))
+        row.addWidget(self.rate)
+        self.per = QLabel("")
+        self.per.setObjectName("priceRowUnit")
+        self.per.setFixedWidth(54)
+        row.addWidget(self.per)
+        self.amount = QLabel("")
+        self.amount.setObjectName("priceRowAmount")
+        self.amount.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.amount.setMinimumWidth(104)
+        row.addWidget(self.amount)
+
+    def show_line(self, it, rate_text: str, tip: str = ""):
+        self.name.setText(it.description)
+        self.name.setToolTip(it.description)
+        self.qty.setText(f"{_qty(it.quantity)} {it.unit}".strip())
+        if not self.rate.hasFocus():
+            self.rate.setText(rate_text)
+        self.rate.setToolTip(tip)
+        self.per.setText(i18n.t("per {unit}").format(unit=it.unit) if it.unit else "")
+        priced = bool(it.priced)
+        self.amount.setText(f"₹{_money(it.amount)}" if priced else i18n.t("no rate yet"))
+        self.amount.setProperty("empty", not priced)
+        self.amount.style().unpolish(self.amount)
+        self.amount.style().polish(self.amount)
+
+
 class PricingTable(QWidget):
     """Rate list, the priced grid, the totals, and the three exports."""
 
@@ -91,18 +171,18 @@ class PricingTable(QWidget):
         col.setContentsMargins(0, 0, 0, 0)
         col.setSpacing(theme.SPACE_2)
 
-        col.addWidget(C.label(i18n.t(
+        intro_text = i18n.t(
             "Rates come from your own price list, or you type them in. Amounts "
-            "and totals are arithmetic. No AI touches a number here."),
-            level="SUPPORT", wrap=True))
+            "and totals are arithmetic. No AI touches a number here.")
 
         # ── how to price it: three cards, each one the old control ──────────
         self.card_list = ChoiceCard("file", i18n.t("Use my price list"),
-                                    i18n.t("Pick your rate sheet (Excel, PDF or Word)."))
+                                    i18n.t("Pick your rate sheet (Excel, PDF or Word)."), compact=True)
         self.card_starter = ChoiceCard("spark", i18n.t("Use typical prices"),
-                                       i18n.t("Good for a first estimate. Check them before you send a quote."))
+                                       i18n.t("Good for a first estimate. Check them before you send a quote."),
+                                       compact=True)
         self.card_none = ChoiceCard("x", i18n.t("No prices"),
-                                    i18n.t("Leave the price columns empty for you to fill."))
+                                    i18n.t("Leave the price columns empty for you to fill."), compact=True)
         cards = QHBoxLayout()
         cards.setContentsMargins(0, 0, 0, 0)
         cards.setSpacing(theme.SPACE_3)
@@ -127,18 +207,49 @@ class PricingTable(QWidget):
         rates_row.addWidget(self.starter_btn)
         self.starter_btn.setVisible(False)      # the "Use typical prices" card is this button
         self.rates_label = C.label(i18n.t("No rate list yet — every line is unpriced."),
-                                   level="SUPPORT", wrap=True)
-        rates_row.addWidget(self.rates_label, stretch=1)
+                                   level="SUPPORT")
+        rates_row.addWidget(self.rates_label)
+        # One quiet line (full text in the tooltip), not a coloured box.
+        self.warn = _QuietLine("")
+        self.warn.setObjectName("priceWarn")
+        self.warn.setVisible(False)
+        rates_row.addWidget(self.warn, stretch=1)
         col.addLayout(rates_row)
 
-        self.warn = QLabel("")
-        self.warn.setWordWrap(True)
-        self.warn.setStyleSheet(
-            f"color: {theme.WARN_INK}; background: {theme.WARN_BG};"
-            f" border-radius: {theme.R_CONTROL}px;"
-            f" padding: {theme.SPACE_2}px {theme.SPACE_3}px; font-size: 13px;")
-        self.warn.setVisible(False)
-        col.addWidget(self.warn)
+        # ── the Prices card: calm rows, the summary pinned under them ─────
+        self.prices_card = QFrame()
+        self.prices_card.setObjectName("pricesCard")
+        self.prices_card.setAttribute(Qt.WA_StyledBackground, True)
+        card = QVBoxLayout(self.prices_card)
+        card.setContentsMargins(0, 0, 0, 0)
+        card.setSpacing(0)
+        head_row = QHBoxLayout()
+        head_row.setContentsMargins(14, 10, 14, 10)
+        ptitle = QLabel(i18n.t("Prices"))
+        ptitle.setObjectName("pricesTitle")
+        head_row.addWidget(ptitle)
+        head_row.addStretch(1)
+        # The trust line lives in the card's header (full sentence on hover),
+        # which leaves room for the totals on a 768px screen.
+        phint = QLabel(i18n.t("Type a rate. No AI touches a number here."))
+        phint.setObjectName("priceRowUnit")
+        phint.setToolTip(intro_text)
+        head_row.addWidget(phint)
+        card.addLayout(head_row)
+        self._rows_box = QWidget()
+        self._rows_box.setObjectName("priceRows")
+        self._rows_layout = QVBoxLayout(self._rows_box)
+        self._rows_layout.setContentsMargins(0, 0, 0, 0)
+        self._rows_layout.setSpacing(0)
+        self._row_widgets: list = []
+        self.rows_scroll = QScrollArea()
+        self.rows_scroll.setObjectName("priceRowsScroll")
+        self.rows_scroll.setWidgetResizable(True)
+        self.rows_scroll.setFrameShape(QFrame.NoFrame)
+        self.rows_scroll.setWidget(self._rows_box)
+        self.rows_scroll.setMaximumHeight(106)      # two lines; the rest scroll inside
+        card.addWidget(self.rows_scroll)
+        col.addWidget(self.prices_card)
 
         # ── the grid ─────────────────────────────────────────────────────
         self.table = QTableWidget(0, 8)
@@ -180,23 +291,33 @@ class PricingTable(QWidget):
         self._detail_cols = (COL_SECTION, COL_ITEM, COL_BASIS)
         for column in self._detail_cols:
             self.table.setColumnHidden(column, True)
-        col.addWidget(self.table)
-        self.details_btn = C.button(i18n.t("Show section, item code and basis"), "tertiary",
+        self.table.cellChanged.connect(self._sync_row)        # after _on_edited: show what it made
+        # The full grid (section, item code, description, unit, basis are
+        # editable there) is one click away, under the summary.
+        self.table.setVisible(False)
+        self.details_btn = C.button(i18n.t("Show the full table"), "tertiary",
                                     small=True, on_click=self._toggle_details)
-        col.addWidget(self.details_btn, alignment=Qt.AlignLeft)
 
         # ── the bottom of the sheet ──────────────────────────────────────
+        self.summary_box = summary = QFrame()
+        summary.setObjectName("priceSummary")
+        summary.setAttribute(Qt.WA_StyledBackground, True)
+        sum_col = QVBoxLayout(summary)
+        sum_col.setContentsMargins(14, 6, 14, 8)
+        sum_col.setSpacing(4)
         tail = QHBoxLayout()
         tail.setContentsMargins(0, 0, 0, 0)
         tail.setSpacing(theme.SPACE_2)
-        tail.addWidget(QLabel(i18n.t("Contingency")))
+        clab = QLabel(i18n.t("Contingency")); clab.setObjectName("priceRowUnit")
+        tail.addWidget(clab)
         self.contingency_spin = QDoubleSpinBox()
         self.contingency_spin.setRange(0.0, 50.0)
         self.contingency_spin.setDecimals(1)
         self.contingency_spin.setSuffix(" %")
         self.contingency_spin.setValue(0.0)
         tail.addWidget(self.contingency_spin)
-        tail.addWidget(QLabel(i18n.t("GST")))
+        glab = QLabel(i18n.t("GST")); glab.setObjectName("priceRowUnit")
+        tail.addWidget(glab)
         self.gst_spin = QDoubleSpinBox()
         self.gst_spin.setRange(0.0, 50.0)
         self.gst_spin.setDecimals(1)
@@ -209,13 +330,19 @@ class PricingTable(QWidget):
             "The total tax is the same."))
         tail.addWidget(self.interstate_check)
         tail.addStretch(1)
-        col.addLayout(tail)
+        sum_col.addLayout(tail)
         for w in (self.contingency_spin, self.gst_spin):
+            w.setFixedSize(96, 28)
             w.valueChanged.connect(self._refresh_totals)
         self.interstate_check.toggled.connect(self._refresh_totals)
 
-        self.totals = C.label("", level="BODY", wrap=True)
-        col.addWidget(self.totals)
+        self.totals = QLabel("")
+        self.totals.setWordWrap(True)
+        self.totals.setObjectName("priceTotals")
+        sum_col.addWidget(self.totals)
+        card.addWidget(summary)
+        col.addWidget(self.details_btn, alignment=Qt.AlignLeft)
+        col.addWidget(self.table)
 
         # ── exports ──────────────────────────────────────────────────────
         exports = QHBoxLayout()
@@ -292,11 +419,44 @@ class PricingTable(QWidget):
             c.set_selected(c is card)
 
     def _toggle_details(self):
-        show = self.table.isColumnHidden(COL_SECTION)
+        show = self.table.isHidden()
+        self.table.setVisible(show)
         for column in self._detail_cols:
             self.table.setColumnHidden(column, not show)
-        self.details_btn.setText(i18n.t("Hide section, item code and basis") if show
-                                 else i18n.t("Show section, item code and basis"))
+        self.details_btn.setText(i18n.t("Hide the full table") if show
+                                 else i18n.t("Show the full table"))
+
+    # ── the calm rows (display; the grid holds the data) ─────────────────
+    def _render_rows(self):
+        for w in self._row_widgets:
+            self._rows_layout.removeWidget(w)
+            w.hide()
+            w.deleteLater()
+        self._row_widgets = []
+        items = self._boq.items if self._boq is not None else []
+        for r, _it in enumerate(items):
+            w = _PriceRow(lambda text, r=r: self._rate_typed(r, text))
+            self._rows_layout.addWidget(w)
+            self._row_widgets.append(w)
+            self._show_row(r)
+
+    def _show_row(self, r: int):
+        if r >= len(self._row_widgets) or self._boq is None:
+            return
+        cell = self.table.item(r, COL_RATE)
+        self._row_widgets[r].show_line(self._boq.items[r], cell.text() if cell else "",
+                                       cell.toolTip() if cell else "")
+
+    def _rate_typed(self, r: int, text: str):
+        """A rate typed in a row goes into the grid's own rate cell, so the
+        grid's handler (_on_edited) prices it exactly as typing in the grid."""
+        cell = self.table.item(r, COL_RATE)
+        if cell is not None and cell.text() != text.strip():
+            cell.setText(text.strip())
+
+    def _sync_row(self, r: int, _c: int = 0):
+        if not self._filling:
+            self._show_row(r)
 
     def _pick_rates(self):
         import paths
@@ -330,6 +490,7 @@ class PricingTable(QWidget):
             self._fill_row(r, it)
         self._filling = False
         self._set_have_lines(bool(self._boq.items))
+        self._render_rows()
         self._refresh_totals()
 
     def _fill_row(self, r: int, it):
