@@ -90,9 +90,9 @@ class _Card(QFrame):
             self.move_btn.setCursor(Qt.PointingHandCursor)
             self.move_btn.setFixedHeight(24)
             self.move_btn.setStyleSheet(
-                f"QPushButton{{background:transparent;color:{theme.NEUTRAL[700]};border:1px solid {theme.NEUTRAL[300]};"
-                f"border-radius:{theme.R_CHIP}px;padding:0 10px;font-size:12px;font-weight:600;}}"
-                f"QPushButton:hover{{background:{theme.NEUTRAL[100]};}}"
+                f"QPushButton{{background:{theme.CARD};color:{theme.INK};border:1px solid {theme.HAIRLINE};"
+                f"border-radius:13px;padding:0 12px;min-height:26px;max-height:26px;font-size:13px;font-weight:500;}}"
+                f"QPushButton:hover{{background:{theme.WELL};border-color:{theme.BORDER};}}"
                 f"QPushButton::menu-indicator{{image:none;width:0px;}}")
             self.menu = QMenu(self.move_btn)
             self.actions_by_stage = {}
@@ -126,7 +126,7 @@ class DealsPage(QWidget):
         hl.setContentsMargins(theme.SPACE_4, theme.SPACE_3, theme.SPACE_4, theme.SPACE_3)
         titles = QVBoxLayout()
         titles.setSpacing(2)
-        titles.addWidget(C.label(i18n.t("Deals"), level="SECTION", weight=700))
+        titles.addWidget(C.label(i18n.t("Deals"), level="SECTION", weight=400))
         self.summary = C.label("", level="SUPPORT", colour=theme.NEUTRAL[600], wrap=True)
         titles.addWidget(self.summary)
         hl.addLayout(titles, 1)
@@ -143,7 +143,7 @@ class DealsPage(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setStyleSheet(f"QScrollArea{{background:{theme.CANVAS};border:none;}}")
+        scroll.setStyleSheet(f"QScrollArea{{background:{theme.CARD};border:none;}}")
         self._host = QWidget()
         self._row = QHBoxLayout(self._host)
         self._row.setContentsMargins(theme.SPACE_4, theme.SPACE_4, theme.SPACE_4, theme.SPACE_4)

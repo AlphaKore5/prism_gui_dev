@@ -108,7 +108,6 @@ class TheStackIsInTheDeclaredOrder(GateTest):
         "inquiry": "inquiry_panel",
         "config": "settings_panel",
         "guide": "guide_panel",
-        "catalog": "catalog_panel",
         "runs": "history_panel",
         "boq": "boq_panel",
         "email": "email_panel",
@@ -143,7 +142,13 @@ class TheStackIsInTheDeclaredOrder(GateTest):
         win = self._window()
         for name, index in main_window.SCREEN_INDEX.items():
             with self.subTest(screen=name):
+                before = win.screens.currentIndex()
                 win._show_screen(name)
+                if name in main_window._SWITCHED_OFF:
+                    # A switched-off add-on's page (bom since 2026-11-16)
+                    # keeps its index but is never shown: asking stays put.
+                    self.assertEqual(win.screens.currentIndex(), before)
+                    continue
                 self.assertEqual(win.screens.currentIndex(), index)
 
     def test_an_unknown_screen_falls_back_to_home(self):

@@ -305,8 +305,10 @@ class TonePill(QLabel):
         self.setObjectName("boardPill")
         self.setStyleSheet(
             f"QLabel#boardPill {{ background: {bg}; color: {ink}; "
-            f"border-radius: 4px; padding: 1px 5px; "
-            f"font-size: 10.5px; font-weight: 700; }}")
+            f"border-radius: 6px; padding: 2px 7px; "
+            f"font-family: {theme.FONT_MONO_STACK}; "
+            f"font-size: 10px; font-weight: 500; }}")
+        C.track(self, 0.06)
         self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
 
 
@@ -390,7 +392,8 @@ def _meta(text: str, icon: str = "") -> QLabel:
 
 
 class BoardCard(QFrame):
-    """One inquiry on the board. Opaque white, a 3px stripe in its tone."""
+    """One inquiry on the board. Opaque white with a hairline edge; the stage
+    tone is carried by its pill and its column, not by a stripe."""
     clicked = Signal(str)
 
     def __init__(self, row: dict, *, head: str, pill: tuple | None,
@@ -410,7 +413,7 @@ class BoardCard(QFrame):
         self._current = current
         self._picked = picked
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(theme.SPACE_3 + 3, theme.SPACE_2 + 2,
+        lay.setContentsMargins(theme.SPACE_3, theme.SPACE_2 + 2,
                                theme.SPACE_3, theme.SPACE_2 + 2)
         lay.setSpacing(2)
         top = QHBoxLayout()
@@ -432,7 +435,7 @@ class BoardCard(QFrame):
             top.addWidget(TonePill(pill[0], pill[1]))
         lay.addLayout(top)
         self.customer = Elided(row.get("Customer", "") or row.get("Email", ""))
-        self.customer.setFont(theme.font("BODY", 700))
+        self.customer.setFont(theme.font("BODY", 500))
         lay.addWidget(self.customer)
         self.product = Elided(product)
         self.product.setObjectName("meta")
@@ -464,7 +467,7 @@ class BoardCard(QFrame):
         foot.addWidget(flow_host, 1)
         if amount:
             amt = QLabel(amount)
-            amt.setFont(theme.font("BODY", 700))
+            amt.setFont(theme.font("MONO", 500))
             amt.setAlignment(Qt.AlignRight | Qt.AlignBottom)
             foot.addWidget(amt, 0, Qt.AlignBottom)
         lay.addLayout(foot)
@@ -486,18 +489,13 @@ class BoardCard(QFrame):
         p.setRenderHint(QPainter.Antialiasing)
         r = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
         path = QPainterPath()
-        path.addRoundedRect(r, 10, 10)
+        path.addRoundedRect(r, 12, 12)
         p.fillPath(path, theme.qcolor("#fafafa" if self._dim else "#ffffff"))
-        edge = theme.NEUTRAL[900] if (self._current or self._picked) \
-            else theme.NEUTRAL[200]
+        edge = theme.INK if (self._current or self._picked) \
+            else theme.HAIRLINE
         p.setPen(QPen(theme.qcolor(edge), 1.5 if self._current or self._picked
                       else 1))
         p.drawPath(path)
-        p.save()
-        p.setClipPath(path)
-        p.fillRect(QRectF(r.left(), r.top(), 3, r.height()),
-                   theme.qcolor(self._stripe))
-        p.restore()
 
 
 def _esc(text) -> str:
@@ -527,7 +525,7 @@ class _GroupHeader(QPushButton):
         self.setMinimumWidth(10)
         self.setStyleSheet(
             "QPushButton#boardGroup { text-align: left; border: none;"
-            " padding: 4px 2px; %s font-weight: 700; }"
+            " padding: 4px 2px; %s font-weight: 500; }"
             % theme.type_css("LABEL", theme.NEUTRAL[600]))
 
     def full_text(self) -> str:
@@ -548,12 +546,13 @@ class Column(QFrame):
         super().__init__(parent)
         self.stage = stage
         self.setObjectName("boardColumn")
-        bg, ink = _tone(STAGE_TONES[stage])
+        _bg, ink = _tone(STAGE_TONES[stage])
         self.setStyleSheet(
-            "QFrame#boardColumn { background: rgba(255,255,255,0.55);"
-            " border: 1px solid %s; border-radius: 12px; }"
-            "QFrame#boardColHead { background: %s; border-top-left-radius: 12px;"
-            " border-top-right-radius: 12px; }" % (theme.NEUTRAL[200], bg))
+            "QFrame#boardColumn { background: #ffffff;"
+            " border: 1px solid %s; border-radius: 16px; }"
+            "QFrame#boardColHead { background: #F6F5F2; border: none;"
+            " border-bottom: 1px solid %s; border-top-left-radius: 16px;"
+            " border-top-right-radius: 16px; }" % (theme.HAIRLINE, theme.HAIRLINE))
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
@@ -564,23 +563,28 @@ class Column(QFrame):
                               theme.SPACE_2)
         hl.setSpacing(0)
         trow = QHBoxLayout()
+        trow.setSpacing(theme.SPACE_2)
+        mark = QLabel()
+        mark.setFixedSize(6, 6)
+        mark.setStyleSheet(f"background: {ink}; border: none;")
+        trow.addWidget(mark)
         # Elided, never wider than the column (review R12): a QLabel's
         # minimum width is its whole text.
         self.title = Elided(f"{number} · {title}")
-        self.title.setFont(theme.font("CARD_TITLE", 700))
-        self.title.setStyleSheet(f"color: {ink};")
+        self.title.setFont(theme.font("CARD_TITLE", 500))
+        self.title.setStyleSheet(f"color: {theme.INK};")
         trow.addWidget(self.title, 1)
         self.count = QLabel(str(count))
         self.count.setObjectName("boardCount")
         self.count.setStyleSheet(
-            "QLabel#boardCount { background: white; border-radius: 8px;"
-            " padding: 0 7px; %s font-weight: 700; }"
-            % theme.type_css("LABEL", ink))
+            "QLabel#boardCount { background: #EFEEEA; border-radius: 6px;"
+            " padding: 1px 7px; font-family: %s; %s font-weight: 500; }"
+            % (theme.FONT_MONO_STACK, theme.type_css("LABEL", theme.INK)))
         trow.addWidget(self.count)
         hl.addLayout(trow)
         self.sub = QLabel(sub)
         self.sub.setWordWrap(True)
-        self.sub.setStyleSheet(theme.type_css("SUPPORT", ink))
+        self.sub.setStyleSheet(theme.type_css("SUPPORT", theme.MUTE))
         hl.addWidget(self.sub)
         lay.addWidget(head)
         self.scroll = QScrollArea()
@@ -623,11 +627,10 @@ class _Kpi(QFrame):
         self.setObjectName("boardKpi")
         self.setCursor(Qt.PointingHandCursor)
         self.setFocusPolicy(Qt.StrongFocus)
-        bg, ink = _tone(STAGE_TONES[stage])
+        _bg, ink = _tone(STAGE_TONES[stage])
         self.setStyleSheet(
             "QFrame#boardKpi { background: white; border: 1px solid %s;"
-            " border-left: 3px solid %s; border-radius: 12px; }"
-            % (theme.NEUTRAL[200], ink))
+            " border-radius: 14px; }" % theme.HAIRLINE)
         lay = QHBoxLayout(self)
         lay.setContentsMargins(theme.SPACE_3, theme.SPACE_2, theme.SPACE_2,
                                theme.SPACE_2)
@@ -635,21 +638,21 @@ class _Kpi(QFrame):
         self.pad = QLabel()
         self.pad.setFixedSize(34, 34)
         self.pad.setAlignment(Qt.AlignCenter)
-        self.pad.setStyleSheet(f"background: {bg}; border-radius: 9px;")
+        self.pad.setStyleSheet("background: #F6F5F2; border-radius: 10px;")
         try:
             from widgets import icons
             self.pad.setPixmap(icons.pixmap(STAGE_ICONS.get(stage, "inbox"),
-                                            16, ink))
+                                            16, theme.INK))
         except Exception:                               # noqa: BLE001
             pass
         lay.addWidget(self.pad, 0, Qt.AlignTop)
         col = QVBoxLayout()
         col.setSpacing(0)
         self.value = QLabel("0")
-        self.value.setFont(theme.font("SECTION", 700))
+        self.value.setFont(theme.font("SECTION", 500))
         self.title = Elided("")
         self.detail = Elided("")
-        self.detail.setStyleSheet(theme.type_css("SUPPORT", ink))
+        self.detail.setStyleSheet(theme.type_css("SUPPORT", theme.MUTE))
         col.addWidget(self.value)
         col.addWidget(self.title)
         col.addWidget(self.detail)

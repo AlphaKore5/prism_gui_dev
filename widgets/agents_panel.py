@@ -884,6 +884,8 @@ class AgentsPanel(QWidget):
 
         self.run_btn = QPushButton(i18n.t('Start the work'))
         self.run_btn.setObjectName("primaryBtn")
+        self.run_btn.setIcon(C.brand_dot_icon(24))
+        self.run_btn.setIconSize(QSize(24, 24))
         self.run_btn.setCursor(Qt.PointingHandCursor)
         self.run_btn.setMinimumHeight(44)
         self.run_btn.setEnabled(False)

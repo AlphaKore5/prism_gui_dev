@@ -65,7 +65,7 @@ class LeadsPanel(QWidget):
         root.addWidget(self.header)
         self._body = QWidget()
         self._body_lay = QVBoxLayout(self._body)
-        self._body_lay.setContentsMargins(0, 0, 0, 0)
+        self._body_lay.setContentsMargins(0, 13, 0, 0)       # the preview starts the card 30px under the header
         self._body_lay.setSpacing(0)
         root.addWidget(self._body, stretch=1)
 

@@ -1864,7 +1864,7 @@ class TheMeasurementIsATable(unittest.TestCase):
             d._on_measured(self.Q, ["a note"])
         self.assertEqual(len(d.meas_table.rows()), 5)
         self.assertIn("LENGTHS BY LAYER", d.summary)     # the AI's text, intact
-        self.assertTrue(d.meas_box.isVisibleTo(d))
+        self.assertTrue(d.meas_box.isVisibleTo(d.pages.widget(d.S_COUNT)))
 
 
 class RowsAreTintedByConfidenceAndValueIsEditable(unittest.TestCase):
@@ -1955,6 +1955,11 @@ class RowsAreTintedByConfidenceAndValueIsEditable(unittest.TestCase):
             t.set_quantities(self.Q)
             t.resize(760, 300)
             t.show()
+            # The measured view opens on count cards; the table (the thing
+            # this test is about) is one click behind "Show every line in a
+            # table". Open it the way a person does, then sample real pixels.
+            t._toggle_table()
+            self.assertTrue(t.table.isVisibleTo(t))
             app.processEvents()
             by_item = {t.table.item(r, COL_ITEM).text(): r for r in range(t.table.rowCount())}
             r = by_item["A-WALL"]                       # red (lookalike)
@@ -2251,7 +2256,7 @@ class ExternalMeasurementsAreASecondWayIn(unittest.TestCase):
         self.assertEqual(d.q, {"external": True,
                                "text": "DUCT SUMMARY\n  supply 20x30 38.8m\n"})
         self.assertEqual(d.summary, "DUCT SUMMARY\n  supply 20x30 38.8m\n")
-        self.assertTrue(d.ext_meas_box.isVisibleTo(d))
+        self.assertTrue(d.ext_meas_box.isVisibleTo(d.pages.widget(d.S_COUNT)))
         self.assertEqual(d.ext_meas_view.toPlainText(), d.summary)
 
     def test_it_never_writes_outside_the_patched_runs_dir(self):
@@ -2304,7 +2309,7 @@ class ExternalMeasurementsAreASecondWayIn(unittest.TestCase):
         with mock.patch.object(CB.config, "RUNS_DIR", tempfile.mkdtemp()), \
                 mock.patch.object(CB.config, "save_artifact"):
             d._use_external_measurements("text")
-        self.assertTrue(d.ext_meas_box.isVisibleTo(d))
+        self.assertTrue(d.ext_meas_box.isVisibleTo(d.pages.widget(d.S_COUNT)))
         d.cad_path = "/x/site.dxf"
         with mock.patch.object(CB.config, "RUNS_DIR", tempfile.mkdtemp()), \
                 mock.patch.object(CB.config, "save_artifact"):
@@ -2312,8 +2317,8 @@ class ExternalMeasurementsAreASecondWayIn(unittest.TestCase):
                             "block_counts": {}, "unit": "m", "unit_code": 6,
                             "unit_confirmed": True, "notes": [], "site": {},
                             "entity_count": 0}, [])
-        self.assertFalse(d.ext_meas_box.isVisibleTo(d))
-        self.assertTrue(d.meas_box.isVisibleTo(d))
+        self.assertFalse(d.ext_meas_box.isVisibleTo(d.pages.widget(d.S_COUNT)))
+        self.assertTrue(d.meas_box.isVisibleTo(d.pages.widget(d.S_COUNT)))
 
     def test_make_with_drawing_is_off_without_a_real_drawing(self):
         from unittest import mock

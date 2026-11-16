@@ -349,10 +349,14 @@ class TheRegistryStillMatchesTheLiveTables(unittest.TestCase):
     # never drift from" the rail.
     # step (order 35) sits between Gerber and Email so the three measuring
     # add-ons are neighbours on both shelves -- see addons/step/addon.py.
+    # bom left both shelves on 2026-11-16: the owner asked for BOM & Stock to
+    # be removed from the UI for now, so addons/bom/addon.py is status=OFF.
+    # Flipping it back to LIVE puts "bom" back at the end of both lists
+    # (tests/test_ui_port_bom_hidden.py proves that).
     GOLDEN_RAIL = ["inquiry", "boq", "gerber", "step", "email", "leads",
-                   "whatsapp", "bom"]
+                   "whatsapp"]
     GOLDEN_HOME = ["inquiry", "boq", "gerber", "step", "email", "leads",
-                   "whatsapp", "reel", "motion", "bom"]
+                   "whatsapp", "reel", "motion"]
 
     def test_the_rail_shelf_is_what_we_decided(self):
         self.assertEqual(

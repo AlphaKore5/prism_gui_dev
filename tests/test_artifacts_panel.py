@@ -40,7 +40,9 @@ class TaskFoldersAlongsideLooseFiles(unittest.TestCase):
         os.unlink(self._src.name)
 
     def _names(self, panel):
-        return [getattr(w, "_name", None) for w in _widgets(panel._col)]
+        # Rows now sit inside one Card per day, so look through the cards too.
+        from widgets.controls import FileItem
+        return [w._name for w in panel._col.parentWidget().findChildren(FileItem)]
 
     def test_a_task_folder_gets_its_own_row(self):
         self.CB.config.save_artifact(self._src.name, "a poster", kind="visual",

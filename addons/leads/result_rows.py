@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from typing import Callable, Optional
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QFontMetrics
+from PySide6.QtGui import QFont, QFontMetrics
 from PySide6.QtWidgets import QCheckBox, QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout, QWidget
 
 import theme
@@ -53,22 +53,24 @@ def avatar(name: str, size: int = 34) -> QLabel:
     lab.setFixedSize(size, size)
     lab.setAlignment(Qt.AlignCenter)
     lab.setStyleSheet(
-        f"QLabel{{color:{theme.NEUTRAL[700]};background:{theme.NEUTRAL[200]};"
-        f"border-radius:{size // 2}px;font-weight:700;font-size:{max(11, size // 3)}px;}}")
+        f"QLabel{{color:#ffffff;background:{theme.INK};"
+        f"border-radius:{size // 2}px;font-weight:500;font-size:{max(11, size // 3)}px;}}")
     return lab
 
 
 def pill(text: str, tone: str = "quiet") -> QLabel:
     """A pill. R_CHIP, not a huge radius: Qt drops a radius over half the height and draws square corners."""
+    if tone != "outline":
+        # The preview's `.st`: mono caps with a square before the word (the shared Pill; the words stay as given).
+        from widgets import controls as C
+        return C.Pill(text, {"ok": "st_ok", "warn": "st_warn", "err": "st_err"}.get(tone, "st_neutral"))
     lab = QLabel(text)
-    if tone == "outline":
-        lab.setStyleSheet(
-            f"QLabel{{color:{theme.NEUTRAL[600]};background:transparent;border:1px solid {theme.NEUTRAL[300]};"
-            f"border-radius:{theme.R_CHIP}px;padding:1px 9px;font-size:12px;}}")
-    else:
-        ink, bg = TONES.get(tone, TONES["quiet"])
-        lab.setStyleSheet(
-            f"QLabel{{color:{ink};background:{bg};border-radius:{theme.R_CHIP}px;padding:2px 10px;font-size:12px;}}")
+    f = lab.font()
+    f.setCapitalization(QFont.AllUppercase)
+    lab.setFont(f)
+    lab.setStyleSheet(
+        f"QLabel{{color:{theme.TEXT};background:transparent;border:1px solid {theme.BORDER};"
+        f"border-radius:7px;padding:5px 9px;font-family:{theme.FONT_MONO_STACK};font-size:11px;font-weight:500;}}")
     lab.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
     return lab
 
@@ -81,14 +83,14 @@ def button(text: str, primary: bool, on_click: Optional[Callable] = None) -> QPu
     b.setFixedHeight(28)
     if primary:
         b.setStyleSheet(
-            f"QPushButton{{background:{theme.ACCENT};color:#ffffff;border:1px solid {theme.ACCENT};border-radius:{theme.R_CONTROL}px;"
-            f"padding:0 12px;font-size:12px;font-weight:600;}}"
+            f"QPushButton{{background:{theme.ACCENT};color:#ffffff;border:1px solid {theme.ACCENT};border-radius:14px;"
+            f"padding:0 14px;min-height:26px;max-height:26px;font-size:13px;font-weight:500;}}"
             f"QPushButton:hover{{background:{theme.ACCENT_2};}}")
     else:
         b.setStyleSheet(
-            f"QPushButton{{background:transparent;color:{theme.TEXT};border:1px solid {theme.NEUTRAL[300]};border-radius:{theme.R_CONTROL}px;"
-            f"padding:0 12px;font-size:12px;font-weight:600;}}"
-            f"QPushButton:hover{{background:{theme.NEUTRAL[100]};}}")
+            f"QPushButton{{background:{theme.WELL};color:{theme.INK};border:1px solid {theme.HAIRLINE};border-radius:14px;"
+            f"padding:0 14px;min-height:26px;max-height:26px;font-size:13px;font-weight:500;}}"
+            f"QPushButton:hover{{background:{theme.CARD};border-color:{theme.BORDER};}}")
     if on_click is not None:
         b.clicked.connect(on_click)
     return b
@@ -159,7 +161,7 @@ class ResultRow(QFrame):
         head = QHBoxLayout()
         head.setContentsMargins(0, 0, 0, 0)
         head.setSpacing(5)
-        self.name = _Elided(spec.name, f"color:{theme.TEXT};font-size:14px;font-weight:600;background:transparent;")
+        self.name = _Elided(spec.name, f"color:{theme.TEXT};font-size:14px;font-weight:500;background:transparent;")
         self.name.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
         head.addWidget(self.name)
         self.company = None
@@ -193,7 +195,7 @@ class ResultRow(QFrame):
         ground = "background:rgba(9, 9, 11, 0.06);" if self._current else "background:transparent;"
         self.setStyleSheet(
             f"QFrame#resultRow{{{ground}border:none;border-bottom:{rule};}}"
-            f"QFrame#resultRow:hover{{background:{theme.NEUTRAL[100]};}}")
+            f"QFrame#resultRow:hover{{background:{theme.WELL};}}")
 
     def set_last(self, last: bool):
         self._last = last
@@ -225,11 +227,11 @@ class ViewToggle(QFrame):
         self.setObjectName("viewSeg")
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setStyleSheet(
-            f"QFrame#viewSeg{{background:{theme.WELL};border:1px solid {theme.HAIRLINE};border-radius:{theme.R_CONTROL}px;}}"
+            f"QFrame#viewSeg{{background:#EFEEEA;border:none;border-radius:16px;}}"
             f"QFrame#viewSeg QPushButton{{background:transparent;border:none;color:{theme.NEUTRAL[600]};padding:3px 14px;"
-            f"min-height:20px;font-size:12px;font-weight:600;border-radius:{theme.R_CHIP}px;}}"
+            f"min-height:22px;font-size:13px;font-weight:500;border-radius:14px;}}"
             f"QFrame#viewSeg QPushButton:hover{{color:{theme.TEXT};}}"
-            f"QFrame#viewSeg QPushButton:checked{{background:{theme.CARD};color:{theme.TEXT};}}")
+            f"QFrame#viewSeg QPushButton:checked{{background:{theme.CARD};color:{theme.INK};}}")
         lay = QHBoxLayout(self)
         lay.setContentsMargins(2, 2, 2, 2)
         lay.setSpacing(2)
@@ -260,7 +262,7 @@ class ResultList(QFrame):
         self.setObjectName("resultList")
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setStyleSheet(
-            f"QFrame#resultList{{background:{theme.CARD};border:1px solid {theme.HAIRLINE};border-radius:{theme.R_CARD}px;}}")
+            f"QFrame#resultList{{background:{theme.CARD};border:none;}}")
         self._col = QVBoxLayout(self)
         self._col.setContentsMargins(theme.SPACE_4, theme.SPACE_1, theme.SPACE_4, theme.SPACE_1)
         self._col.setSpacing(0)

@@ -75,6 +75,7 @@ class ElvReadDialog(QDialog):
         self.read_btn = C.button(i18n.t("Read"), "primary", icon_name="check",
                                  small=True, on_click=self._read)
         self.read_btn.setEnabled(False)
+        self.read_btn.setToolTip(i18n.t("Pick a drawing first."))
         col.addWidget(self.read_btn, alignment=Qt.AlignLeft)
 
         self.status = QLabel("")
@@ -91,6 +92,7 @@ class ElvReadDialog(QDialog):
         self.use_btn = C.button(i18n.t("Use this reading"), "primary",
                                 on_click=self.accept)
         self.use_btn.setEnabled(False)
+        self.use_btn.setToolTip(i18n.t("Read a drawing first, then use the reading."))
         btn_row.addWidget(self.use_btn)
         col.addLayout(btn_row)
 
@@ -134,7 +136,7 @@ class ElvReadDialog(QDialog):
                 QMessageBox.information(self, i18n.t(
                     "{industry} drawing reading").format(industry=self.industry),
                     i18n.t("Reading a PDF drawing needs an OpenRouter key — "
-                           "add one in Settings → AI tools."))
+                           "add one in Settings → Agents."))
                 return
             if not self._consent():
                 return

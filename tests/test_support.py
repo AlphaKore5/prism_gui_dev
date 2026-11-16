@@ -269,7 +269,10 @@ class SearchFindsTheRightThing(unittest.TestCase):
         ("measure 3d cad model", "step-overview"),
         ("are 3d models kept private", "step-privacy"),
         ("whatsapp customer messaging", "whatsapp-safe"),
-        ("check parts list stock shortages", "bom-shortage"),
+        # "check parts list stock shortages" -> "bom-shortage" left this list
+        # on 2026-11-16 with BOM & Stock (addons/bom/addon.py status=OFF);
+        # tests/test_ui_port_bom_hidden.py asserts it is NOT found while off
+        # and IS found again once BOM is switched back on.
         ("what is motion graphics", "motion-overview"),
         ("add voiceover to reel", "reel-audio"),
         ("edit scenes in studio", "reel-edit"),

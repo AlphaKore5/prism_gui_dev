@@ -59,7 +59,9 @@ now — the same trade `plans.py` already makes with its feature blurbs.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+
+from addons import registry
 
 
 @dataclass(frozen=True)
@@ -2014,10 +2016,25 @@ _BROKEN = Topic(
     ))
 
 
-TOPICS: tuple[Topic, ...] = (
-    _START, _RUNNING, _SIGNIN, _LICENCE, _FILES, _ADDONS, _VOICE, _TEAM,
-    _PRIVACY, _BROKEN,
-)
+_ALL = (_START, _RUNNING, _SIGNIN, _LICENCE, _FILES, _ADDONS, _VOICE, _TEAM,
+        _PRIVACY, _BROKEN)
+
+# Answers about a switched-off add-on (manifest.OFF) are left out, and so are
+# `related` pointers to them, so Help, search and Lumi's context never offer
+# a door the app will not open. They come back when the add-on is LIVE again.
+_OFF = {q.qid for t in _ALL for q in t.questions
+        if registry.is_off(q.answer.action)}
+
+
+def _switched_on(t: Topic) -> Topic:
+    if not _OFF:
+        return t
+    return replace(t, questions=tuple(
+        replace(q, related=tuple(r for r in q.related if r not in _OFF))
+        for q in t.questions if q.qid not in _OFF))
+
+
+TOPICS: tuple[Topic, ...] = tuple(_switched_on(t) for t in _ALL)
 
 
 # ── lookups ────────────────────────────────────────────────────────────────

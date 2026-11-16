@@ -100,8 +100,8 @@ def kind_name(kind: str) -> str:
             "expire": i18n.t("Expired")}.get(kind, kind)
 
 
-_SLICES = ("#4480bb", "#16a34a", "#ca8a04", "#7c3aed", "#dc2626", "#0891b2", "#db2777",
-           "#71717a")
+_SLICES = ("#111110", "#C8161D", "#6B6A65", "#1F6B43", "#7A5A0E", "#A9A8A3", "#2A2A28",
+           "#CBCAC4")                   # the brand: ink, red, stone greys, the two status tones
 
 
 def _fit(dialog, width: int, height: int) -> None:

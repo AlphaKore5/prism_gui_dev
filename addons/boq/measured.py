@@ -48,7 +48,7 @@ from PySide6.QtGui import QBrush, QColor, QPainter
 from PySide6.QtWidgets import (
     QAbstractItemView, QComboBox, QDialog, QHBoxLayout, QHeaderView, QLabel,
     QListWidget, QListWidgetItem, QStyle, QStyledItemDelegate, QTableWidget,
-    QTableWidgetItem, QVBoxLayout, QWidget,
+    QTableWidgetItem, QVBoxLayout, QWidget, QFrame, QLineEdit,
 )
 
 import i18n
@@ -265,6 +265,29 @@ class MeasuredTable(QWidget):
             f" QListWidget::item {{ padding: {theme.SPACE_1}px {theme.SPACE_2}px; }}")
         col.addWidget(self.warn_list)
 
+        # What a person reads first: the items that need them, as cards, then
+        # a tick for the rest. The table below is the same data, kept for
+        # anyone who wants every line.
+        self.summary = C.label("", level="CARD_TITLE", wrap=True)
+        col.addWidget(self.summary)
+        self.verdict = QLabel("")
+        self.verdict.setObjectName("countVerdict")
+        self.verdict.setTextFormat(Qt.RichText)
+        col.addWidget(self.verdict)
+        self.cards_box = QVBoxLayout()
+        self.cards_box.setContentsMargins(0, 0, 0, 0)
+        self.cards_box.setSpacing(theme.SPACE_3)
+        col.addLayout(self.cards_box)
+        self.table_btn = C.button(i18n.t("Show every line in a table"), "tertiary",
+                                  small=True, on_click=self._toggle_table)
+        col.addWidget(self.table_btn, alignment=Qt.AlignLeft)
+        self.detail = QWidget()
+        detail_l = QVBoxLayout(self.detail)
+        detail_l.setContentsMargins(0, 0, 0, 0)
+        detail_l.setSpacing(theme.SPACE_2)
+        self.detail.setVisible(False)
+        col.addWidget(self.detail)
+
         unit_row = QHBoxLayout()
         unit_row.setContentsMargins(0, 0, 0, 0)
         unit_row.setSpacing(theme.SPACE_2)
@@ -278,7 +301,7 @@ class MeasuredTable(QWidget):
         self.unit_combo.currentIndexChanged.connect(self._on_unit_changed)
         unit_row.addWidget(self.unit_combo)
         unit_row.addStretch(1)
-        col.addLayout(unit_row)
+        detail_l.addLayout(unit_row)
 
         # Trust, then the 5 columns a person reads, and a 7th, hidden, that
         # holds the CSV's own order: a sortable table re-sorts itself on
@@ -310,7 +333,7 @@ class MeasuredTable(QWidget):
         # list, and a table that shows only its header is a table nobody reads.
         self.table.setMinimumHeight(head_h + 6 * row_h + 4)
         self.table.setMaximumHeight(head_h + 10 * row_h + 4)
-        col.addWidget(self.table)
+        detail_l.addWidget(self.table)
 
         legend = C.label(i18n.t(
             "Trust column: green — nothing flagged it. Yellow — the HVAC "
@@ -320,7 +343,7 @@ class MeasuredTable(QWidget):
             "\"Show values in\" re-draws from the original measured figures "
             "— pick the unit first, then correct a number."),
             level="SUPPORT", wrap=True)
-        col.addWidget(legend)
+        detail_l.addWidget(legend)
 
         actions = QHBoxLayout()
         actions.setContentsMargins(0, 0, 0, 0)
@@ -454,6 +477,9 @@ class MeasuredTable(QWidget):
             self.table.setItem(r, COL_SORT, hidden)
         self.table.setSortingEnabled(True)
         self.table.sortItems(COL_SORT, Qt.AscendingOrder)
+        self._filling = False
+        self._render_cards()
+        self._filling = True
         if not self._raw_rows:
             self.table.setRowCount(1)
             self.table.setItem(0, COL_ITEM, QTableWidgetItem(i18n.t(
@@ -475,6 +501,164 @@ class MeasuredTable(QWidget):
                 (self.table.item(r, c).text() if self.table.item(r, c) else "")
                 for c in range(COL_ITEM, COL_UNIT + 1)))
         return out
+
+    # ── the cards ────────────────────────────────────────────────────────
+    def _row_sev(self, item: str, layer: str) -> str:
+        return self._sev_map.get(item) or self._sev_map.get(layer) or SEV_GOOD
+
+    def _reason_for(self, item: str, layer: str, sev: str) -> str:
+        """Why Prism flagged it, in the words it already has: the warning that
+        names this item or layer, else the Trust column's own sentence."""
+        for w in self._warnings:
+            if item and item in w or layer and layer in w:
+                return w
+        return _sev_tooltip(sev)
+
+    def _toggle_table(self):
+        show = not self.detail.isVisible()
+        self.detail.setVisible(show)
+        self.table_btn.setText(i18n.t("Hide the table") if show
+                               else i18n.t("Show every line in a table"))
+
+    def _shown(self, r: int) -> tuple:
+        """(item, kind, layer, value text, unit) exactly as the table has row r
+        now -- edits and the unit picker included."""
+        def cell(c):
+            it = self.table.item(r, c)
+            return it.text() if it else ""
+        return (cell(COL_ITEM), cell(COL_KIND), cell(COL_LAYER),
+                cell(COL_VALUE), cell(COL_UNIT))
+
+    def _render_cards(self):
+        while self.cards_box.count():
+            w = self.cards_box.takeAt(0).widget()
+            if w is not None:
+                w.setParent(None)
+                w.deleteLater()
+        n = len(self._raw_rows)
+        bad, warn, good = [], [], []
+        for r, (item, _k, layer, _v, _u) in enumerate(self._raw_rows):
+            {SEV_BAD: bad, SEV_WARN: warn}.get(
+                self._row_sev(item, layer), good).append(r)
+        self.summary.setText(i18n.t("Prism found {n} items").format(n=n) if n
+                             else i18n.t("Nothing to count in this drawing"))
+        parts = []
+        if bad:
+            parts.append(f"<span style='color:{theme.ERR_INK}'><b>"
+                         + i18n.t("{n} you must check").format(n=len(bad))
+                         + "</b></span>")
+        if warn:
+            parts.append(f"<span style='color:{theme.WARN_INK}'>"
+                         + i18n.t("{n} worth a look").format(n=len(warn))
+                         + "</span>")
+        tail = (i18n.t("The rest look right.") if parts
+                else i18n.t("Everything looks right."))
+        self.verdict.setText(" · ".join(parts) + (". " if parts else "") + tail
+                             if n else "")
+        self.verdict.setVisible(bool(n))
+        for r in bad:
+            self.cards_box.addWidget(self._card(r, SEV_BAD))
+        for r in warn:
+            self.cards_box.addWidget(self._card(r, SEV_WARN))
+        if good:
+            self.cards_box.addWidget(self._good_box(good))
+
+    def _card(self, r: int, sev: str) -> QFrame:
+        item, kind, layer, value, unit = self._shown(r)
+        card = QFrame()
+        card.setObjectName("countCard")
+        card.setProperty("sev", sev)
+        card.setAttribute(Qt.WA_StyledBackground, True)
+        col = QVBoxLayout(card)
+        col.setContentsMargins(theme.SPACE_4, theme.SPACE_3, theme.SPACE_4,
+                               theme.SPACE_3)
+        col.setSpacing(theme.SPACE_2)
+        top = QHBoxLayout()
+        tag = QLabel(i18n.t("YOU MUST CHECK") if sev == SEV_BAD
+                     else i18n.t("WORTH A LOOK"))
+        tag.setObjectName("countTag")
+        tag.setProperty("sev", sev)
+        top.addWidget(tag)
+        top.addWidget(C.label(item, level="CARD_TITLE"), stretch=1)
+        top.addWidget(C.label(f"{value}  {unit}", level="MONO"))
+        col.addLayout(top)
+        col.addWidget(C.label(self._reason_for(item, layer, sev),
+                              level="SUPPORT", wrap=True))
+        row = QHBoxLayout()
+        yes = C.button(i18n.t("Yes, it's right"), "primary",
+                       on_click=lambda _=False, i=item, l=layer: self._confirm(i, l))
+        change = C.button(i18n.t("Change the number"), "secondary",
+                          icon_name="edit",
+                          on_click=lambda _=False, rr=r, c=card: self._change(rr, c))
+        row.addWidget(yes)
+        row.addWidget(change)
+        edit = QLineEdit()
+        edit.setPlaceholderText(i18n.t("New number"))
+        edit.setMaximumWidth(140)
+        edit.setVisible(False)
+        edit.returnPressed.connect(lambda rr=r, e=edit: self._apply_number(rr, e))
+        row.addWidget(edit)
+        row.addStretch(1)
+        card._edit = edit
+        col.addLayout(row)
+        return card
+
+    def _good_box(self, rows: list) -> QFrame:
+        box = QFrame()
+        box.setObjectName("countGood")
+        box.setAttribute(Qt.WA_StyledBackground, True)
+        col = QVBoxLayout(box)
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(0)
+        head = QLabel(f"✓  " + i18n.t("{n} look right").format(n=len(rows)))
+        head.setObjectName("countGoodHead")
+        col.addWidget(head)
+        for r in rows:
+            item, _kind, _layer, value, unit = self._shown(r)
+            line = QFrame()
+            line.setObjectName("countLine")
+            line.setAttribute(Qt.WA_StyledBackground, True)
+            h = QHBoxLayout(line)
+            h.setContentsMargins(theme.SPACE_4, theme.SPACE_2, theme.SPACE_4,
+                                 theme.SPACE_2)
+            h.addWidget(C.label(item, level="BODY"), stretch=1)
+            h.addWidget(C.label(f"{value}  {unit}", level="MONO"))
+            col.addWidget(line)
+        return box
+
+    def _confirm(self, item: str, layer: str):
+        """"Yes, it's right": the person has looked, so the row is trusted.
+        Same effect as correcting its number to itself."""
+        self._sev_map[item] = SEV_GOOD
+        for r in range(self.table.rowCount()):
+            it = self.table.item(r, COL_ITEM)
+            if it is not None and it.text() == item:
+                bg = theme.qcolor(theme.OK_BG)
+                for c in (COL_TRUST, COL_ITEM, COL_KIND, COL_LAYER, COL_VALUE, COL_UNIT):
+                    cell = self.table.item(r, c)
+                    if cell:
+                        cell.setBackground(bg)
+                dot = self.table.item(r, COL_TRUST)
+                if dot:
+                    dot.setForeground(theme.qcolor(theme.OK_INK))
+                    dot.setToolTip(i18n.t("You checked this one."))
+        self._render_cards()
+
+    def _change(self, r: int, card: QFrame):
+        card._edit.setText(self._shown(r)[3].replace(",", ""))
+        card._edit.setVisible(True)
+        card._edit.setFocus()
+        card._edit.selectAll()
+
+    def _apply_number(self, r: int, edit: QLineEdit):
+        cell = self.table.item(r, COL_VALUE)
+        if cell is None:
+            return
+        try:
+            float(edit.text().strip().replace(",", ""))
+        except ValueError:
+            return                      # a bad entry is left alone
+        cell.setText(edit.text().strip())     # itemChanged -> _on_edited
 
     # ── warnings dropdown ────────────────────────────────────────────────
     def _set_warnings(self, warnings: list[str]):
@@ -528,6 +712,11 @@ class MeasuredTable(QWidget):
         if dot:
             dot.setForeground(theme.qcolor(theme.OK_INK))
             dot.setToolTip(_sev_tooltip(SEV_GOOD))
+        # An edited number is a confirmed one: the card for it goes green too.
+        name = self.table.item(r, COL_ITEM)
+        if name is not None:
+            self._sev_map[name.text()] = SEV_GOOD
+        self._render_cards()
 
     # ── the bigger window ────────────────────────────────────────────────
     def _open_big(self):

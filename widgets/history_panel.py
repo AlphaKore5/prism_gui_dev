@@ -132,13 +132,20 @@ class HistoryPanel(Page):
         self._chips = None
         self._chip_counts = None
 
-        bar = C.Toolbar()
+        # One white card holding the search box and the count (the preview's
+        # `.card.search`), not the bare toolbar strip.
+        self._col.setSpacing(11)
+        bar = C.Card()
+        bar_row = QHBoxLayout()
+        bar_row.setSpacing(theme.SPACE_3 - 1)
+        bar.body((14, 8, 9, 8)).addLayout(bar_row)
         self._search = C.SearchField(
             i18n.t("Search a task, or a tool that ran it"))
         self._search.changed.connect(lambda _text: self._render())
-        bar.add(self._search, stretch=1)
+        bar_row.addWidget(self._search, 1)
         self._count = C.label("", role="meta")
-        bar.add(self._count)
+        self._count.setObjectName("monoMeta")
+        bar_row.addWidget(self._count)
         self._col.addWidget(bar)
 
         self._chip_host = QWidget()
@@ -148,6 +155,7 @@ class HistoryPanel(Page):
         self._col.addWidget(self._chip_host)
 
         self._bulk = C.Toolbar()
+        self._bulk.setObjectName("selBar")      # the dark selection strip
         self._bulk_label = C.label("", role="meta")
         self._bulk.add(self._bulk_label, stretch=1)
         self._bulk.add(C.button(i18n.t("Delete selected"), "destructive",
@@ -159,7 +167,7 @@ class HistoryPanel(Page):
         self._list = QWidget()
         self._list_col = QVBoxLayout(self._list)
         self._list_col.setContentsMargins(0, 0, 0, 0)
-        self._list_col.setSpacing(theme.CARD_GAP)
+        self._list_col.setSpacing(0)
         self._col.addWidget(self._list, stretch=1)
         self._render()
 
@@ -238,11 +246,19 @@ class HistoryPanel(Page):
         # In this case skip the fold so each attempt is individually visible.
         has_real_runs = counts["completed"] > 0 or counts["failed"] > 0
         folding = want == "all" and not query and has_real_runs
+        first_group = True
         for bucket, items in groups:
-            self._list_col.addWidget(C.SectionHeader(
+            head = C.SectionHeader(
                 i18n.t(bucket),
-                i18n.t("1 run") if len(items) == 1
-                else i18n.t("{n} runs").format(n=len(items))))
+                (i18n.t("1 run") if len(items) == 1
+                 else i18n.t("{n} runs").format(n=len(items))).upper())
+            head.subtitle.setProperty("mono", True)
+            # The preview's day heading: 17px above (6 for the first, which
+            # already sits 11px under the filters), 10px above its card.
+            head.layout().setContentsMargins(4, 6 if first_group else 17,
+                                             4, 10)
+            first_group = False
+            self._list_col.addWidget(head)
             card = C.Card()
             col = card.body((0, 0, 0, 0), spacing=0)
 

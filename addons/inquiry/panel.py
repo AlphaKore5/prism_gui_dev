@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
 import dashboard_data as DATA
 import i18n
 import theme
+from widgets import icons
 from inquiry_config import TAB_INDEX, TABS  # noqa: F401 — re-exported
 from widgets import controls as C
 from widgets.controls import Card, IconPad, Pill
@@ -110,7 +111,7 @@ class InquiryPanel(QWidget):
         self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self._host = QWidget()
         self._col = QVBoxLayout(self._host)
-        self._col.setContentsMargins(theme.PAGE_PAD, theme.SPACE_5,
+        self._col.setContentsMargins(theme.PAGE_PAD, theme.SPACE_5 + 14,
                                      theme.PAGE_PAD, theme.PAGE_PAD)
         self._col.setSpacing(theme.CARD_GAP)
         self._scroll.setWidget(self._host)
@@ -138,6 +139,7 @@ class InquiryPanel(QWidget):
             return
 
         self._header.add_action(C.button(i18n.t("Edit setup"), "secondary",
+                                         icon_name="sliders",
                                          on_click=self.set_up.emit))
         door = C.button(i18n.t(OPEN_LABEL), "primary",
                         on_click=lambda: self.open_dialog.emit(0))
@@ -146,16 +148,18 @@ class InquiryPanel(QWidget):
             "record the order."))
         self._header.add_action(door)
 
-        self._col.addWidget(self._needs_you_card())
-        month = self._month_card()
-        if month is not None:
-            self._col.addWidget(month)
-        mailboxes = self._mailboxes()
-        if mailboxes is not None:
-            self._col.addWidget(self._head(
-                i18n.t("Mailboxes Prism reads"),
-                i18n.t("Every one of them feeds the same register.")))
-            self._col.addWidget(mailboxes)
+        # Two columns like the preview's .inqdash: what needs you (1.25) beside
+        # this month and the mailboxes (1).
+        cols = QHBoxLayout()
+        cols.setContentsMargins(0, 0, 0, 0)
+        cols.setSpacing(theme.SPACE_4 - 1)
+        cols.addWidget(self._needs_you_card(), 125, Qt.AlignTop)
+        right = self._month_card()
+        if right is not None:
+            cols.addWidget(right, 100, Qt.AlignTop)
+        else:
+            cols.addStretch(100)
+        self._col.addLayout(cols)
         self._col.addStretch(1)
 
     def _clear_actions(self):
@@ -185,10 +189,10 @@ class InquiryPanel(QWidget):
         that opens the working window on exactly that list. A zero is said
         in words, greyed, with no button — "No new orders" is news too."""
         counts = DATA.needs_you(self.cfg, self._rows)
-        card = Card(stripe=True)
-        col = card.body((theme.CARD_PAD, theme.SPACE_4,
-                         theme.CARD_PAD, theme.SPACE_4), theme.SPACE_2)
-        col.addWidget(C.label(i18n.t("What needs you today"), level="SECTION"))
+        card = Card()
+        col = card.body((18, 16, 18, 16), 0)
+        col.addWidget(C.kicker(i18n.t("What needs you today")))
+        col.addSpacing(theme.SPACE_2)
         col.addWidget(C.hairline())
 
         n = counts["to_quote"]
@@ -225,7 +229,7 @@ class InquiryPanel(QWidget):
                    else i18n.t("{n} orders came"),
                    i18n.t("No new orders"), i18n.t("Open the order"), "orders")
 
-        col.addWidget(C.hairline())
+        col.addSpacing(13)
         foot = []
         if counts["sent_today"]:
             n = counts["sent_today"]
@@ -244,27 +248,44 @@ class InquiryPanel(QWidget):
             foot.append(i18n.t("Prism checks the mail when you press Check "
                                "my mail now. Switch on \"Check by itself\" "
                                "in the working window to have it run alone."))
-        col.addWidget(C.label(" ".join(foot), level="META", wrap=True))
+        col.addWidget(C.label(" ".join(foot), level="META", colour=theme.MUTE,
+                              wrap=True))
         return card
 
     def _line(self, col, count: int, text: str, none_text: str,
               button_text: str, tab: str):
+        """One row of the preview's .nline: the figure in mono, the sentence,
+        and (only when there is something to do) the light pill that opens
+        the working window on that tab. A hairline closes every row."""
         row = QHBoxLayout()
-        row.setContentsMargins(0, theme.SPACE_1, 0, theme.SPACE_1)
-        row.setSpacing(theme.SPACE_3)
+        row.setContentsMargins(0, 12, 0, 12)
+        row.setSpacing(12)
+        number = QLabel(str(count))
+        number.setObjectName("needsFigure")
+        number.setFixedWidth(38)
+        number.setStyleSheet(
+            f"font-family: {theme.FONT_MONO_STACK}; font-size: 25px;"
+            f" font-weight: 400; color: {theme.INK if count else theme.FAINT};")
+        row.addWidget(number)
         if count:
             label = C.label(text.replace("{n}", str(count)), level="BODY",
-                            weight=500, wrap=True)
+                            weight=400, colour=theme.INK, wrap=True)
         else:
-            label = C.label(none_text, level="BODY", colour=theme.NEUTRAL[600],
+            label = C.label(none_text, level="BODY", colour=theme.MUTE,
                             wrap=True)
         label.setMinimumHeight(C.MIN_TARGET)
         row.addWidget(label, stretch=1)
         if count:
             index = TAB_INDEX[tab]
-            row.addWidget(C.button(button_text, "tertiary",
-                                   on_click=lambda: self.open_dialog.emit(index)))
+            act = C.button(button_text, "secondary", small=True,
+                           on_click=lambda: self.open_dialog.emit(index))
+            act.setProperty("pill", True)       # the light pill, QSS only
+            # `.btn.sm` is 33px; the sheet's padding and min-height would make it 45.
+            act.setStyleSheet("min-height: 31px; max-height: 31px; padding: 0px 16px;")
+            act.setFixedHeight(33)
+            row.addWidget(act)
         col.addLayout(row)
+        col.addWidget(C.hairline())
 
     def _auto_minutes(self) -> int:
         try:
@@ -275,23 +296,37 @@ class InquiryPanel(QWidget):
 
     # ── this month ────────────────────────────────────────────────────────
     def _month_card(self) -> QWidget | None:
-        """Six plain rows, right-aligned figures. Read straight off
-        register.summarise() — the same arithmetic the month-end summary
-        uses, so the two can never disagree."""
+        """This month's rows and the mailboxes, on one card (the preview's
+        .month). The figures are read straight off register.summarise() — the
+        same arithmetic the month-end summary uses, so the two can never
+        disagree. None when there is neither a month nor a mailbox."""
         month = DATA.month_summary(self.cfg, self._rows)
-        if not month:
+        from inquiry_config import active_accounts_of
+        accounts = active_accounts_of(self.cfg)
+        if not month and not accounts:
             return None
         card = Card()
-        col = card.body((theme.CARD_PAD, theme.SPACE_4,
-                         theme.CARD_PAD, theme.SPACE_4), theme.SPACE_2)
-        col.addWidget(C.label(
-            i18n.t("This month — {month}").replace("{month}", month["month"]),
-            level="SECTION"))
-        col.addWidget(C.hairline())
-        grid = QGridLayout()
-        grid.setContentsMargins(0, theme.SPACE_1, 0, 0)
-        grid.setHorizontalSpacing(theme.SPACE_5)
-        grid.setVerticalSpacing(theme.SPACE_2)
+        col = card.body((18, 16, 18, 16), 0)
+        if month:
+            self._month_rows(col, month)
+        if accounts:
+            if month:
+                col.addSpacing(theme.SPACE_4)
+            col.addWidget(C.kicker(i18n.t("Mailboxes Prism reads")))
+            col.addSpacing(theme.SPACE_2)
+            sub = C.label(i18n.t("Every one of them feeds the same register."),
+                          level="SUPPORT", colour=theme.MUTE, wrap=True)
+            col.addWidget(sub)
+            col.addSpacing(theme.SPACE_1)
+            for account in accounts:
+                col.addWidget(C.hairline())
+                col.addLayout(self._mailbox_row(account))
+        return card
+
+    def _month_rows(self, col, month: dict):
+        col.addWidget(C.kicker(
+            i18n.t("This month — {month}").replace("{month}", month["month"])))
+        col.addSpacing(theme.SPACE_2)
         lines = [
             (i18n.t("Inquiries received"), str(month["received"]), ""),
             (i18n.t("Quotations sent"), str(month["quoted"]),
@@ -308,29 +343,49 @@ class InquiryPanel(QWidget):
                              sorted(reasons.items(), key=lambda kv: -kv[1]))
             lines.append((i18n.t("Lost because"), said, ""))
         for index, (name, figure, money) in enumerate(lines):
-            name_label = C.label(name, level="SUPPORT")
-            name_label.setMinimumHeight(C.MIN_TARGET)
-            grid.addWidget(name_label, index, 0)
-            figure_label = C.label(figure, level="MONO", colour=theme.TEXT)
-            figure_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-            grid.addWidget(figure_label, index, 1)
+            if index:
+                col.addWidget(C.hairline())
+            row = QHBoxLayout()
+            row.setContentsMargins(0, 10, 0, 10)
+            row.setSpacing(theme.SPACE_2)
+            name_label = C.label(name, level="BODY", colour=theme.MUTE)
+            name_label.setMinimumHeight(22)
+            row.addWidget(name_label, stretch=1)
             if money:
-                money_label = C.label(money, level="MONO", colour=theme.TEXT)
-                money_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-                grid.addWidget(money_label, index, 2)
-        grid.setColumnStretch(0, 1)
-        col.addLayout(grid)
-        return card
+                money_label = C.label(money, level="MONO", colour=theme.MUTE)
+                row.addWidget(money_label)
+            figure_label = C.label(figure, level="BODY", colour=theme.INK)
+            figure_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            row.addWidget(figure_label)
+            col.addLayout(row)
 
-    def _mailboxes(self) -> QWidget | None:
-        from inquiry_config import active_accounts_of
-        accounts = active_accounts_of(self.cfg)
-        if not accounts:
-            return None
-        grid = C.CardGrid(min_col_width=300)
-        for account in accounts:
-            grid.add(self._mailbox_card(account))
-        return grid
+    def _mailbox_row(self, account: dict) -> QHBoxLayout:
+        """One line of the preview's .inc list: glyph, address, READY pill.
+        `is_complete` is the setup dialog's own test for a mailbox Prism can
+        actually sign in to — a half-entered one is exactly the reason a first
+        check finds nothing. The server line is the app's own, kept."""
+        from inquiry_config import is_complete
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 9, 0, 9)
+        row.setSpacing(12)
+        glyph = QLabel()
+        glyph.setPixmap(icons.pixmap("inbox", 16, theme.MUTE))
+        row.addWidget(glyph, 0, Qt.AlignVCenter)
+        text = QVBoxLayout()
+        text.setSpacing(1)
+        text.addWidget(C.label(account.get("address", ""), level="BODY",
+                               colour=theme.INK, weight=500))
+        host = (account.get("host") or "").strip()
+        detail = f"{host}:{account.get('port') or 993}" if host else ""
+        folder = (account.get("folder") or "INBOX").strip()
+        text.addWidget(C.label(" · ".join(p for p in (detail, folder) if p),
+                               level="MONO", colour=theme.MUTE))
+        row.addLayout(text, stretch=1)
+        ready = bool(is_complete(account))
+        row.addWidget(Pill(i18n.t("Ready") if ready
+                           else i18n.t("Needs a password"),
+                           "st_ok" if ready else "st_warn"), 0, Qt.AlignVCenter)
+        return row
 
     # ── not set up yet ────────────────────────────────────────────────────
     def _not_set_up(self) -> QWidget:
@@ -417,13 +472,19 @@ class InquiryPanel(QWidget):
         return out
 
     @staticmethod
-    def _head(title: str, subtitle: str = "") -> C.SectionHeader:
-        """A SectionHeader whose subtitle WRAPS — the shared one builds its
-        subtitle as an unbreakable line, which pushed the page wider than the
+    def _head(title: str, subtitle: str = "") -> QWidget:
+        """A mono kicker over a muted line, like the preview's card labels. The
+        subtitle WRAPS: an unbreakable line pushed the page wider than the
         viewport and silently clipped the right-hand column."""
-        header = C.SectionHeader(title, subtitle)
-        header.subtitle.setWordWrap(True)
-        return header
+        host = QWidget()
+        col = QVBoxLayout(host)
+        col.setContentsMargins(4, theme.SPACE_2, 4, 0)
+        col.setSpacing(theme.SPACE_1)
+        col.addWidget(C.kicker(title))
+        if subtitle:
+            col.addWidget(C.label(subtitle, level="SUPPORT", colour=theme.MUTE,
+                                  wrap=True))
+        return host
 
     def _mailbox_card(self, account: dict) -> Card:
         """One configured mailbox. `_complete` is the setup dialog's own test
@@ -441,7 +502,7 @@ class InquiryPanel(QWidget):
         ready = bool(is_complete(account))
         head.addWidget(Pill(i18n.t("Ready") if ready
                             else i18n.t("Needs a password"),
-                            "ok" if ready else "warn"))
+                            "st_ok" if ready else "st_warn"))
         col.addLayout(head)
         col.addSpacing(theme.SPACE_2)
         host = (account.get("host") or "").strip()

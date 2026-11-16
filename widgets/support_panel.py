@@ -69,6 +69,7 @@ import app_meta
 import i18n
 import support_kb as KB
 import theme
+from addons import registry
 from widgets import controls as C
 from widgets import icons
 from widgets.markdown import render_markdown
@@ -1534,6 +1535,8 @@ class SupportPanel(QWidget):
             elif any(w in context_text for w in ("email", "inquiry", "smtp")):
                 action = "email"
 
+        if action and registry.is_off(action.lower()):
+            action = ""     # a switched-off add-on gets no "take me there"
         if action:
             clean_act = action.lower().replace("settings:", "")
             action_map = {

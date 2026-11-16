@@ -44,12 +44,14 @@ import platform
 import sys
 from datetime import datetime
 
-from PySide6.QtCore import QSize, QTimer, QUrl, Qt, Signal
-from PySide6.QtGui import QDesktopServices, QIcon, QPixmap
+from PySide6.QtCore import QRectF, QSize, QTimer, QUrl, Qt, Signal
+from PySide6.QtGui import (
+    QColor, QDesktopServices, QIcon, QPainter, QPen, QPixmap,
+)
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QFileDialog, QFormLayout,
     QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton, QScrollArea,
-    QSizePolicy, QVBoxLayout, QWidget,
+    QFrame, QSizePolicy, QVBoxLayout, QWidget,
 )
 
 import app_meta
@@ -63,7 +65,7 @@ import updater
 import workspace
 from widgets import controls as C
 from widgets.agents_picker import AgentsPicker
-from widgets.controls import Card, Pill
+from widgets.controls import Card as _BaseCard, Pill as _BasePill
 
 # Lifted out of the rail (see widgets/sidebar.SECONDARY). These are screens,
 # not settings, so they are listed here as doors rather than restated as
@@ -71,15 +73,13 @@ from widgets.controls import Card, Pill
 # spend a permanent row on each.
 MORE_LINKS = [
     ("runs", "History", "Every past run, re-rendered from its record"),
-    ("catalog", "AI tools", "Every tool Prism can drive, and whether you're "
-     "signed in to it"),
     ("guide", "How to use Prism", "What Prism can do, and what to type"),
     ("support", "Lumi", "Prism help, answers and a route to our team"),
 ]
 
 # The glyph each door wears, kept out of MORE_LINKS so that table stays the
 # three-column shape tests/test_support.py reads.
-MORE_ICONS = {"runs": "clock", "catalog": "grid", "guide": "book",
+MORE_ICONS = {"runs": "clock", "guide": "book",
               "support": "help"}
 
 # (key, label, group, blurb). The group is the kicker the section sits under
@@ -163,6 +163,85 @@ STATUS_COPY = {
 }
 
 
+class Card(_BaseCard):
+    """A Settings panel. Settings sits inside one white shell card (the
+    preview's .sbody), so the panels in it are flat tinted surfaces, not a
+    second stack of lifted cards: "soft" is the .kv / .inc list surface,
+    "white" the bordered .who4 / form group, "danger" the red group."""
+
+    _KINDS = {
+        "soft": ("#F6F5F2", theme.HAIRLINE),
+        "white": ("#FFFFFF", "#D8D7D2"),
+        "danger": (theme.BRAND_ERR_BG, "#E9C6C3"),
+    }
+
+    def __init__(self, kind: str = "white", parent=None):
+        super().__init__(radius=16, parent=parent)
+        self._kind = kind
+
+    def paintEvent(self, _event):
+        fill, line = self._KINDS.get(self._kind, self._KINDS["white"])
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setPen(QPen(QColor(line), 1))
+        painter.setBrush(QColor(fill))
+        painter.drawRoundedRect(QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5),
+                                16, 16)
+        painter.end()
+
+
+_PILL_TONES = {"ok": "st_ok", "err": "st_err", "warn": "st_warn",
+               "neutral": "st_neutral", "quiet": "st_neutral",
+               "accent": "st_ok", "info": "st_neutral"}
+
+
+def Pill(text: str = "", tone: str = "neutral"):
+    """A Settings status word: mono caps with a square before it (.st)."""
+    return _BasePill(text, _PILL_TONES.get(tone, tone))
+
+
+class _SettingsNav(QFrame):
+    """The section list's soft panel; paints the red tick beside the open row."""
+
+    def paintEvent(self, _event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setPen(QPen(QColor(theme.HAIRLINE), 1))
+        painter.setBrush(QColor("#F6F5F2"))
+        painter.drawRoundedRect(QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5),
+                                16, 16)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor(theme.BRAND_RED))
+        for btn in self.findChildren(QPushButton, "secBtn"):
+            if btn.property("cur") and btn.isVisible():
+                y = btn.mapTo(self, btn.rect().center()).y()
+                painter.drawRect(btn.mapTo(self, btn.rect().topLeft()).x() - 5,
+                                 y - 3, 6, 6)
+        painter.end()
+
+
+class _ToastPill(QLabel):
+    """The toast: an ink pill, white words, a tone square before them (.toast)."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._tone = QColor("#3FB46F")
+
+    def set_tone(self, colour: str):
+        self._tone = QColor(colour)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor(theme.INK))
+        painter.drawRoundedRect(QRectF(self.rect()), self.height() / 2,
+                                self.height() / 2)
+        painter.fillRect(16, (self.height() - 6) // 2, 6, 6, self._tone)
+        painter.end()
+        super().paintEvent(event)
+
+
 # Feature keys arrive from the licence server in lower case. str.title() turns
 # "boq" into "Boq" and "bom" into "Bom" — and BOQ is the word this product is
 # sold on. Getting a customer's own vocabulary wrong, on the screen that proves
@@ -206,7 +285,7 @@ class SettingsPanel(QDialog):
 
     # The modal is deliberately compact: the category list is a navigation
     # aid, not a second page competing with the details beside it.
-    NAV_W = 210
+    NAV_W = 220
 
     def __init__(self, cfg: dict, parent=None):
         super().__init__(parent)
@@ -232,20 +311,30 @@ class SettingsPanel(QDialog):
 
         self._header = C.PageHeader(
             i18n.t("Settings"), i18n.t("Manage your Prism experience"))
-        self._header.add_action(C.icon_button(
-            "x", i18n.t("Close settings"), self.reject))
+        close = C.icon_button("x", i18n.t("Close settings"), self.reject)
+        close.setObjectName("closeBtn")          # 38px ringed square (style only)
+        close.setFixedSize(38, 38)
+        self._header.add_action(close)
         root.addWidget(self._header)
 
+        # One white shell holds the section list and the page, as in the
+        # preview's .sbody; the list is a soft panel inside it.
+        shell = C.Card()
+        shell_col = shell.body((12, 12, 12, 12))
         body = QHBoxLayout()
-        body.setContentsMargins(theme.SPACE_4, theme.SPACE_3,
-                                theme.SPACE_4, theme.SPACE_4)
-        body.setSpacing(theme.SPACE_3)
+        body.setContentsMargins(0, 0, 0, 0)
+        body.setSpacing(theme.SPACE_4)
+        shell_col.addLayout(body)
+        shell_wrap = QHBoxLayout()
+        shell_wrap.setContentsMargins(14, 8, 14, 14)
+        shell_wrap.addWidget(shell)
 
-        self._nav_host = C.Card(radius=16)
+        self._nav_host = _SettingsNav()
+        self._nav_host.setObjectName("settingsNav")
         self._nav_host.setFixedWidth(self.NAV_W)
-        self._nav = self._nav_host.body((theme.SPACE_3, theme.SPACE_4,
-                                         theme.SPACE_3, theme.SPACE_4),
-                                        spacing=2)
+        self._nav = QVBoxLayout(self._nav_host)
+        self._nav.setContentsMargins(11, 11, 10, 11)
+        self._nav.setSpacing(2)
         self._settings_search = C.SearchField(i18n.t("Search settings"))
         self._settings_search.setAccessibleName(i18n.t("Search settings"))
         self._settings_search.changed.connect(self._settings_search_changed)
@@ -266,10 +355,10 @@ class SettingsPanel(QDialog):
         outer.setSpacing(0)
         
         self._container = QWidget()
-        self._container.setMaximumWidth(740)
+        self._container.setMaximumWidth(540)
         
         self._col = QVBoxLayout(self._container)
-        self._col.setContentsMargins(0, theme.SPACE_3, 0, 56)
+        self._col.setContentsMargins(6, 6, 12, 28)
         self._col.setSpacing(theme.CARD_GAP)
         
         outer.addWidget(self._container)
@@ -278,7 +367,7 @@ class SettingsPanel(QDialog):
         self._scroll.setWidget(self._page)
         body.addWidget(self._scroll, stretch=1)
 
-        root.addLayout(body, stretch=1)
+        root.addLayout(shell_wrap, stretch=1)
         self.refresh()
 
     def show_section(self, key: str):
@@ -378,7 +467,7 @@ class SettingsPanel(QDialog):
             btn = QPushButton(_amp(i18n.t(label)))
             btn.setObjectName("secBtn")
             btn.setCursor(Qt.PointingHandCursor)
-            btn.setMinimumHeight(C.MIN_TARGET)
+            btn.setFixedHeight(34)
             btn.setProperty("cur", key == self._section)
             btn.clicked.connect(lambda _=False, k=key: self.show_section(k))
             self._nav.addWidget(btn)
@@ -390,9 +479,9 @@ class SettingsPanel(QDialog):
         self._nav.addSpacing(theme.SPACE_3)
         self._nav.addWidget(C.label(
             i18n.t("Prism {version}").format(version=app_meta.VERSION),
-            level="META"))
+            level="MONO", colour=theme.TEXT))
         support = C.label(app_meta.SUPPORT_EMAIL, level="META",
-                          colour=theme.ACCENT_RAMP[700])
+                          colour=theme.NEUTRAL[600])
         support.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self._nav.addWidget(support)
         self._nav.addSpacing(theme.SPACE_2)
@@ -450,9 +539,9 @@ class SettingsPanel(QDialog):
     def _facts(self, pairs) -> Card:
         """A card of label / value rows split by hairlines. `value` is either
         a string or an already-built widget."""
-        card = Card()
-        col = card.body((theme.CARD_PAD, theme.SPACE_2,
-                         theme.CARD_PAD, theme.SPACE_2), spacing=0)
+        card = Card("soft")
+        col = card.body((theme.CARD_PAD - 2, theme.SPACE_1,
+                         theme.CARD_PAD - 2, theme.SPACE_1), spacing=0)
         for i, (name, value) in enumerate(pairs):
             if i:
                 col.addWidget(C.hairline())
@@ -473,7 +562,7 @@ class SettingsPanel(QDialog):
                 # to wrap inside the card instead of running off its right
                 # edge, where it was being clipped mid-word.
                 text = C.label(str(value), level="SUPPORT",
-                               colour=theme.TEXT, weight=500, wrap=True)
+                               colour=theme.TEXT, weight=400, wrap=True)
                 text.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
                 line.addWidget(text, stretch=1)
             col.addLayout(line)
@@ -492,25 +581,22 @@ class SettingsPanel(QDialog):
         """
         header = C.SectionHeader(title, subtitle)
         header.subtitle.setWordWrap(True)
+        header.layout().setContentsMargins(0, 8, 0, 0)
+        C.track(header.title, -0.03)
         return header
 
     def _note(self, text: str, tone: str = "", kicker: str = "") -> Card:
         """A card carrying one paragraph — the explanations that are the
         difference between a fact and an answer."""
-        card = Card()
-        if tone == "info":
-            card.setStyleSheet(
-                f"#card {{ background: {theme.INFO_BG};"
-                f" border-radius: {theme.R_CARD}px;"
-                f" border: 1px solid {theme.ACCENT_RAMP[200]}; }}")
-        col = card.body((theme.CARD_PAD, theme.SPACE_4,
+        card = Card("soft" if tone == "info" else "white")
+        col = card.body((theme.CARD_PAD - 2, theme.SPACE_3 + 2,
                          theme.CARD_PAD, theme.SPACE_4), spacing=0)
         if kicker:
             col.addWidget(C.kicker(kicker))
             col.addSpacing(theme.SPACE_2)
         col.addWidget(C.label(
             text, level="SUPPORT",
-            colour=theme.INFO_INK if tone == "info" else theme.NEUTRAL[700],
+            colour=theme.INK if tone != "info" else theme.NEUTRAL[700],
             wrap=True))
         return card
 
@@ -588,24 +674,21 @@ class SettingsPanel(QDialog):
         warning, red for a failure. Lives on the dialog, so refresh() (which
         rebuilds the page) does not take it away."""
         if getattr(self, "_toast", None) is None:
-            self._toast = QLabel(self)
+            self._toast = _ToastPill(self)
             self._toast.setAlignment(Qt.AlignCenter)
             self._toast.setWordWrap(True)
             self._toast.setAttribute(Qt.WA_TransparentForMouseEvents, True)
             self._toast_timer = QTimer(self)
             self._toast_timer.setSingleShot(True)
             self._toast_timer.timeout.connect(self._toast.hide)
-        bg, ink, edge = {
-            "ok": (theme.OK_BG, theme.OK_INK, theme.OK),
-            "warn": (theme.WARN_BG, theme.WARN_INK, theme.WARN),
-            "err": (theme.ERR_BG, theme.ERR_INK, theme.ERR),
-        }.get(tone, (theme.OK_BG, theme.OK_INK, theme.OK))
-        mark = {"ok": "✓", "warn": "!", "err": "✕"}.get(tone, "✓")
+        square = {"ok": "#3FB46F", "warn": "#E0A82E",
+                  "err": "#E5484D"}.get(tone, "#3FB46F")
+        self._toast.set_tone(square)
         self._toast.setStyleSheet(
-            f"background: #ffffff; color: {ink}; border: 1.5px solid {edge};"
-            " border-radius: 12px; padding: 10px 18px; font-size: 13.5px;"
-            " font-weight: 600;")
-        self._toast.setText(f"{mark}  {text}")
+            "background: transparent; color: #ffffff;"
+            " padding: 10px 20px 10px 36px;"
+            " font-size: 13px; font-weight: 400;")
+        self._toast.setText(text)
         self._place_toast()
         self._toast.show()
         self._toast.raise_()
@@ -627,16 +710,13 @@ class SettingsPanel(QDialog):
     def _danger(self, title: str, blurb: str, buttons) -> Card:
         """The quarantine. Everything irreversible lives in one red-bordered
         card at the foot of its page, never inline beside a Save."""
-        card = Card()
-        card.setStyleSheet(
-            f"#card {{ background: {theme.ERR_BG};"
-            f" border-radius: {theme.R_CARD}px;"
-            f" border: 1px solid {theme.ERR_LINE}; }}")
+        card = Card("danger")
         col = card.body((theme.CARD_PAD, theme.CARD_PAD,
                          theme.CARD_PAD, theme.CARD_PAD), theme.SPACE_2)
-        col.addWidget(C.label(title, level="CARD_TITLE", colour=theme.ERR_INK))
+        col.addWidget(C.label(title, level="CARD_TITLE",
+                              colour=theme.BRAND_ERR))
         col.addWidget(C.label(blurb, level="SUPPORT",
-                              colour=theme.ERR_INK, wrap=True))
+                              colour=theme.BRAND_ERR, wrap=True))
         col.addSpacing(theme.SPACE_1)
         col.addWidget(self._buttons(buttons))
         return card
@@ -748,7 +828,7 @@ class SettingsPanel(QDialog):
         return out
 
     def _features_card(self, features: list[tuple[str, str, str, bool]]) -> Card:
-        card = Card()
+        card = Card("soft")
         col = card.body((theme.CARD_PAD, theme.SPACE_2,
                          theme.CARD_PAD, theme.SPACE_2), spacing=0)
         for i, (key, name, blurb, have) in enumerate(features):
@@ -1092,7 +1172,7 @@ class SettingsPanel(QDialog):
 
     def _members_card(self, members: list[dict]) -> Card:
         import roles as R
-        card = Card()
+        card = Card("soft")
         col = card.body((theme.CARD_PAD, theme.SPACE_2,
                          theme.CARD_PAD, theme.SPACE_2), spacing=0)
         for i, member in enumerate(members):
@@ -1214,8 +1294,6 @@ class SettingsPanel(QDialog):
             col.addWidget(self._sites_card(sites))
 
         col.addWidget(self._buttons([
-            C.button(i18n.t("Open the AI tools screen"), "secondary",
-                     on_click=lambda: self.navigate.emit("catalog")),
             C.button(i18n.t("Open login tabs"), "secondary",
                      on_click=self.login_tabs.emit)]))
 
@@ -1388,7 +1466,7 @@ class SettingsPanel(QDialog):
         self._after_save(i18n.t("Saved."))
 
     def _agents_list_card(self, picked, categories, premium) -> Card:
-        card = Card()
+        card = Card("soft")
         col = card.body((theme.CARD_PAD, theme.SPACE_2,
                          theme.CARD_PAD, theme.SPACE_2), spacing=0)
         for i, (stage, tool) in enumerate(picked):
@@ -1409,8 +1487,8 @@ class SettingsPanel(QDialog):
                 stack.addWidget(C.label(i18n.t(meta["desc"]), level="META", wrap=True))
             row.addLayout(stack, stretch=1)
             row.addWidget(Pill(i18n.t("Paid") if paid else i18n.t("Free"),
-                               "accent" if paid else "quiet")
-                          if tool else Pill(i18n.t("Skipped"), "quiet"),
+                               "tag")
+                          if tool else Pill(i18n.t("Skipped"), "tag"),
                           alignment=Qt.AlignTop)
             col.addLayout(row)
         return card
@@ -1427,8 +1505,8 @@ class SettingsPanel(QDialog):
         head.addWidget(C.label(tool or i18n.t("Not picked"),
                                level="CARD_TITLE"), stretch=1)
         head.addWidget(Pill(i18n.t("Paid") if paid else i18n.t("Free"),
-                            "accent" if paid else "quiet")
-                       if tool else Pill(i18n.t("Skipped"), "quiet"))
+                            "tag")
+                       if tool else Pill(i18n.t("Skipped"), "tag"))
         col.addLayout(head)
         col.addSpacing(theme.SPACE_2)
         col.addWidget(C.kicker(i18n.t(meta.get("label", stage.title()))))
@@ -1665,7 +1743,7 @@ class SettingsPanel(QDialog):
         return CB.resolved_agents(dict(self.cfg.get("agents") or {}))
 
     def _sites_card(self, sites: list[tuple[str, str]]) -> Card:
-        card = Card()
+        card = Card("soft")
         col = card.body((theme.CARD_PAD, theme.SPACE_2,
                          theme.CARD_PAD, theme.SPACE_2), spacing=0)
         for i, (tool, url) in enumerate(sites):
@@ -1752,7 +1830,7 @@ class SettingsPanel(QDialog):
         w_col.addWidget(
             C.label(
                 i18n.t("Choose one of the Prism wallpapers, upload your own image, or keep the clean default."),
-                level="META",
+                level="META", wrap=True,
             )
         )
         head_w.addLayout(w_col, stretch=1)
@@ -1790,15 +1868,15 @@ class SettingsPanel(QDialog):
         )
 
         # ── thumbnail grid ──
-        # 3 columns: each tile is 190x116 px with a label underneath.
-        THUMB_W, THUMB_H = 190, 116
+        # 3 columns: each tile is 146x90 px with a label underneath.
+        THUMB_W, THUMB_H = 146, 90
         RADIUS = 10
         COLS = 3
 
         def _tile_border(active: bool) -> str:
             if active:
-                return f"3px solid {theme.ACCENT}"
-            return "2px solid rgba(0,0,0,0.12)"
+                return f"2px solid {theme.INK}"
+            return "1.5px solid #D8D7D2"
 
         grid_widget = QWidget()
         grid_widget.setStyleSheet("background: transparent;")
@@ -1844,8 +1922,8 @@ class SettingsPanel(QDialog):
                     btn.setStyleSheet(
                         f"QPushButton {{ border: {border}; border-radius: {RADIUS}px;"
                         " background: qlineargradient(x1:0,y1:0,x2:1,y2:1,"
-                        "stop:0 #e8eaf0, stop:0.5 #f0f2f7, stop:1 #dde1ea);"
-                        " color: #555; font-size: 13px; font-weight: 600; }"
+                        "stop:0 #f6f5f2, stop:1 #eeedea);"
+                        " color: #2a2a28; font-size: 13px; font-weight: 500; }"
                     )                                   # plain string: ONE brace
                     btn.setText("Default\n(Light)")
                 else:
@@ -1872,7 +1950,7 @@ class SettingsPanel(QDialog):
                 if is_active:
                     ck = QLabel("✓", btn)
                     ck.setStyleSheet(
-                        f"background: {theme.ACCENT}; color: white;"
+                        f"background: {theme.INK}; color: white;"
                         " font-size: 13px; font-weight: bold;"
                         " border-radius: 10px; padding: 2px 5px; border: none;"
                     )
@@ -1955,9 +2033,8 @@ class SettingsPanel(QDialog):
         col.addWidget(self._facts([
             (i18n.t("Your work is written to"), self._path(root or "—")),
             (i18n.t("This folder is"),
-             Pill(i18n.t("Shared with the team") if shared
-                  else i18n.t("On this computer only"),
-                  "accent" if shared else "quiet")),
+             Pill(i18n.t("Shared with the team"), "accent") if shared
+             else i18n.t("On this computer only")),
             (i18n.t("Filed under"), self._mono(me.get("mid") or "—")),
             (i18n.t("Prism's own folder"), self._path(prism_dir or "—")),
             (i18n.t("Generated files (Reel, images, documents)"),
@@ -2082,16 +2159,12 @@ class SettingsPanel(QDialog):
         return None
 
     def _action_card(self, kicker: str, text: str, download: bool) -> Card:
-        card = Card()
-        card.setStyleSheet(
-            f"#card {{ background: {theme.INFO_BG};"
-            f" border-radius: {theme.R_CARD}px;"
-            f" border: 1px solid {theme.ACCENT_RAMP[200]}; }}")
+        card = Card("soft")
         col = card.body((theme.CARD_PAD, theme.SPACE_4,
                          theme.CARD_PAD, theme.SPACE_4), spacing=0)
         col.addWidget(C.kicker(kicker))
         col.addSpacing(theme.SPACE_2)
-        col.addWidget(C.label(text, level="SUPPORT", colour=theme.INFO_INK,
+        col.addWidget(C.label(text, level="SUPPORT", colour=theme.INK,
                               wrap=True))
         if download:
             col.addSpacing(theme.SPACE_3)
@@ -2235,7 +2308,8 @@ class SettingsPanel(QDialog):
 
     @staticmethod
     def _mono(text: str) -> QLabel:
-        label = C.label(str(text), level="MONO")
+        label = C.label(str(text), level="MONO", colour=theme.NEUTRAL[600],
+                        weight=400)
         label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         return label
 
@@ -2245,6 +2319,7 @@ class SettingsPanel(QDialog):
         and a shared-drive prefix is the same on every row."""
         text = str(text)
         label = C.label(text if len(text) <= 46 else "…" + text[-45:],
-                        level="MONO", tooltip=text)
+                        level="MONO", tooltip=text,
+                        colour=theme.NEUTRAL[600], weight=400)
         label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         return label

@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox, QFileDialog, QFormLayout, QGridLayout, QHBoxLayout,
     QHeaderView, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMessageBox,
     QPushButton, QSizePolicy, QSpinBox, QStyle, QStyledItemDelegate,
-    QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
+    QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget, QFrame,
 )
 
 import core_bridge as CB
@@ -31,6 +31,7 @@ import email_config
 import i18n
 from widgets.loader import Loader, busy_button
 from addons.email import sent_log
+from addons.email.panel import linkify, pillify
 import theme
 from dialogs.base import PrismDialog
 from widgets import controls as C
@@ -85,8 +86,8 @@ class EmailSetupDialog(PrismDialog):
             "myaccount.google.com/apppasswords")
         note.setWordWrap(True)
         note.setStyleSheet(
-            f"color: {theme.INFO_INK}; background: {theme.INFO_BG};"
-            f" border-radius: {theme.R_CONTROL}px;"
+            f"color: {theme.MUTE}; background: #F6F5F2;"
+            f" border-radius: 12px;"
             f" padding: {theme.SPACE_2}px {theme.SPACE_3}px; font-size: 13px;")
         root.addWidget(note)
 
@@ -107,13 +108,13 @@ class EmailSetupDialog(PrismDialog):
             "sales@, accounts@, your own — you pick which one a message goes "
             "out from when you send it"))
         self.add_sender_btn.clicked.connect(self._add_sender)
-        list_row.addWidget(self.add_sender_btn)
+        list_row.addWidget(pillify(self.add_sender_btn))
         self.remove_sender_btn = QPushButton(i18n.t("Remove this address"))
         self.remove_sender_btn.clicked.connect(self._remove_sender)
-        list_row.addWidget(self.remove_sender_btn)
+        list_row.addWidget(pillify(self.remove_sender_btn))
         self.default_btn = QPushButton(i18n.t("Send from this one by default"))
         self.default_btn.clicked.connect(self._make_default)
-        list_row.addWidget(self.default_btn)
+        list_row.addWidget(pillify(self.default_btn))
         list_row.addStretch(1)
         root.addLayout(list_row)
 
@@ -141,6 +142,10 @@ class EmailSetupDialog(PrismDialog):
         # A real minimum makes the dialog grow to fit instead.
         for edit in (self.addr_edit, self.pass_edit, self.host_edit, self.port_edit):
             edit.setMinimumHeight(theme.BTN_HEIGHT_MD)
+        for edit in (self.addr_edit, self.pass_edit, self.host_edit, self.port_edit):
+            lbl = form.labelForField(edit)      # the preview's quiet 400-weight field label
+            if lbl is not None:
+                lbl.setStyleSheet(f"font-weight: 400; color: {theme.INK};")
         root.addLayout(form)
 
         # The placeholder alone reads as "empty" to anyone who has not
@@ -413,6 +418,8 @@ class EmailSetupDialog(PrismDialog):
             self.status.setText(f"✗  {error}")
         else:
             self.status.setText("✓  Signed in — this account can send.")
+        self.status.setStyleSheet(
+            f"color: {theme.BRAND_ERR if error else theme.BRAND_OK}; font-weight: 500;")
 
     def _save(self):
         """Check the account on screen the way this dialog always has, then
@@ -508,9 +515,9 @@ class EmailComposeDialog(PrismDialog):
         self._subject = self._body = ""
         self._held_back: list[dict] = []     # kept in the list for next time
 
-        self.header.add_action(C.button(
+        self.header.add_action(pillify(C.button(
             i18n.t("Change account"), "secondary", icon_name="key",
-            small=True, on_click=self._change_account))
+            small=True, on_click=self._change_account)))
 
         root = self.body
         root.setSpacing(theme.ROW_GAP)
@@ -540,9 +547,9 @@ class EmailComposeDialog(PrismDialog):
             "rajesh@acme.in — for more than one, separate with commas"))
         self.to_edit.textChanged.connect(self._sync)
         to_row.addWidget(self.to_edit, stretch=1)
-        self.list_btn = C.button(i18n.t("Add a list (CSV)"), "secondary",
-                                 icon_name="list", small=True,
-                                 on_click=self._add_list)
+        self.list_btn = pillify(C.button(i18n.t("Add a list (CSV)"), "secondary",
+                                         icon_name="list", small=True,
+                                         on_click=self._add_list))
         to_row.addWidget(self.list_btn)
         form.addWidget(self._field_label(i18n.t("To")), 1, 0)
         form.addLayout(to_row, 1, 1)
@@ -555,10 +562,11 @@ class EmailComposeDialog(PrismDialog):
         who_row.setSpacing(theme.SPACE_3)
         self.who_label = C.label("", level="SUPPORT", wrap=True)
         who_row.addWidget(self.who_label, stretch=1)
-        self.search_btn = C.button(i18n.t("Don't know the address? Search the web"),
-                                   "tertiary", icon_name="search", small=True,
-                                   on_click=self._discover_recipient)
-        who_row.addWidget(self.search_btn, alignment=Qt.AlignTop)
+        self.search_btn = linkify(C.button(
+            i18n.t("Don't know the address? Search the web"),
+            "tertiary", icon_name="search", small=True,
+            on_click=self._discover_recipient))
+        who_row.addWidget(self.search_btn, alignment=Qt.AlignTop | Qt.AlignRight)
         form.addLayout(who_row, 2, 1)
 
         self.list_box = QWidget()
@@ -594,11 +602,11 @@ class EmailComposeDialog(PrismDialog):
         list_btns = QHBoxLayout()
         list_btns.setContentsMargins(0, 0, 0, 0)
         list_btns.setSpacing(theme.SPACE_2)
-        self.remove_btn = C.button(i18n.t("Remove selected"), "secondary",
-                                   small=True, on_click=self._remove_selected)
+        self.remove_btn = pillify(C.button(i18n.t("Remove selected"), "secondary",
+                                           small=True, on_click=self._remove_selected))
         list_btns.addWidget(self.remove_btn)
-        self.clear_list_btn = C.button(i18n.t("Clear the list"), "tertiary",
-                                       small=True, on_click=self._clear_list)
+        self.clear_list_btn = linkify(C.button(i18n.t("Clear the list"), "tertiary",
+                                               small=True, on_click=self._clear_list), 13)
         list_btns.addWidget(self.clear_list_btn)
         list_btns.addStretch(1)
         list_col.addLayout(list_btns)
@@ -627,15 +635,15 @@ class EmailComposeDialog(PrismDialog):
         files_row = QHBoxLayout()
         files_row.setContentsMargins(0, 0, 0, 0)
         files_row.setSpacing(theme.SPACE_2)
-        self.attach_btn = C.button(i18n.t("Attach a file"), "secondary",
-                                   icon_name="paperclip", small=True,
-                                   on_click=self._attach)
+        self.attach_btn = pillify(C.button(i18n.t("Attach a file"), "secondary",
+                                           icon_name="paperclip", small=True,
+                                           on_click=self._attach))
         files_row.addWidget(self.attach_btn)
         self.files_label = C.label(i18n.t("No files attached."), level="SUPPORT",
                                    wrap=True)
         files_row.addWidget(self.files_label, stretch=1)
-        self.clear_files_btn = C.button(i18n.t("Remove files"), "tertiary",
-                                        small=True, on_click=self._clear_files)
+        self.clear_files_btn = linkify(C.button(i18n.t("Remove files"), "tertiary",
+                                                small=True, on_click=self._clear_files), 13)
         self.clear_files_btn.setVisible(False)
         files_row.addWidget(self.clear_files_btn)
         form.addWidget(self._field_label(i18n.t("Files")), 6, 0)
@@ -656,18 +664,25 @@ class EmailComposeDialog(PrismDialog):
         # room. It opens on its own when a saved setting is not the default,
         # because a cap somebody set last week should not be invisible.
         self._policy = email_config.send_policy(cfg)
-        pace = C.Card()
-        pace_col = pace.body(margins=(theme.SPACE_4, theme.SPACE_3,
-                                      theme.SPACE_4, theme.SPACE_3),
-                             spacing=theme.SPACE_2)
+        pace = QFrame()                     # the preview's soft `.stripe`
+        pace.setObjectName("paceStripe")
+        pace.setStyleSheet("#paceStripe { background: #F6F5F2; border: none;"
+                           " border-radius: 12px; }")
+        pace_col = QVBoxLayout(pace)
+        pace_col.setContentsMargins(theme.SPACE_4, theme.SPACE_3,
+                                    theme.SPACE_4, theme.SPACE_3)
+        pace_col.setSpacing(theme.SPACE_2)
         head = QHBoxLayout()
         head.setContentsMargins(0, 0, 0, 0)
         head.setSpacing(theme.SPACE_3)
-        head.addWidget(C.label(i18n.t("Pace and limits"), level="CARD_TITLE"))
-        self.pace_summary = C.label("", level="SUPPORT", wrap=True)
+        head.addWidget(C.label(i18n.t("Pace and limits"), level="BODY", weight=500,
+                               colour=theme.INK))
+        self.pace_summary = C.label("", level="MONO", wrap=True, colour=theme.MUTE)
+        self.pace_summary.setStyleSheet(self.pace_summary.styleSheet()
+                                        + " font-size: 11px; font-weight: 400;")
         head.addWidget(self.pace_summary, stretch=1)
-        self.pace_toggle = C.button(i18n.t("Change"), "tertiary", small=True,
-                                    on_click=self._toggle_pace)
+        self.pace_toggle = linkify(C.button(i18n.t("Change"), "tertiary", small=True,
+                                            on_click=self._toggle_pace), 13)
         head.addWidget(self.pace_toggle, alignment=Qt.AlignTop)
         pace_col.addLayout(head)
 
@@ -784,13 +799,16 @@ class EmailComposeDialog(PrismDialog):
         root.addWidget(pace)
 
         # ── optional: let Prism write it ──────────────────────────────────
-        card = C.Card()
-        card_col = card.body(margins=(theme.SPACE_4, theme.SPACE_3,
-                                      theme.SPACE_4, theme.SPACE_3),
-                             spacing=theme.SPACE_2)
-        card_col.addWidget(C.label(
-            i18n.t("Want Prism to write the message for you? (optional)"),
-            level="CARD_TITLE"))
+        card = QFrame()                     # the preview's hairline `.group`
+        card.setObjectName("draftGroup")
+        card.setStyleSheet("#draftGroup { background: #ffffff; border: 1px solid"
+                           " #E6E5E1; border-radius: 14px; }")
+        card_col = QVBoxLayout(card)
+        card_col.setContentsMargins(theme.SPACE_4, theme.SPACE_3,
+                                    theme.SPACE_4, theme.SPACE_3)
+        card_col.setSpacing(theme.SPACE_2)
+        card_col.addWidget(C.kicker(
+            i18n.t("Want Prism to write the message for you? (optional)")))
         brief_row = QHBoxLayout()
         brief_row.setContentsMargins(0, 0, 0, 0)
         brief_row.setSpacing(theme.SPACE_2)
@@ -800,15 +818,15 @@ class EmailComposeDialog(PrismDialog):
             "ask for a meeting next week"))
         self.brief_edit.returnPressed.connect(self._write_for_me)
         brief_row.addWidget(self.brief_edit, stretch=1)
-        self.write_btn = C.button(i18n.t("Write it for me"), "secondary",
-                                  icon_name="pencil", small=True,
-                                  on_click=self._write_for_me)
+        self.write_btn = pillify(C.button(i18n.t("Write it for me"), "secondary",
+                                          icon_name="pencil", small=True,
+                                          on_click=self._write_for_me))
         brief_row.addWidget(self.write_btn)
         card_col.addLayout(brief_row)
         card_col.addWidget(C.label(i18n.t(
             "Attached files are read for the draft. The draft lands in the "
             "Message box above; change anything before you send."),
-            level="SUPPORT", wrap=True))
+            level="SUPPORT", wrap=True, colour=theme.MUTE))
         root.addWidget(card)
 
         self.status = QLabel("")
@@ -955,7 +973,7 @@ class EmailComposeDialog(PrismDialog):
     # ── small builders ──────────────────────────────────────────────────
     @staticmethod
     def _field_label(text: str) -> QLabel:
-        lbl = C.label(text, level="BODY", weight=600)
+        lbl = C.label(text, level="BODY", weight=400, colour=theme.INK)
         lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         return lbl
 
@@ -1205,7 +1223,7 @@ class EmailComposeDialog(PrismDialog):
         avail = [s for s in ("research", "brains", "content") if agents.get(s)]
         if not avail:
             self.status.setText(i18n.t(
-                "No writing tool is set up (Settings → AI tools), so Prism "
+                "No writing tool is set up (Settings → Agents), so Prism "
                 "cannot write this. Type the message yourself instead."))
             return
         draft_stage = avail[-1]
@@ -1419,6 +1437,9 @@ class EmailComposeDialog(PrismDialog):
                   self.gap_spin, self.jitter_spin, self.per_run_spin,
                   self.per_day_spin, self.later_check):
             w.setEnabled(not sending)
+            if isinstance(w, QPushButton):      # a disabled button says why
+                w.setToolTip(i18n.t("Locked while the emails are going out.")
+                             if sending else "")
         self.later_edit.setEnabled(not sending and self.later_check.isChecked())
         self.send_btn.setEnabled(True)
         if sending:

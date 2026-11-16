@@ -249,7 +249,7 @@ def _chip(text: str, ink: str, bg: str) -> QLabel:
     lab = QLabel(text)
     lab.setStyleSheet(
         f"color:{ink};background:{bg};border-radius:{theme.R_CHIP}px;"
-        f"padding:3px 10px;font-size:12px;font-weight:600;")
+        f"padding:3px 10px;font-size:12px;font-weight:500;")
     return lab
 
 
@@ -560,7 +560,7 @@ class ImportWizard(PrismDialog):
             f"QWidget#setTabs{{border-bottom:1px solid {theme.HAIRLINE};}}"
             f"QPushButton#setTab{{background:transparent;border:none;border-radius:0px;"
             f"border-bottom:2px solid transparent;color:{theme.NEUTRAL[600]};"
-            f"padding:8px 2px;font-size:13px;font-weight:600;}}"
+            f"padding:8px 2px;font-size:13px;font-weight:500;}}"
             f"QPushButton#setTab:checked{{color:{theme.TEXT};"
             f"border-bottom:2px solid {theme.ACCENT};}}")
         bar.setLayout(tabs)

@@ -132,6 +132,10 @@ class TheGridFollowsTheMeasurement(unittest.TestCase):
             t.set_quantities(Q)       # no rate list loaded -- every row unpriced
             t.resize(900, 300)
             t.show()
+            # Step 4 shows calm rows first; the grid this test is about is
+            # one click behind "Show the full table". Open it as a person does.
+            t._toggle_details()
+            self.assertTrue(t.table.isVisibleTo(t))
             app.processEvents()
             rect = t.table.visualItemRect(t.table.item(0, pricing.COL_RATE))
             local_pt = t.mapFromGlobal(
@@ -249,9 +253,9 @@ class TheDialogShowsTheCardOnceMeasured(unittest.TestCase):
         itself only shows once a BOQ actually exists — see the two tests
         below."""
         d = self._dialog()
-        self.assertFalse(d.price_box.isVisibleTo(d))
+        self.assertFalse(d.price_box.isVisibleTo(d.pages.widget(d._last_step())))
         self._measure(d)
-        self.assertFalse(d.price_box.isVisibleTo(d))
+        self.assertFalse(d.price_box.isVisibleTo(d.pages.widget(d._last_step())))
         self.assertEqual(len(d.price_table.rows()), 5)
         # The measured table and the prompt text are untouched by pricing.
         self.assertEqual(len(d.meas_table.rows()), 5)
@@ -270,7 +274,7 @@ class TheDialogShowsTheCardOnceMeasured(unittest.TestCase):
         with mock.patch("dialogs.followup_dialog.FollowupDialog") as fake:
             fake.return_value.submitted.return_value = False
             d._on_written({"format": ["1  Brick wall  12.00  m"]}, {})
-        self.assertTrue(d.price_box.isVisibleTo(d))
+        self.assertTrue(d.price_box.isVisibleTo(d.pages.widget(d._last_step())))
 
     def test_a_write_up_with_nothing_back_leaves_it_hidden(self):
         d = self._dialog()
@@ -279,12 +283,12 @@ class TheDialogShowsTheCardOnceMeasured(unittest.TestCase):
         d.request = "BOQ for the site"
         d._write_made_files = []
         d._on_written({"format": []}, {})
-        self.assertFalse(d.price_box.isVisibleTo(d))
+        self.assertFalse(d.price_box.isVisibleTo(d.pages.widget(d._last_step())))
 
     def test_a_bom_is_a_parts_list_and_does_not_price(self):
         d = self._dialog(mode="bom")
         self._measure(d)
-        self.assertFalse(d.price_box.isVisibleTo(d))
+        self.assertFalse(d.price_box.isVisibleTo(d.pages.widget(d._last_step())))
 
 
 if __name__ == "__main__":

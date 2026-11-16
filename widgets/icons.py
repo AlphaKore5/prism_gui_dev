@@ -129,6 +129,81 @@ _STROKED: dict[str, list[str]] = {
                        "M19 19c0 1.5-1 2.5-2.5 2.5H14"],
 }
 
+# The preview's own glyphs (index.html <symbol id="i-*">), 24x24, drawn at 1.7px
+# with round caps and joins. They replace the older drawings of the same name
+# so every screen shows one icon set; the sidebar's add-on tiles use the new
+# names sheet / chip / cube / box.
+def _circle(cx: float, cy: float, r: float) -> str:
+    return (f"M{cx - r:g} {cy:g}a{r:g} {r:g} 0 1 0 {2 * r:g} 0 "
+            f"{r:g} {r:g} 0 1 0-{2 * r:g} 0z")
+
+
+def _rect(x: float, y: float, w: float, h: float, r: float) -> str:
+    return (f"M{x + r:g} {y:g}h{w - 2 * r:g}a{r:g} {r:g} 0 0 1 {r:g} {r:g}v{h - 2 * r:g}"
+            f"a{r:g} {r:g} 0 0 1-{r:g} {r:g}h-{w - 2 * r:g}a{r:g} {r:g} 0 0 1-{r:g}-{r:g}"
+            f"v-{h - 2 * r:g}a{r:g} {r:g} 0 0 1 {r:g}-{r:g}z")
+
+
+_SHEET = "M14 3.5H7a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8.5z"
+_CHAT = ["M20.5 12a8.3 8.3 0 0 1-12.3 7.3L3.5 20.5l1.3-4.4A8.3 8.3 0 1 1 20.5 12z",
+         "M9 10.5h6M9 13.5h4"]
+_STROKED.update({
+    "home":    ["M3.5 10.5 12 3.5l8.5 7V20a1 1 0 0 1-1 1H15v-6H9v6H4.5a1 1 0 0 1-1-1z"],
+    "clock":   [_circle(12, 12, 8.5), "M12 7.5V12l3 2"],
+    "folder":  ["M3.5 7a2 2 0 0 1 2-2h3.8l2 2.2h7.2a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"],
+    "inbox":   ["M3.5 13 6 5.5h12l2.5 7.5V18a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1z",
+                "M3.5 13H8l1.5 2.5h5L16 13h4.5"],
+    "sheet":   [_SHEET, "M14 3.5v5h5M8.5 12.5h7M8.5 16h7M12 12.5V16"],
+    "file":    [_SHEET, "M14 3.5v5h5"],
+    "chip":    [_rect(7, 7, 10, 10, 1.6),
+                "M10 3.5V7M14 3.5V7M10 17v3.5M14 17v3.5M3.5 10H7M3.5 14H7M17 10h3.5M17 14h3.5"],
+    "cube":    ["M12 3.2 19.8 7.6v8.8L12 20.8l-7.8-4.4V7.6z", "M4.2 7.6 12 12l7.8-4.4M12 12v8.8"],
+    "mail":    [_rect(3.5, 5.5, 17, 13, 2), "M4 7.5l8 5.5 8-5.5"],
+    "user":    [_circle(12, 8.5, 3.8), "M4.8 20.5a7.2 7.2 0 0 1 14.4 0"],
+    "message": _CHAT, "chat": _CHAT, "message-circle": _CHAT,
+    "box":     [_rect(4, 4, 7, 7, 1.5), _rect(13, 4, 7, 7, 1.5), _rect(4, 13, 7, 7, 1.5),
+                "M14.5 16.5h4M16.5 14.5v4"],
+    "grid":    [_rect(4, 4, 6.5, 6.5, 1.4), _rect(13.5, 4, 6.5, 6.5, 1.4),
+                _rect(4, 13.5, 6.5, 6.5, 1.4), _rect(13.5, 13.5, 6.5, 6.5, 1.4)],
+    "search":  [_circle(11, 11, 6.5), "M20 20l-4.2-4.2"],
+    "trash":   ["M4.5 7h15M9.5 7V4.5h5V7M6.5 7l.9 12.5a1 1 0 0 0 1 .9h7.2a1 1 0 0 0 1-.9L17.5 7"],
+    "x":       ["M6.5 6.5l11 11M17.5 6.5l-11 11"],
+    "expand":  ["M14 4.5h5.5V10M10 19.5H4.5V14M19.5 4.5 14 10M4.5 19.5 10 14"],
+    "chevron-left":  ["m14.5 6-6 6 6 6"],
+    "chevron-down":  ["m6 9.5 6 6 6-6"],
+    "chevron-right": ["m9.5 6 6 6-6 6"],
+    "check":   ["m5.5 12.5 4.2 4.2L18.5 8"],
+    "sliders": ["M4 7h9M17 7h3M4 17h3M11 17h9", _circle(15, 7, 2), _circle(9, 17, 2)],
+    "settings": ["M4 7h9M17 7h3M4 17h3M11 17h9", _circle(15, 7, 2), _circle(9, 17, 2)],
+    "help":    [_circle(12, 12, 8.5), "M9.6 9.5a2.5 2.5 0 1 1 3.4 2.3c-.6.3-1 .8-1 1.5v.4",
+                _circle(12, 16.8, .6)],
+    "list":    ["M5 7h14M5 12h14M5 17h9"],
+    "key":     [_circle(8, 15, 3.8), "M10.8 12.2l8.7-8.7M16 6.5l2.5 2.5M13.5 9l2 2"],
+    "external": ["M14 4.5h5.5V10M19.5 4.5 11 13M18 14v4.5a1 1 0 0 1-1 1H5.5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1H10"],
+    "lock":    [_rect(5, 10.5, 14, 10, 2), "M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5"],
+    "pencil":  ["M15.5 4.5l4 4L9 19H5v-4z", "M13.5 6.5l4 4"],
+    "eye":     ["M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z",
+                _circle(12, 12, 2.8)],
+    "mic":     [_rect(9, 3.5, 6, 11, 3), "M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v2.5"],
+    "video":   [_rect(3.5, 6.5, 12, 11, 2), "M15.5 10.5l5-3v9l-5-3"],
+    "paperclip": ["m20 11.5-8 8a5 5 0 0 1-7-7l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7L9.6 17.3a1.7 1.7 0 0 1-2.4-2.4L15 7"],
+    "chart":   ["M6 19V11M12 19V5M18 19v-6"],
+    "arrow-right": ["M5 12h14M13.5 6.5 19 12l-5.5 5.5"],
+})
+
+# The preview's glyphs that the Home page uses and no other screen did yet. New
+# names, so nothing that already draws "film", "command" or "sparkles" changes.
+_STROKED.update({
+    "cmd":      ["M9 6.5a2.5 2.5 0 1 0-2.5 2.5h11A2.5 2.5 0 1 0 15 6.5v11a2.5 2.5 0 1 0 2.5-2.5"
+                 "h-11A2.5 2.5 0 1 0 9 17.5z"],
+    "spark":    ["M12 4v4M12 16v4M4 12h4M16 12h4M7 7l1.8 1.8M15.2 15.2 17 17M17 7l-1.8 1.8"
+                 "M8.8 15.2 7 17"],
+    "bars":     ["M6 19V11M12 19V5M18 19v-6"],
+    "film-box": [_rect(3.5, 4.5, 17, 15, 2),
+                 "M7.5 4.5v15M16.5 4.5v15M3.5 9.5h4M3.5 14.5h4M16.5 9.5h4M16.5 14.5h4"],
+    "more-dots": [_circle(6, 12, .9), _circle(12, 12, .9), _circle(18, 12, .9)],
+})
+
 # Icons the design fills rather than strokes.
 _FILLED: dict[str, list[str]] = {
     "play": ["M7 5l12 7-12 7z"],
@@ -194,7 +269,7 @@ def _svg(name: str, color: str, stroke: float) -> bytes:
 
 
 def pixmap(name: str, size: int = 18, color: str = theme.TEXT,
-           stroke: float = 1.6) -> QPixmap:
+           stroke: float = 1.7) -> QPixmap:
     app = QApplication.instance()
     dpr = app.devicePixelRatio() if app else 1.0
     key = (name, size, color, stroke, dpr)
@@ -219,12 +294,29 @@ def pixmap(name: str, size: int = 18, color: str = theme.TEXT,
 
 
 def icon(name: str, size: int = 18, color: str = theme.TEXT,
-         stroke: float = 1.6) -> QIcon:
+         stroke: float = 1.7) -> QIcon:
     return QIcon(pixmap(name, size, color, stroke))
 
 
+def icon_gapped(name: str, size: int = 14, color: str = theme.TEXT,
+                gap: float = 3, stroke: float = 1.7) -> QIcon:
+    """An icon with `gap` extra transparent px on its right. Qt puts a fixed
+    4px between a button's icon and its text; the preview has ~6.6px, and the
+    only handle on that is a wider icon."""
+    app = QApplication.instance()
+    dpr = app.devicePixelRatio() if app else 1.0
+    base = pixmap(name, size, color, stroke)
+    px = QPixmap(int((size + gap) * dpr + .5), int(size * dpr + .5))
+    px.setDevicePixelRatio(dpr)
+    px.fill(Qt.transparent)
+    p = QPainter(px)
+    p.drawPixmap(0, 0, base)
+    p.end()
+    return QIcon(px)
+
+
 def button_icon(btn, name: str, size: int = 16, color: str = theme.TEXT,
-                stroke: float = 1.6):
+                stroke: float = 1.7):
     """Set an icon on a button at its true pixel size (Qt otherwise scales to
     a 16px default that softens the 1.6px strokes)."""
     btn.setIcon(icon(name, size, color, stroke))
@@ -260,6 +352,34 @@ def logo_pixmap(height: int = 24) -> QPixmap:
     painter = QPainter(px)
     painter.setRenderHint(QPainter.Antialiasing)
     renderer.render(painter, QRectF(0, 0, width, height))
+    painter.end()
+    _logo_cache[key] = px
+    return px
+
+
+# The AlphaKore "AK" mark (preview/alphakore-reskin/img/ak-mark.svg), a single
+# filled outline on a 789x480 artboard, for the "BY AlphaKore" byline.
+_AK_PATH = ("M0,479 L295,480 L366,374 L330,312 L260,418 L106,417 L282,126 L387,302 "
+            "L486,480 L789,480 L653,240 L787,18 L499,18 L420,134 L463,185 L531,75 "
+            "L680,76 L577,245 L682,419 L521,417 L374,153 L283,0Z")
+
+
+def ak_mark_pixmap(width: float, color: str = theme.INK) -> QPixmap:
+    app = QApplication.instance()
+    dpr = app.devicePixelRatio() if app else 1.0
+    key = ("ak", width, color, dpr)
+    hit = _logo_cache.get(key)
+    if hit is not None:
+        return hit
+    height = width * 480 / 789
+    px = QPixmap(round(width * dpr) + 1, round(height * dpr) + 1)
+    px.setDevicePixelRatio(dpr)
+    px.fill(Qt.transparent)
+    svg = (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 789 480">'
+           f'<path fill="{color}" fill-rule="evenodd" d="{_AK_PATH}"/></svg>').encode()
+    painter = QPainter(px)
+    painter.setRenderHint(QPainter.Antialiasing)
+    QSvgRenderer(QByteArray(svg)).render(painter, QRectF(0, 0, width, height))
     painter.end()
     _logo_cache[key] = px
     return px

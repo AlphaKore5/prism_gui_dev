@@ -38,12 +38,13 @@ Two things here are Prism's and not the design's, and both are kept:
 from __future__ import annotations
 from PySide6.QtCore import Qt, Signal, QSize, QEvent, QPoint, QTimer, QRect, QRectF, QPointF
 from PySide6.QtGui import (
-    QFontMetrics, QPainter, QPainterPath, QLinearGradient, QBrush, QPen,
-    QColor,
+    QFont, QFontMetrics, QFontMetricsF, QIcon, QPainter, QPainterPath,
+    QLinearGradient, QRadialGradient, QBrush, QPen, QColor,
 )
 from PySide6.QtWidgets import (
     QAbstractButton, QFrame, QVBoxLayout, QLabel, QListWidget, QListWidgetItem,
-    QPushButton, QHBoxLayout, QFileDialog, QSizePolicy, QWidget, QScrollArea,
+    QPushButton, QHBoxLayout, QFileDialog, QSizePolicy, QStyle,
+    QStyleOptionButton, QWidget, QScrollArea,
 )
 
 import favorites as FAV
@@ -128,15 +129,9 @@ MORE = [
 # Lumi's working help surface is on Home, where it can be found when a customer
 # needs it without spending a permanent navigation slot.
 #
-# AI tools stays here rather than coming back to the rail with History, and the
-# reason is the budget: the rail is at twelve of twelve. Of the two, History is
-# the one the rail cannot do without — it is a *stage of the work*, and nothing
-# else in the rail reports on finished runs. AI tools is a catalogue of what
-# Prism can drive and whether you are signed in to each: setup, consulted when
-# something will not log in, which is exactly what Settings is for.
+# (The AI tools catalogue screen used to sit here; it was removed in UI port
+# stage 11. The pipeline it showed is Settings → Agents.)
 SECONDARY = [
-    ("catalog", "AI tools", "grid", "Every tool Prism can drive, and whether "
-     "you're signed in to it"),
     ("guide", "How to use Prism", "help",
      "What Prism can do and what to type"),
 ]
@@ -235,18 +230,99 @@ class _Elided(QLabel):
                                         max(0, self.width())))
 
 
+# Rail rows sit on a 39.7px pitch in the preview (37.5px row + 2.2px gap). Qt
+# rows are whole pixels, so each row takes the height that keeps its top within
+# half a pixel of the preview's: 38 or 37 with a 2px gap.
+_PITCH = 39.7
+
+
+def row_height(first_top: float, index: int) -> int:
+    top = lambda i: round(first_top + _PITCH * i)
+    return top(index + 1) - top(index) - 2
+
+
+# One glyph per add-on, as the preview draws the add-on tiles.
+_RAIL_ICON = {
+    "inquiry": "inbox", "boq": "sheet", "gerber": "chip", "step": "cube",
+    "email": "mail", "leads": "user", "whatsapp": "message", "bom": "box",
+}
+
+
+class NavButton(QPushButton):
+    """A rail row: the preview's `.navi`. QSS still draws the fill and ring
+    (hover, `cur`), the glyph and label are placed here so they sit where the
+    preview puts them (glyph at 11px, label at 36.7px from the row's edge)."""
+
+    ICON_X = 11
+    TEXT_X = 37
+
+    def __init__(self, text: str = "", parent=None):
+        super().__init__(text, parent)
+        self.row_h = 38
+        self._kbd_focus = False
+
+    @property
+    def row_h(self) -> int:
+        return self._row_h
+
+    @row_h.setter
+    def row_h(self, h: int) -> None:
+        # Fixed, not just a size hint: the stylesheet's own min-height is
+        # shorter and the rail's scroll area would squeeze the rows to it.
+        self._row_h = h
+        self.setProperty("rowh", h)
+        self.setFixedHeight(h)
+
+    def sizeHint(self) -> QSize:
+        return QSize(super().sizeHint().width(), self._row_h)
+
+    def minimumSizeHint(self) -> QSize:
+        return QSize(0, self._row_h)
+
+    def focusInEvent(self, event):
+        self._kbd_focus = event.reason() in (
+            Qt.TabFocusReason, Qt.BacktabFocusReason, Qt.ShortcutFocusReason)
+        super().focusInEvent(event)
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        opt = QStyleOptionButton()
+        self.initStyleOption(opt)
+        opt.text = ""
+        opt.icon = QIcon()
+        self.style().drawControl(QStyle.CE_PushButtonBevel, opt, p, self)
+        cur = bool(self.property("cur"))
+        label = self.text().strip().replace("&&", "&")
+        size = self.iconSize().width()
+        pm = self.icon().pixmap(self.iconSize())
+        y = (self.height() - size) / 2
+        if not label:                                  # collapsed rail
+            p.drawPixmap(QPointF((self.width() - size) / 2, y), pm)
+            return
+        p.drawPixmap(QPointF(self.ICON_X, y), pm)
+        font = QFont(theme.FONT_BODY)
+        font.setPixelSize(14)
+        font.setWeight(QFont.Medium if cur else QFont.Normal)
+        p.setFont(font)
+        p.setPen(QColor(theme.INK if cur else theme.TEXT))
+        room = self.width() - self.TEXT_X - 8
+        text = QFontMetrics(font).elidedText(label, Qt.ElideRight, room)
+        p.drawText(QRectF(self.TEXT_X, 0, room, self.height()),
+                   Qt.AlignVCenter | Qt.AlignLeft, text)
+
+
 def nav_button(label: str, icon_name: str, small: bool = False,
                tip: str = "") -> QPushButton:
-    btn = QPushButton(f"  {_amp(label)}")
+    btn = NavButton(f"  {_amp(label)}")
     btn.setObjectName("navSub" if small else "navItem")
     btn.setCursor(Qt.PointingHandCursor)
     btn.setFlat(True)
     btn.setFocusPolicy(Qt.StrongFocus)
-    size = 15 if small else 17
+    size = 16
     icons.button_icon(btn, icon_name, size, "#27272a")
     btn.setIconSize(QSize(size, size))
     btn.setProperty("cur", False)
-    btn.setMinimumHeight(C.MIN_TARGET + 4)
     # The accessible name is the label without its two-space icon gutter; the
     # description is why you would go there. A screen reader reads both.
     btn.setAccessibleName(label)
@@ -268,7 +344,24 @@ class AddonRow(QPushButton):
     it: an add-on is a product, and it gets to look like one.
     """
 
-    CHIP = 24
+    CHIP = 26
+    PAD = 11                    # row edge to tile, as the preview's .navi
+
+    @property
+    def row_h(self) -> int:
+        return self._row_h
+
+    @row_h.setter
+    def row_h(self, h: int) -> None:
+        self._row_h = h
+        self.setProperty("rowh", h)
+        self.setFixedHeight(h)
+
+    def sizeHint(self) -> QSize:
+        return QSize(super().sizeHint().width(), self._row_h)
+
+    def minimumSizeHint(self) -> QSize:
+        return QSize(0, self._row_h)
 
     def __init__(self, label: str, icon_name: str, hue: str, parent=None):
         # No _amp() here, deliberately, even though this IS a QPushButton:
@@ -288,9 +381,10 @@ class AddonRow(QPushButton):
         display_label = "Email Inquiries" if label == "Email inquiry automation" else label
 
         row = QHBoxLayout(self)
-        row.setContentsMargins(6, 0, 6, 0)
+        row.setContentsMargins(self.PAD, 0, 6, 0)
         row.setSpacing(theme.SPACE_2 + 2)
         self._row_layout = row
+        self.row_h = 38
         self._chip = QLabel()
         self._chip.setFixedSize(self.CHIP, self.CHIP)
         self._chip.setAlignment(Qt.AlignCenter)
@@ -305,7 +399,6 @@ class AddonRow(QPushButton):
         self._lock.setAlignment(Qt.AlignCenter)
         self._lock.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         row.addWidget(self._lock)
-        self.setMinimumHeight(34)
         self.setAccessibleName(label)
         self._repaint()
 
@@ -320,12 +413,11 @@ class AddonRow(QPushButton):
         else:
             self._label.setVisible(True)
             self._lock.setVisible(self._locked)
-            self._row_layout.setContentsMargins(6, 0, 6, 0)
+            self._row_layout.setContentsMargins(self.PAD, 0, 6, 0)
             self._row_layout.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-            self.setMinimumHeight(34)
             self.setMaximumWidth(16777215)
             self.setMinimumWidth(0)
-            self.setMaximumHeight(16777215)
+            self.row_h = self._row_h
         self._repaint()          # tile and glyph size differ between the two rails
 
     # ── state ─────────────────────────────────────────────────────────────
@@ -370,16 +462,20 @@ class AddonRow(QPushButton):
             self._chip.setPixmap(icons.pixmap(self._icon_name, 18, glyph))
             self._chip.setStyleSheet("background: transparent;")
             return
-        chip_bg = (theme.tint(self._hue, "2e") if live
-                   else theme.tint("#ffffff", "16"))
-        self._chip.setPixmap(icons.pixmap(self._icon_name, 14, hue))
+        # The preview's tile: a soft stone square with a dark glyph for a live
+        # add-on, the same square with a muted glyph for a locked one. The
+        # add-on's own hue is no longer painted on the rail.
+        chip_bg = "#EFEEEA"
+        glyph = theme.INK if live else theme.NEUTRAL[400]
+        self._chip.setPixmap(icons.pixmap(self._icon_name, 13, glyph))
         self._chip.setStyleSheet(
-            f"background: {chip_bg}; border-radius: {theme.R_CHIP + 1}px;")
-        ink = theme.over(INK_CURRENT if self._current
-                         else INK_PRIMARY if live else INK_ITEM)
+            f"background: {chip_bg}; border-radius: 7px;")
+        ink = (theme.INK if self._current else theme.TEXT) if live \
+            else theme.over(INK_ITEM)
         self._label.setStyleSheet(
-            theme.type_css("SUPPORT", ink)
-            + " font-weight: 500; background: transparent;")
+            f"font-family: '{theme.FONT_BODY}'; font-size: 14px; color: {ink};"
+            f" font-weight: {500 if self._current else 400};"
+            " background: transparent;")
         if self._locked:
             self._lock.setPixmap(icons.pixmap("lock", 13,
                                               theme.over(INK_HEADING)))
@@ -433,6 +529,48 @@ class SoonRow(QFrame):
             self.setMaximumHeight(16777215)
 
 
+class _RailPrimary(C.DarkPill):
+    """The rail's New task: the preview's `.btn.dark` at the rail's size (a
+    43px pill, 32px dot, 15px label) with a painted drop shadow under it."""
+
+    BODY_H = 43
+    LIP = 5
+    FONT_PX = 15
+    DOT = 32
+    PAD_L = 6
+    GAP = 8.8
+
+
+class _ByLine(QLabel):
+    """"BY [AK mark] ALPHAKORE": mono caps with the AlphaKore mark between the
+    two words, as the preview's `.brand .by`. The label's text stays
+    "BY ALPHAKORE"; the mark is painted where the space is."""
+
+    def __init__(self, parent=None):
+        super().__init__("BY ALPHAKORE", parent)
+        self.setObjectName("brandBy")
+        self.setFixedHeight(12)
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        font = QFont(theme.FONT_MONO)
+        font.setPixelSize(10)
+        font.setLetterSpacing(QFont.AbsoluteSpacing, 0.6)
+        p.setFont(font)
+        p.setPen(QColor(theme.MUTE))
+        fm = QFontMetricsF(font)
+        gap, mark_w = 4.4, 14.0
+        y = QRectF(0, 0, self.width(), self.height())
+        p.drawText(y, Qt.AlignVCenter | Qt.AlignLeft, "BY")
+        x = fm.horizontalAdvance("BY") + gap
+        pm = icons.ak_mark_pixmap(mark_w, theme.INK)
+        p.drawPixmap(QPointF(x, (self.height() - mark_w * 480 / 789) / 2), pm)
+        x += mark_w + gap
+        p.drawText(QRectF(x, 0, self.width() - x, self.height()),
+                   Qt.AlignVCenter | Qt.AlignLeft, "ALPHAKORE")
+
+
 class Sidebar(QFrame):
     command_triggered = Signal(str)
     favorite_chosen = Signal(str)
@@ -443,7 +581,7 @@ class Sidebar(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("sidebar")
-        self.setFixedWidth(260)
+        self.setFixedWidth(258)           # 17.5rem at 1366
         self._collapsed = False
         self.setAttribute(Qt.WA_StyledBackground, False)
 
@@ -453,11 +591,14 @@ class Sidebar(QFrame):
         # a rail you can reach by scrolling is worth more than one Qt has
         # squeezed below its sizeHint and clipped.
         shell = QVBoxLayout(self)
-        shell.setContentsMargins(4, 4, 4, 4)
+        shell.setContentsMargins(0, 0, 0, 0)
         shell.setSpacing(0)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        # No scrollbar line down the rail (the preview has none); the wheel
+        # and the keyboard still scroll it.
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll.setFrameShape(QScrollArea.NoFrame)
         scroll.setStyleSheet("""
             QScrollArea { background: transparent; border: none; }
@@ -498,14 +639,17 @@ class Sidebar(QFrame):
         self._inner = inner
 
         root = QVBoxLayout(inner)
-        root.setContentsMargins(theme.SPACE_3, theme.SPACE_5,
-                                theme.SPACE_3, theme.SPACE_3)
-        root.setSpacing(theme.SPACE_1)
+        root.setContentsMargins(12, 15, 12, 10)
+        root.setSpacing(0)
         self._root_layout = root
 
         self._brand_widget = self._brand()
         root.addWidget(self._brand_widget)
-        root.addSpacing(theme.SPACE_3)
+        root.addSpacing(20)
+        # Gaps that give a little back when the window is too short for the whole
+        # rail, so the Settings row is never left half under the user chip. Only
+        # gaps below the add-on rows: the rows themselves keep the preview's y.
+        self._gaps = []
 
         # ── WORK ─────────────────────────────────────────────────────────────
         # One heading over the three things a run is made of: start it, see
@@ -522,43 +666,43 @@ class Sidebar(QFrame):
 
         # The rail's one emphasised control. A soft tinted button rather than a
         # solid black one: the black slab was the heaviest thing on the screen.
-        self.new_task_btn = QPushButton(i18n.t('New task'))
+        self.new_task_btn = _RailPrimary(i18n.t('New task'))
         self.new_task_btn.setObjectName("railPrimary")
         self.new_task_btn.setCursor(Qt.PointingHandCursor)
         self.new_task_btn.setFocusPolicy(Qt.StrongFocus)
-        self.new_task_btn.setMinimumHeight(C.MIN_TARGET + 6)
         self.new_task_btn.setAccessibleName(i18n.t("New task"))
         self.new_task_btn.setToolTip(i18n.t("Describe something you want done"))
-        icons.button_icon(self.new_task_btn, "plus", 15, "#ffffff")
         self.new_task_btn.clicked.connect(
             lambda: self.command_triggered.emit("workbench"))
-        elevate(self.new_task_btn, theme.SHADOW_ACCENT, theme.ACCENT)
+        root.addSpacing(8)
         root.addWidget(self.new_task_btn)
+        root.addSpacing(2)
         # "workbench" is a destination even though its control is a button: on
         # the workbench the rail must say so, or the screen the app is *for* is
         # the one screen with nothing lit.
         self._register("workbench", self.new_task_btn)
 
-        for key, label, icon_name, tip in PRIMARY:
+        for i, (key, label, icon_name, tip) in enumerate(PRIMARY):
             small = key != "home"
             btn = nav_button(i18n.t(label), icon_name, small=small,
                              tip=i18n.t(tip))
+            btn.row_h = row_height(157.4, i)
             btn.clicked.connect(lambda _=False, k=key: self._go(k))
-            self._nav_glyph[key] = (icon_name, 15 if small else 17,
-                                    INK_ITEM if small else INK_PRIMARY)
+            self._nav_glyph[key] = (icon_name, 16, INK_ITEM)
             self._register(key, btn)
             root.addWidget(btn)
+            root.addSpacing(2)
         self._current = "home"
 
         # ── the add-on shelf: collapsible with dropdown arrow ─────────────
-        root.addSpacing(theme.SPACE_2)
+        root.addSpacing(11)
 
         addons_head = QWidget()
         addons_head.setObjectName("addonsHead")
         addons_head.setCursor(Qt.PointingHandCursor)
         addons_hlayout = QHBoxLayout(addons_head)
-        addons_hlayout.setContentsMargins(4, 2, 4, 2)
-        addons_hlayout.setSpacing(theme.SPACE_1)
+        addons_hlayout.setContentsMargins(0, 0, 5, 0)
+        addons_hlayout.setSpacing(0)
 
         addons_lbl = self._section("ADD-ONS")
         addons_hlayout.addWidget(addons_lbl, stretch=1)
@@ -567,16 +711,18 @@ class Sidebar(QFrame):
         self._addons_toggle_btn.setObjectName("addonsChevron")
         self._addons_toggle_btn.setFlat(True)
         self._addons_toggle_btn.setFixedSize(22, 22)
+        addons_head.setFixedHeight(22)
         self._addons_toggle_btn.setCursor(Qt.PointingHandCursor)
         self._addons_toggle_btn.setToolTip(i18n.t("Collapse / expand Add-ons"))
         self._addons_open = True
-        icons.button_icon(self._addons_toggle_btn, "chevron-down", 11, theme.over(INK_CHROME))
+        icons.button_icon(self._addons_toggle_btn, "chevron-down", 13, theme.MUTE)
         addons_hlayout.addWidget(self._addons_toggle_btn)
 
         addons_head.mousePressEvent = lambda e: self._toggle_addons()
         self._addons_toggle_btn.clicked.connect(lambda: self._toggle_addons())
 
         root.addWidget(addons_head)
+        root.addSpacing(4)
         self._addons_head = addons_head
         self._addons_collapsed_rule = self._rule()
         self._addons_collapsed_rule.setVisible(False)
@@ -589,7 +735,7 @@ class Sidebar(QFrame):
         # cannot, and which used to be smuggled through the licence column as
         # a SOON sentinel. This loop runs when the rail is BUILT, so
         # theme.tone() below resolves after apply_role() rather than at import.
-        for addon in registry.shelf(manifest.RAIL):
+        for n, addon in enumerate(registry.shelf(manifest.RAIL)):
             if addon.status == manifest.SOON:
                 # A caption, not a control. A disabled thing that cannot be
                 # clicked, focused or activated is not a button, and drawing
@@ -602,8 +748,10 @@ class Sidebar(QFrame):
                 self._addon_rows.append(row)
                 root.addWidget(row)
                 continue
-            row = AddonRow(i18n.t(addon.label), addon.icon,
+            row = AddonRow(i18n.t(addon.label),
+                           _RAIL_ICON.get(addon.key, addon.icon),
                            theme.tone(addon.tone))
+            row.row_h = row_height(313.4, n)
             row.setToolTip(i18n.t(addon.tip))
             row.setAccessibleDescription(i18n.t(addon.tip))
             row.clicked.connect(
@@ -614,19 +762,22 @@ class Sidebar(QFrame):
             self._register(addon.key, row)
             self._addon_rows.append(row)
             root.addWidget(row)
+            root.addSpacing(2)
 
         # -- Settings ---------------------------------------------------------
         # Under a hairline rather than under a third heading: it is the one
         # configuring surface, and the rule says "different kind of thing" for
         # nothing but a pixel.
         root.addSpacing(theme.SPACE_2)
+        self._gaps.append((root.itemAt(root.count() - 1), theme.SPACE_2, 0))
         root.addWidget(self._rule())
         root.addSpacing(theme.SPACE_1)
+        self._gaps.append((root.itemAt(root.count() - 1), theme.SPACE_1, 2))
         for key, label, icon_name, tip in MORE:
             btn = nav_button(i18n.t(label), icon_name, small=True,
                              tip=i18n.t(tip))
             btn.clicked.connect(lambda _=False, k=key: self._go(k))
-            self._nav_glyph[key] = (icon_name, 15, INK_ITEM)
+            self._nav_glyph[key] = (icon_name, 16, INK_ITEM)
             self._register(key, btn)
             root.addWidget(btn)
 
@@ -645,13 +796,12 @@ class Sidebar(QFrame):
 
         fav_head = QHBoxLayout()
         fav_head.setSpacing(theme.SPACE_1 // 2)
-        self.fav_toggle = QPushButton(i18n.t("Favourites"))
+        self.fav_toggle = NavButton(i18n.t("Favourites"))
         self.fav_toggle.setObjectName("navSub")
         self.fav_toggle.setFlat(True)
         self.fav_toggle.setCheckable(True)
         self.fav_toggle.setCursor(Qt.PointingHandCursor)
         self.fav_toggle.setFocusPolicy(Qt.StrongFocus)
-        self.fav_toggle.setMinimumHeight(C.MIN_TARGET)
         self.fav_toggle.setAccessibleName(i18n.t("Favourites"))
         self.fav_toggle.setToolTip(i18n.t("Files and folders you attach often"))
         icons.button_icon(self.fav_toggle, "chevron-right", 13,
@@ -708,11 +858,8 @@ class Sidebar(QFrame):
         foot = QWidget()
         foot.setObjectName("sidebarInner")
         foot_col = QVBoxLayout(foot)
-        foot_col.setContentsMargins(theme.SPACE_3, 0,
-                                    theme.SPACE_3, theme.SPACE_3)
-        foot_col.setSpacing(theme.SPACE_1)
-        foot_col.addWidget(self._rule())
-        foot_col.addSpacing(theme.SPACE_1)
+        foot_col.setContentsMargins(12, 0, 12, 10)
+        foot_col.setSpacing(0)
         self._foot_col = foot_col
 
         # The wake word lives down here rather than above the add-on shelf: it
@@ -733,9 +880,10 @@ class Sidebar(QFrame):
         # background over anything the QFrame itself would draw.
         self._pip = QFrame(inner)
         self._pip.setObjectName("railPip")
-        self._pip.setStyleSheet("background: #09090b; border-radius: 2px;")
+        self._pip.setStyleSheet(f"background: {theme.BRAND_RED}; border-radius: 0px;")
         self._pip.hide()
         inner.installEventFilter(self)
+        scroll.viewport().installEventFilter(self)
 
         for widget in self._chain:
             widget.installEventFilter(self)
@@ -750,7 +898,15 @@ class Sidebar(QFrame):
         painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
 
         r = QRectF(self.rect())
-        radius = 20.0
+        radius = 17.0
+        # The preview's rail: white fading to #FBFAF8, a 1px ring at 4% ink and
+        # no visible lip (its shadow is spread away to nothing at the edges).
+        fade = QLinearGradient(QPointF(r.left(), r.top()), QPointF(r.left(), r.bottom()))
+        fade.setColorAt(0.0, QColor("#FFFFFF"))
+        fade.setColorAt(1.0, QColor("#FBFAF8"))
+        if C.paint_flat_card(self, painter, r, radius, fill=QBrush(fade),
+                             edge=QColor(20, 20, 18, 22), lip=0):
+            return
 
         clip = QPainterPath()
         clip.addRoundedRect(r, radius, radius)
@@ -809,24 +965,28 @@ class Sidebar(QFrame):
         main_layout.setSpacing(0)
 
         # ── 1. Expanded brand row ─────────────────────────────────────────────
+        # The preview's .brand: the crystal at 5px in, "Prism" and the byline
+        # stacked beside it, the collapse chevron at the far right.
         expanded_w = QWidget()
+        expanded_w.setFixedHeight(36)
         expanded_row = QHBoxLayout(expanded_w)
-        expanded_row.setContentsMargins(2, 0, 0, 0)
-        expanded_row.setSpacing(theme.SPACE_2)
+        expanded_row.setContentsMargins(5, 0, 5, 0)
+        expanded_row.setSpacing(10)
         mark = QLabel()
-        mark.setPixmap(icons.logo_pixmap(26))
+        mark.setPixmap(icons.logo_pixmap(30))
         mark.setAccessibleName("Prism")
-        expanded_row.addWidget(mark)
+        expanded_row.addWidget(mark, 0, Qt.AlignTop)
         name = QLabel("PRISM")
         name.setObjectName("brand")
+        name.setFixedHeight(20)
         # Stacked under the wordmark when this copy belongs to a company
         # member: on a shared workspace several people run Prism side by side
         # and the accent colour alone does not say WHICH sales person.
         who = identity.describe()
         if who:
             stack = QVBoxLayout()
-            stack.setContentsMargins(0, 0, 0, 0)
-            stack.setSpacing(0)
+            stack.setContentsMargins(0, 1, 0, 0)
+            stack.setSpacing(4)
             stack.addWidget(track(name, 0.14))
             member = _Elided(who)
             member.setObjectName("railMuted")
@@ -836,18 +996,33 @@ class Sidebar(QFrame):
             member.setToolTip("This copy of Prism is set up for this person. "
                               "Change it in Settings → Your role.")
             stack.addWidget(member)
+            stack.addStretch(1)
             expanded_row.addLayout(stack, stretch=1)
         else:
-            expanded_row.addWidget(track(name, 0.14), stretch=1)
+            # Wordmark over a small mono "BY [AK] ALPHAKORE" -- the family
+            # line the preview shows under the name.
+            name.setText("Prism")
+            track(name, -0.02)
+            stack = QVBoxLayout()
+            stack.setContentsMargins(0, 0, 0, 0)
+            stack.setSpacing(4)
+            stack.addWidget(name)
+            stack.addWidget(_ByLine())
+            stack.addStretch(1)
+            expanded_row.addLayout(stack, stretch=1)
 
         self._collapse_btn = QPushButton()
         self._collapse_btn.setObjectName("railCollapseBtn")
-        self._collapse_btn.setFixedSize(28, 28)
+        self._collapse_btn.setFixedSize(34, 34)
         self._collapse_btn.setCursor(Qt.PointingHandCursor)
         self._collapse_btn.setToolTip(i18n.t("Collapse navigation"))
-        icons.button_icon(self._collapse_btn, "chevron-left", 14, theme.over(INK_CHROME))
+        icons.button_icon(self._collapse_btn, "chevron-left", 16, theme.MUTE)
         self._collapse_btn.clicked.connect(lambda: self.toggle_collapsed(True))
-        expanded_row.addWidget(self._collapse_btn)
+        collapse_col = QVBoxLayout()
+        collapse_col.setContentsMargins(0, 1, 0, 0)
+        collapse_col.addWidget(self._collapse_btn)
+        collapse_col.addStretch(1)
+        expanded_row.addLayout(collapse_col)
 
         main_layout.addWidget(expanded_w)
         self._brand_expanded = expanded_w
@@ -894,10 +1069,9 @@ class Sidebar(QFrame):
         """
         lbl = kicker(text, muted=True)
         lbl.setObjectName("navSection")
-        lbl.setStyleSheet(
-            theme.type_css("LABEL",
-                           theme.over(INK_QUIET if faint else INK_HEADING))
-            + f" background: transparent; padding: {theme.SPACE_2}px 4px 2px;")
+        lbl.setFixedHeight(14)
+        lbl.set_inset(8)                 # the preview's .label margin
+        lbl.set_tracked(0.77, theme.MUTE if not faint else theme.FAINT)
         return lbl
 
     @staticmethod
@@ -1000,10 +1174,10 @@ class Sidebar(QFrame):
         btn.clicked.connect(lambda: self.command_triggered.emit("config"))
         # A QPushButton does not grow its sizeHint for a layout put inside it,
         # so the second line was being clipped by the button's own text height.
-        btn.setMinimumHeight(48)
+        btn.setMinimumHeight(46)
         row = QHBoxLayout(btn)
-        row.setContentsMargins(6, 6, 6, 6)
-        row.setSpacing(theme.SPACE_2 + 1)
+        row.setContentsMargins(6, 12, 7, 0)
+        row.setSpacing(10)
         self._profile_btn_layout = row
 
         self._avatar_slot = QHBoxLayout()
@@ -1015,21 +1189,20 @@ class Sidebar(QFrame):
         stack.setSpacing(0)
         self._profile_name = _Elided(i18n.t("This computer"))
         self._profile_name.setObjectName("railProfileName")
+        self._profile_name.setFixedHeight(17)
         stack.addWidget(self._profile_name)
         self._profile_sub = _Elided(i18n.t("Checking licence…"))
         self._profile_sub.setObjectName("railProfileRole")
         # `#railProfileRole` inks itself white-at-45%, 4.1:1 on the rail. The
         # plan name is the answer to "what am I paying for" and has to clear
         # AA, so the ink comes from the INK_ scale instead — 5.3:1.
-        self._profile_sub.setStyleSheet(
-            theme.type_css("META", theme.over(INK_ITEM))
-            + " background: transparent;")
+        self._profile_sub.setFixedHeight(18)
+        self._profile_sub.setStyleSheet(self._sub_css(theme.MUTE))
         stack.addWidget(self._profile_sub)
         row.addLayout(stack, stretch=1)
 
         chevron = QLabel()
-        chevron.setPixmap(icons.pixmap("chevron-right", 13,
-                                       theme.over(INK_CHROME)))
+        chevron.setPixmap(icons.pixmap("chevron-right", 13, theme.MUTE))
         chevron.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         row.addWidget(chevron)
         self._profile_chevron = chevron
@@ -1037,6 +1210,12 @@ class Sidebar(QFrame):
         self._chain.append(btn)
         self.set_profile("")
         return btn
+
+    @staticmethod
+    def _sub_css(colour: str) -> str:
+        """The plan line: mono 11px, as the preview's `.me .who span`."""
+        return (f"font-family: '{theme.FONT_MONO}'; font-size: 11px;"
+                f" color: {colour}; background: transparent;")
 
     def set_profile(self, name: str) -> None:
         """Name the person, or say plainly that nobody has been named.
@@ -1050,9 +1229,20 @@ class Sidebar(QFrame):
         self._profile_name.set_full_text(shown or i18n.t("This computer"))
         while self._avatar_slot.count():
             item = self._avatar_slot.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
-        self._avatar_slot.addWidget(Avatar(shown or "?", 28))
+            old = item.widget()
+            if old:
+                # deleteLater alone leaves the old circle parented, visible
+                # and painted at its old spot until the event loop runs: that
+                # was the second avatar overlapping the new one.
+                old.hide()
+                old.setParent(None)
+                old.deleteLater()
+        avatar = Avatar(shown or "?", 31, hue=theme.INK)
+        avatar.setObjectName("railAvatar")
+        avatar.setStyleSheet(
+            f"background: {theme.INK}; color: #ffffff; border-radius: 15px;"
+            f" font-family: '{theme.FONT_BODY}'; font-weight: 500; font-size: 12px;")
+        self._avatar_slot.addWidget(avatar)
 
     def _build_direct_group(self) -> QWidget:
         """The settings shortcuts, collapsed behind one disclosure row.
@@ -1155,7 +1345,7 @@ class Sidebar(QFrame):
                 name, size, ink = glyph
                 actual_size = 18 if c else size
                 icons.button_icon(widget, name, actual_size,
-                                  theme.over(INK_CURRENT if cur else ink))
+                                  theme.INK if cur else theme.MUTE)
             if isinstance(widget, AddonRow):
                 widget.set_current(cur)
             widget.style().unpolish(widget)
@@ -1173,11 +1363,11 @@ class Sidebar(QFrame):
         # so go through global coordinates instead (see 4f65dfd).
         origin = self._inner.mapFromGlobal(widget.mapToGlobal(QPoint(0, 0)))
         top = origin.y()
-        height = max(14, min(22, widget.height() - 10))
+        # The preview's marker: a 6px red square, not a bar.
+        size = 6
         c = getattr(self, "_collapsed", False)
-        self._pip.setGeometry(2 if c else 0,
-                              top + (widget.height() - height) // 2,
-                              3 if c else 4, height)
+        self._pip.setGeometry(2 if c else 6,
+                              top + (widget.height() - size) // 2, size, size)
         self._pip.show()
         self._pip.raise_()
 
@@ -1187,8 +1377,23 @@ class Sidebar(QFrame):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
+        self._fit_gaps()
         self._fit_favorites()
         self._place_pip()
+
+    def _fit_gaps(self):
+        """Tight spacing only while the rail would not otherwise fit its window."""
+        gaps = getattr(self, "_gaps", None)
+        if not gaps:
+            return
+        loose = self._inner.sizeHint().height() + sum(
+            n - item.sizeHint().height() for item, n, _t in gaps)
+        tight = self._scroll.viewport().height() < loose
+        for item, n, t in gaps:
+            want = t if tight else n
+            if item.sizeHint().height() != want:
+                item.changeSize(0, want, QSizePolicy.Minimum, QSizePolicy.Fixed)
+        self._root_layout.invalidate()
 
     # ── keyboard ──────────────────────────────────────────────────────────
     def _focus_chain(self) -> list[QWidget]:
@@ -1196,6 +1401,9 @@ class Sidebar(QFrame):
                 if w is not None and w.isVisibleTo(self) and w.isEnabled()]
 
     def eventFilter(self, obj, event):
+        if obj is self._scroll.viewport() and event.type() == QEvent.Resize:
+            self._fit_gaps()
+            return False
         if obj is self._inner and event.type() in (
                 QEvent.LayoutRequest, QEvent.Resize):
             self._place_pip()
@@ -1268,8 +1476,7 @@ class Sidebar(QFrame):
         self._profile_sub.set_full_text(title if ok else detail)
         self._profile_sub.setToolTip(f"{title} — {detail}" if ok else detail)
         self._profile_sub.setStyleSheet(
-            theme.type_css("META", theme.over(INK_ITEM) if ok else theme.WARN)
-            + " background: transparent;")
+            self._sub_css(theme.MUTE if ok else theme.WARN))
 
     def set_listening(self, on: bool):
         """Reflect wake-word state pushed back from the window (e.g. it
@@ -1296,26 +1503,16 @@ class Sidebar(QFrame):
             self._collapsed = collapsed
 
         c = self._collapsed
-        self.setFixedWidth(72 if c else 260)
+        self.setFixedWidth(72 if c else 258)
         self.setProperty("collapsed", c)
         self.style().unpolish(self)
         self.style().polish(self)
 
         # Inner margins
         if hasattr(self, "_root_layout"):
-            self._root_layout.setContentsMargins(
-                8 if c else theme.SPACE_3,
-                theme.SPACE_5,
-                8 if c else theme.SPACE_3,
-                theme.SPACE_3,
-            )
+            self._root_layout.setContentsMargins(12, 15, 12, 10)
         if hasattr(self, "_foot_col"):
-            self._foot_col.setContentsMargins(
-                8 if c else theme.SPACE_3,
-                0,
-                8 if c else theme.SPACE_3,
-                theme.SPACE_3,
-            )
+            self._foot_col.setContentsMargins(12, 0, 12, 10)
 
         # Brand header
         if hasattr(self, "_brand_expanded"):
@@ -1334,15 +1531,12 @@ class Sidebar(QFrame):
             self.new_task_btn.setText("")
             self.new_task_btn.setFixedSize(48, 38)
             self.new_task_btn.setToolTip(i18n.t("New task"))
-            icons.button_icon(self.new_task_btn, "plus", 16, "#ffffff")
         else:
             self.new_task_btn.setText(i18n.t('New task'))
-            self.new_task_btn.setMinimumHeight(C.MIN_TARGET + 6)
             self.new_task_btn.setMaximumWidth(16777215)
             self.new_task_btn.setMinimumWidth(0)
-            self.new_task_btn.setMaximumHeight(16777215)
+            self.new_task_btn.setFixedHeight(_RailPrimary.BODY_H + _RailPrimary.LIP)
             self.new_task_btn.setToolTip(i18n.t("Describe something you want done"))
-            icons.button_icon(self.new_task_btn, "plus", 15, "#ffffff")
 
         # Primary nav buttons
         for key, label, icon_name, tip in PRIMARY:
@@ -1354,10 +1548,9 @@ class Sidebar(QFrame):
                     btn.setToolTip(i18n.t(label))
                 else:
                     btn.setText(f"  {_amp(i18n.t(label))}")
-                    btn.setMinimumHeight(C.MIN_TARGET + 4)
                     btn.setMaximumWidth(16777215)
                     btn.setMinimumWidth(0)
-                    btn.setMaximumHeight(16777215)
+                    btn.row_h = btn.row_h
                     btn.setToolTip(i18n.t(tip))
 
         # ADD-ONS
@@ -1383,10 +1576,9 @@ class Sidebar(QFrame):
                     btn.setToolTip(i18n.t(label))
                 else:
                     btn.setText(f"  {_amp(i18n.t(label))}")
-                    btn.setMinimumHeight(C.MIN_TARGET + 4)
                     btn.setMaximumWidth(16777215)
                     btn.setMinimumWidth(0)
-                    btn.setMaximumHeight(16777215)
+                    btn.row_h = btn.row_h
                     btn.setToolTip(i18n.t(tip))
 
         # Favourites
@@ -1416,11 +1608,11 @@ class Sidebar(QFrame):
                 self._profile_name.setVisible(True)
                 self._profile_sub.setVisible(True)
                 self._profile_chevron.setVisible(True)
-                self._profile_btn.setMinimumHeight(48)
+                self._profile_btn.setMinimumHeight(46)
                 self._profile_btn.setMaximumWidth(16777215)
                 self._profile_btn.setMinimumWidth(0)
                 self._profile_btn.setMaximumHeight(16777215)
-                self._profile_btn_layout.setContentsMargins(6, 6, 6, 6)
+                self._profile_btn_layout.setContentsMargins(6, 12, 7, 0)
                 self._profile_btn_layout.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
                 self._profile_btn.setToolTip(i18n.t("Your profile, licence and workspace"))
 
@@ -1437,7 +1629,7 @@ class Sidebar(QFrame):
 
         icons.button_icon(self._addons_toggle_btn,
                           "chevron-down" if self._addons_open else "chevron-right",
-                          11, theme.over(INK_CHROME))
+                          13, theme.MUTE)
         if not getattr(self, "_collapsed", False):
             for row in getattr(self, "_addon_rows", []):
                 row.setVisible(self._addons_open)

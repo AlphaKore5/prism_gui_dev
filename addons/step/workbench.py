@@ -23,10 +23,33 @@ import i18n
 import paths
 import theme
 from widgets import controls as C
+from widgets import icons
 
 _EDGE = "rgba(0, 0, 0, 0.10)"
 _HAIR = "rgba(0, 0, 0, 0.07)"
 MODEL_EXTS = (".step", ".stp")
+
+# The reskin's pane: white, 17px corners, the shared painted card shadow.
+R_PANE = 17
+RIGHT_W = 397                   # the results pane at its normal width
+
+# The preview's pill segments (.pseg): a stone track, white pill when on.
+SEG_QSS = (
+    "#stepSegBar { background: #EFEEEA; border: none; border-radius: 17px; }"
+    "QPushButton#stepSeg { padding: 0 14px; min-height: 27px; max-height: 27px;"
+    " font-size: 13.25px; font-weight: 400; border: 1px solid transparent;"
+    " background: transparent; border-radius: 14px; color: #2A2A28; }"
+    "QPushButton#stepSeg:hover { color: #111110; }"
+    "QPushButton#stepSeg:checked { background: #ffffff; color: #111110;"
+    " font-weight: 500; border: 1px solid rgba(20, 20, 18, 0.06); }")
+TABS_QSS = (
+    "#tabStrip { background: #EFEEEA; border: none; border-radius: 17px; }"
+    "#tabBtn { padding: 0 14px; min-height: 27px; max-height: 27px;"
+    " font-size: 13.25px; font-weight: 400; border: 1px solid transparent;"
+    " background: transparent; border-radius: 14px; color: #2A2A28; }"
+    "#tabBtn:hover { background: transparent; color: #111110; }"
+    "#tabBtn[cur=\"true\"], #tabBtn:checked { background: #ffffff;"
+    " color: #111110; font-weight: 500; border: 1px solid rgba(20, 20, 18, 0.06); }")
 
 
 def _discard(widget: QWidget):
@@ -39,11 +62,19 @@ def _discard(widget: QWidget):
 
 
 def heading(text: str) -> QLabel:
-    label = QLabel(text.upper())
+    """The preview's section label: mono, upper case, led by the red square."""
+    label = C.kicker(text)
     label.setStyleSheet(
-        f"color: {theme.NEUTRAL[500]}; font-size: 11px; font-weight: 700;"
-        " letter-spacing: 1px; background: transparent; border: none;")
+        f"font-family: '{theme.FONT_MONO}'; font-size: 11px; font-weight: 400;"
+        f" color: {theme.MUTE}; background: transparent; border: none;")
     return label
+
+
+def divider() -> QFrame:
+    line = QFrame()
+    line.setFixedHeight(1)
+    line.setStyleSheet(f"background: {_HAIR}; border: none;")
+    return line
 
 
 def linkify(label: QLabel, colour: str) -> QLabel:
@@ -100,21 +131,28 @@ class Card(QFrame):
         self.setObjectName("wbCard")
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setStyleSheet(
-            f"#wbCard {{ background: #ffffff; border: 1px solid {_EDGE};"
-            f" border-radius: {theme.R_CARD}px; }}")
+            "#wbCard { background: #ffffff; border: none;"
+            f" border-radius: {R_PANE}px; }}")
+        C.attach_shadow(self, C.SH_CARD, R_PANE)
         self.lay = QVBoxLayout(self)
         self.lay.setContentsMargins(0, 0, 0, 0)
         self.lay.setSpacing(0)
         self.count = None
         if title:
             head = QFrame()
-            head.setStyleSheet(f"border: none; border-bottom: 1px solid {_HAIR};")
+            head.setStyleSheet("border: none;")
             row = QHBoxLayout(head)
-            row.setContentsMargins(16, 11, 16, 11)
+            row.setContentsMargins(15, 13, 15, 4)
             row.addWidget(heading(title))
             row.addStretch(1)
             if counter:
-                self.count = chip("0")
+                self.count = QLabel("0")
+                self.count.setObjectName("wbCount")
+                self.count.setStyleSheet(
+                    f"#wbCount {{ font-family: '{theme.FONT_MONO}';"
+                    " font-size: 10.6px; font-weight: 500; color: #111110;"
+                    " background: #EFEEEA; border: none; border-radius: 5px;"
+                    " padding: 1px 6px; }")
                 row.addWidget(self.count)
             self.lay.addWidget(head)
 
@@ -136,33 +174,35 @@ class _ModelRow(QFrame):
         self.setObjectName("wbModel")
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setCursor(Qt.PointingHandCursor)
-        edge = theme.ACCENT if selected else _EDGE
-        width = "2px" if selected else "1px"
+        # The preview's .model.on: a stone row with a red bar on its left.
         self.setStyleSheet(
-            f"#wbModel {{ background: #ffffff; border: {width} solid {edge};"
-            " border-radius: 10px; }")
+            "#wbModel { background: #EEEDEA; border: none;"
+            f" border-left: 3px solid {theme.BRAND_RED}; border-radius: 11px; }}"
+            if selected else
+            "#wbModel { background: transparent; border: none;"
+            " border-radius: 11px; } #wbModel:hover { background: #F6F5F2; }")
         lay = QHBoxLayout(self)
         lay.setContentsMargins(10, 9, 8, 9)
         lay.setSpacing(10)
-        thumb = QLabel("▣")
-        thumb.setAlignment(Qt.AlignCenter)
-        thumb.setFixedSize(42, 42)
-        thumb.setStyleSheet(
-            f"background: {theme.NEUTRAL[100]}; color: {theme.NEUTRAL[700]};"
-            " border-radius: 8px; border: none; font-size: 16px;")
+        thumb = QLabel()
+        thumb.setAlignment(Qt.AlignTop | Qt.AlignHCenter)
+        thumb.setFixedWidth(16)
+        thumb.setPixmap(icons.pixmap("cube", 15, theme.INK))
+        thumb.setStyleSheet("border: none; background: transparent;"
+                            " padding-top: 2px;")
         lay.addWidget(thumb)
         col = QVBoxLayout()
         col.setSpacing(2)
         name = QLabel(item["name"])
         name.setToolTip(item["path"])
         name.setWordWrap(True)
-        name.setStyleSheet("font-weight: 700; font-size: 13.5px; border: none;"
-                           " background: transparent;")
+        name.setStyleSheet("font-weight: 500; font-size: 13px; color: #111110;"
+                           " border: none; background: transparent;")
         col.addWidget(name)
         s = QLabel(item["sub"])
         s.setWordWrap(True)
-        s.setStyleSheet(f"color: {theme.NEUTRAL[500]}; font-size: 12px;"
-                        " border: none; background: transparent;")
+        s.setStyleSheet(f"font-family: '{theme.FONT_MONO}'; color: {theme.MUTE};"
+                        " font-size: 10.6px; border: none; background: transparent;")
         col.addWidget(s)
         tag = QHBoxLayout()
         tag.addWidget(chip(item["status"], item["tone"]))
@@ -301,21 +341,21 @@ class DropZone(QFrame):
         self.setObjectName("wbDrop")
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setStyleSheet(
-            f"#wbDrop {{ background: {theme.NEUTRAL[100]};"
-            f" border: 1.5px dashed {theme.NEUTRAL[300]}; border-radius: 10px; }}"
+            "#wbDrop { background: #F6F5F2; border: 1px dashed #D8D7D2;"
+            " border-radius: 14px; }"
             "QLabel { border: none; background: transparent; }")
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(12, 14, 12, 12)
+        lay.setContentsMargins(13, 13, 13, 13)
         lay.setSpacing(4)
         t = QLabel(i18n.t("Drop .step / .stp files here"))
         t.setAlignment(Qt.AlignCenter)
-        t.setStyleSheet(f"color: {theme.NEUTRAL[500]}; font-size: 12.5px;")
+        t.setStyleSheet(f"color: {theme.MUTE}; font-size: 12.7px;")
         lay.addWidget(t)
         row = QHBoxLayout()
         row.setAlignment(Qt.AlignCenter)
-        b = Link(i18n.t("or browse"))
+        b = Link(i18n.t("or browse"), theme.INK)
         b.clicked.connect(self.browse.emit)
-        f = Link(i18n.t("Favourites"))
+        f = Link(i18n.t("Favourites"), theme.INK)
         f.clicked.connect(self.favourites.emit)
         row.addWidget(b)
         row.addSpacing(10)
@@ -408,7 +448,7 @@ class Canvas(QFrame):
         self.card.setOpenExternalLinks(False)
         linkify(self.card, theme.INFO_INK)
         self.card.setStyleSheet(
-            "background: #fbfbfc; border: none; padding: 20px;"
+            "background: #ffffff; border: none; padding: 20px;"
             f" color: {theme.NEUTRAL[700]}; font-size: 13px;")
         self.page = QWidget()
         pl = QVBoxLayout(self.page)
@@ -427,7 +467,7 @@ class Canvas(QFrame):
         pl.addWidget(self.choose_host)
         pl.addStretch(1)
         self.page.setObjectName("wbPage")
-        self.page.setStyleSheet("#wbPage { background: #fbfbfc; }")
+        self.page.setStyleSheet("#wbPage { background: #ffffff; }")
         self.stack.addWidget(self.page)
         self.stack.addWidget(self.sheet)
         self.tag = chip("")
@@ -456,15 +496,17 @@ class Canvas(QFrame):
         self.tag.hide()
         self.choose_host.show()
         self.card.setText(
-            "<div style='font-size:26px; font-weight:700; color:%s'>%s</div>"
-            "<p>%s</p><p style='color:%s'>%s</p>"
-            "<p style='color:%s'>1 %s &nbsp;·&nbsp; 2 %s &nbsp;·&nbsp; 3 %s</p>"
-            % (theme.TEXT, i18n.t("Attach a 3D model"),
+            "<div style='font-size:24px; font-weight:400; color:%s'>%s</div>"
+            "<p style='color:%s; font-size:13px'>%s</p>"
+            "<p style='color:%s; font-size:13px'>%s</p>"
+            "<p style=\"color:%s; font-size:11px; font-family:'%s'\">"
+            "1 %s · 2 %s · 3 %s</p>"
+            % (theme.TEXT, i18n.t("Attach a 3D model"), theme.MUTE,
                i18n.t(".step / .stp — several at once is fine. It is "
                       "measured on this machine; no AI ever sees the file."),
-               theme.NEUTRAL[500],
+               theme.MUTE,
                i18n.t("or drop them anywhere on this window"),
-               theme.NEUTRAL[600], i18n.t("Attach"),
+               "#2A2A28", theme.FONT_MONO, i18n.t("Attach"),
                i18n.t("Pick Draft · Ask · Edit"), i18n.t("Run")))
         self.stack.setCurrentWidget(self.page)
 
@@ -472,8 +514,8 @@ class Canvas(QFrame):
         self.tag.hide()
         self.choose_host.hide()
         self.card.setText(
-            "<div style='font-size:20px; font-weight:700; color:%s'>%s</div>"
-            "<p>%s</p>" % (theme.TEXT, names,
+            "<div style='font-size:20px; font-weight:500; color:%s'>%s</div>"
+            "<p style='color:%s'>%s</p>" % (theme.TEXT, names, theme.MUTE,
                            i18n.t("Ready. Choose what to do below, then "
                                   "press the button at the bottom right.")))
         self.stack.setCurrentWidget(self.page)
@@ -518,6 +560,9 @@ class Canvas(QFrame):
             if item.widget():
                 _discard(item.widget())
         self.toast_text.setText(text)
+        self.toast_text.setWordWrap(False)
+        self.toast_box.setMinimumWidth(0)
+        self.toast_box.setMaximumWidth(16777215)
         for label, fn in links:
             a = Link(label, "#7dd3fc")
             a.clicked.connect(fn)
@@ -533,6 +578,11 @@ class Canvas(QFrame):
         self._timer.start(seconds * 1000)
 
     def _place_toast(self):
+        # Never wider than the canvas: the links at its end must stay on screen.
+        if self.toast_box.width() > self.width() - 16:
+            self.toast_text.setWordWrap(True)
+            self.toast_box.setFixedWidth(max(self.width() - 16, 120))
+            self.toast_box.adjustSize()
         self.toast_box.move(max((self.width() - self.toast_box.width()) // 2, 8),
                             self.height() - self.toast_box.height() - 16)
 
@@ -581,13 +631,18 @@ class _Rows(QScrollArea):
         self.col.insertWidget(self.col.count() - 1, widget)
 
 
-def _section(text: str) -> QLabel:
-    label = QLabel(text.upper())
+def _section(text: str) -> QWidget:
+    """A register heading: the preview's .sec (mono, red square)."""
+    host = QWidget()
+    host.setStyleSheet("background: transparent; border: none;")
+    lay = QHBoxLayout(host)
+    lay.setContentsMargins(15, 11, 15, 5)
+    label = C.kicker(text)
     label.setStyleSheet(
-        f"background: {theme.NEUTRAL[100]}; color: {theme.NEUTRAL[500]};"
-        " font-size: 10.5px; font-weight: 700; letter-spacing: 1px;"
-        " padding: 6px 16px; border: none;")
-    return label
+        f"font-family: '{theme.FONT_MONO}'; font-size: 10.3px; font-weight: 500;"
+        f" color: {theme.MUTE}; background: transparent; border: none;")
+    lay.addWidget(label)
+    return host
 
 
 def _kv(key: str, value: str, tag: str = "") -> QWidget:
@@ -595,17 +650,20 @@ def _kv(key: str, value: str, tag: str = "") -> QWidget:
     row.setStyleSheet(f"border: none; border-bottom: 1px solid {_HAIR};"
                       " background: transparent;")
     lay = QHBoxLayout(row)
-    lay.setContentsMargins(16, 7, 16, 7)
+    lay.setContentsMargins(15, 7, 15, 7)
     k = QLabel(key)
-    k.setStyleSheet("border: none; font-size: 13px;")
+    k.setStyleSheet(f"border: none; font-size: 13px; color: {theme.MUTE};")
     lay.addWidget(k)
     lay.addStretch(1)
     if tag:
         lay.addWidget(chip(tag))
     v = QLabel(value)
-    v.setWordWrap(True)
+    # A short figure stays on one line (a size split over two reads as two
+    # numbers); only a long one wraps.
+    v.setWordWrap(len(value) > 30)
     v.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-    v.setStyleSheet("border: none; font-size: 13px; font-weight: 700;")
+    v.setStyleSheet(f"border: none; font-family: '{theme.FONT_MONO}';"
+                    " font-size: 12.4px; font-weight: 500; color: #111110;")
     v.setMaximumWidth(250)
     lay.addWidget(v)
     return row
@@ -659,11 +717,16 @@ class SpecPanel(_Rows):
                 self.add(_section(i18n.t("Bend allowance")))
                 self.add(_kv(i18n.t("K-factor"), f"{rep['k_factor']:g}", k_note))
             for w in rep.get("warnings") or []:
-                note = QLabel("! " + w)
+                note = QLabel(w)
                 note.setWordWrap(True)
-                note.setStyleSheet("color: #a16207; padding: 6px 16px;"
-                                   " font-size: 12px; border: none;")
-                self.add(note)
+                note.setStyleSheet("color: #7A5A0E; background: #F6EDD6;"
+                                   " border: none; border-radius: 8px;"
+                                   " padding: 7px 10px; font-size: 12px;")
+                host = QWidget()
+                hl = QVBoxLayout(host)
+                hl.setContentsMargins(15, 6, 15, 2)
+                hl.addWidget(note)
+                self.add(host)
 
 
 class PlanPanel(QWidget):

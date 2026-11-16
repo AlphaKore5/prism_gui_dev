@@ -446,7 +446,7 @@ class _SelectedPanel(C.Card):
     """
 
     def __init__(self, parent=None):
-        super().__init__(stripe=True, parent=parent)
+        super().__init__(parent=parent)
         self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         col = self.body((theme.CARD_PAD, theme.SPACE_3,
                          theme.CARD_PAD, theme.SPACE_3), theme.SPACE_2)
@@ -1248,8 +1248,7 @@ class InquiryDialog(PipelineActions, PipelineScreen, QWidget):
         self.status = _StatusLine("")
         self.status.setObjectName("meta")
         self.status.setWordWrap(True)
-        bar_row.addWidget(self.status)
-        bar_row.addStretch(1)
+        bar_row.addWidget(self.status, 1)
 
         self.body.addWidget(bar)
 

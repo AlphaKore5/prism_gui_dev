@@ -13,8 +13,8 @@ want to be on screen at once, and the plan is one click back."""
 from __future__ import annotations
 import json
 import os
-from PySide6.QtCore import Qt, QTimer, QUrl, Signal, QSize
-from PySide6.QtGui import QGuiApplication, QFont, QCursor, QDesktopServices, QPainter, QPixmap, QColor, QImage, QLinearGradient
+from PySide6.QtCore import Qt, QTimer, QUrl, Signal, QSize, QRectF, QPointF
+from PySide6.QtGui import QGuiApplication, QFont, QCursor, QDesktopServices, QPainter, QPixmap, QColor, QImage, QLinearGradient, QRadialGradient, QBrush
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QMessageBox, QFrame,
     QFileDialog, QDialog, QLabel, QScrollArea, QStackedWidget, QPushButton,
@@ -39,6 +39,7 @@ import workspace
 from addons import registry
 from widgets import icons
 from widgets.sidebar import Sidebar
+from widgets.controls import PrismStatusBar
 from widgets.home_panel import HomePanel
 from addons.inquiry.panel import InquiryPanel
 from addons.inquiry.dialog import InquiryDialog
@@ -48,7 +49,6 @@ from widgets.wizard_panel import WizardPanel
 from widgets.tour import TourOverlay
 from addons.bom.panel import BomPanel
 from addons.boq.panel import BoqPanel
-from widgets.catalog_panel import CatalogPanel
 from addons.email.panel import EmailPanel
 from addons.gerber.panel import GerberPanel
 from addons.step.panel import StepPanel
@@ -72,7 +72,6 @@ from workers import (RouteWorker, AutomationWorker, RecordWorker,
                      ReelWorker)
 import wakeword
 from wakeword import WakeWordListener
-from dialogs.ai_directory_dialog import AIDirectoryDialog
 from addons.email.dialog import EmailComposeDialog, EmailSetupDialog
 from addons.boq.dialog import BoqDialog
 from addons.gerber.dialog import GerberDialog
@@ -105,7 +104,7 @@ COMPOSE, RUNNING = 0, 1        # pages of the workbench's own inner stack
 # inserting renumbers everything after it -- but nothing has to be renumbered
 # BY HAND any more.
 SCREENS = (
-    "home", "workbench", "inquiry", "config", "guide", "catalog",
+    "home", "workbench", "inquiry", "config", "guide",
     "runs", "boq", "email", "support", "gerber",
     "wizard",           # reached only from _first_run(), never by name
     "artifacts",
@@ -130,7 +129,6 @@ WORKBENCH = _INDEX["workbench"]
 INQUIRY = _INDEX["inquiry"]
 SETTINGS = _INDEX["config"]
 GUIDE = _INDEX["guide"]
-CATALOG = _INDEX["catalog"]
 HISTORY = _INDEX["runs"]
 BOQ = _INDEX["boq"]
 EMAIL = _INDEX["email"]
@@ -202,6 +200,12 @@ AGENT_FEATURES = {agent: addon.feature
                   for addon in registry.REGISTRY
                   for agent in addon.agents}
 
+# Screens of add-ons that are switched off (manifest.OFF). The page stays in
+# the stack so SCREENS and every index after it are unchanged; _show_screen()
+# simply refuses to go there.
+_SWITCHED_OFF = {addon.screen for addon in registry.REGISTRY
+                 if addon.is_off() and addon.screen}
+
 
 class DashboardCentral(QWidget):
     """Central widget that paints the wallpaper background cleanly scaled to cover,
@@ -229,6 +233,7 @@ class DashboardCentral(QWidget):
         self._cached_pixmap = None
         self._cached_blurred = None
         self._cached_size = None
+        self._dot_tile = None
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -281,7 +286,31 @@ class DashboardCentral(QWidget):
             grad.setColorAt(1.0, QColor(255, 255, 255, 30))
             painter.fillRect(self.rect(), grad)
         else:
-            painter.fillRect(self.rect(), QColor("#ffffff"))  # the default: plain white
+            painter.fillRect(self.rect(), QColor(theme.STONE))  # the default: AlphaKore stone
+            self._paint_stone_texture(painter)
+
+    def _paint_stone_texture(self, painter):
+        """The preview's canvas: a soft white light from the top and a faint
+        dot field over the stone. Painted, so it is the same on every OS."""
+        w, h = self.width(), self.height()
+        painter.save()
+        painter.translate(w * 0.58, -h * 0.08)
+        painter.scale(1.0, 0.5)
+        light = QRadialGradient(0, 0, w * 0.646)
+        light.setColorAt(0.0, QColor(255, 255, 255, 190))
+        light.setColorAt(0.7, QColor(255, 255, 255, 0))
+        painter.fillRect(QRectF(-w, -h * 2, w * 2, h * 4), light)
+        painter.restore()
+        if self._dot_tile is None:
+            self._dot_tile = QPixmap(16, 16)
+            self._dot_tile.fill(Qt.transparent)
+            tp = QPainter(self._dot_tile)
+            tp.setRenderHint(QPainter.Antialiasing, True)
+            tp.setPen(Qt.NoPen)
+            tp.setBrush(QColor(17, 17, 16, 20))
+            tp.drawEllipse(QPointF(1, 1), 0.9, 0.9)
+            tp.end()
+        painter.fillRect(self.rect(), QBrush(self._dot_tile))
 
     def set_background(self, path: str):
         if path and os.path.exists(path):
@@ -317,6 +346,15 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Prism")
         self._fit_to_screen()
+        self.setStatusBar(PrismStatusBar())
+        # The family line at the right of the status bar, as in the preview.
+        _by = QLabel(f"Prism {app_meta.VERSION} · by AlphaKore")
+        _by.setObjectName("statusBy")
+        self.statusBar().addPermanentWidget(_by)
+        _ak = QLabel()
+        _ak.setPixmap(icons.ak_mark_pixmap(13, "#77766F"))
+        _ak.setContentsMargins(0, 0, 14, 0)
+        self.statusBar().addPermanentWidget(_ak)
 
         self.cfg = CB.config.load()
         try:
@@ -557,8 +595,6 @@ class MainWindow(QMainWindow):
         self.screens.addWidget(self.settings_panel)       # SETTINGS
         self.guide_panel = GuidePanel(self.cfg)
         self.screens.addWidget(self.guide_panel)          # GUIDE
-        self.catalog_panel = CatalogPanel(self.cfg)
-        self.screens.addWidget(self.catalog_panel)        # CATALOG
         self.history_panel = HistoryPanel(self.cfg)
         self.screens.addWidget(self.history_panel)        # HISTORY
         self.boq_panel = BoqPanel(self.cfg)
@@ -649,6 +685,7 @@ class MainWindow(QMainWindow):
         # same handler History uses — same record, same viewer.
         self.home_panel.open_run_record.connect(self._open_run_record)
         self.boq_panel.opened.connect(self._open_boq_dialog)
+        self.boq_panel.files_chosen.connect(self._open_boq_dialog)
         self.bom_panel.opened.connect(self._open_bom_dialog)
         self.step_panel.opened.connect(self._open_step_dialog)
         self.step_work = None           # built on first visit — see _step_screen
@@ -662,7 +699,6 @@ class MainWindow(QMainWindow):
         # settings_panel.navigate — the payload is a _handle_command key, so
         # every screen reaches every other through the one router rather than
         # each learning about the others.
-        self.catalog_panel.navigate.connect(self._handle_command)
         self.history_panel.navigate.connect(self._handle_command)
         self.guide_panel.navigate.connect(self._handle_command)
         for panel in (self.boq_panel, self.bom_panel, self.gerber_panel,
@@ -700,6 +736,12 @@ class MainWindow(QMainWindow):
 
     def _show_screen(self, name: str = "workbench"):
         """Switch the body stack and keep the rail's highlight in step."""
+        if name in _SWITCHED_OFF:
+            # Nothing draws a way here; this is for anything that still asks
+            # (an old Lumi answer, a stale command). Stay put and say why.
+            self.statusBar().showMessage(
+                i18n.t("That add-on isn't available in this version."), 6000)
+            return
         # Leaving the Email inquiry automation working screen: stop its auto-check
         # timer (see InquiryDialog.on_leave) and pick up whatever it wrote —
         # it saves its own settings and reading bookmark, works the register
@@ -731,9 +773,6 @@ class MainWindow(QMainWindow):
             self.history_panel.refresh()
         elif index == ARTIFACTS:
             self.artifacts_panel.refresh()
-        elif index == CATALOG:
-            self.catalog_panel.cfg = self.cfg
-            self.catalog_panel.refresh()
         elif index == SUPPORT:
             # The assistant runs on the customer's own planning key, and a
             # copy taken at launch would miss a key they saved thirty seconds
@@ -1466,8 +1505,6 @@ class MainWindow(QMainWindow):
                 self._reset_for_new_task()
             self.work_stack.setCurrentIndex(COMPOSE)
             self._show_screen("workbench")
-        elif key == "catalog":
-            self._show_screen("catalog")
         elif key == "reel":
             self._open_reel()
         elif key == "motion":
@@ -1684,7 +1721,7 @@ class MainWindow(QMainWindow):
         # runs first; the screen's button opens the working dialog.
         self._authorized_then("boq", "addon", lambda: self._show_screen("boq"))
 
-    def _open_boq_dialog(self):
+    def _open_boq_dialog(self, paths=None):
         # Dependency probe comes AFTER the licence check: a customer who
         # hasn't bought BOQ should be told that, not sent off to install ezdxf
         # for a feature they still won't be able to open.
@@ -1699,7 +1736,10 @@ class MainWindow(QMainWindow):
                 "`brew install libredwg` on macOS. A .dxf needs neither."
                 f"\n\nDetail: {err}")
             return
-        dlg = BoqDialog(self.cfg, [], self)
+        # Paths dropped on (or chosen from) the BOQ front page arrive already
+        # attached: the dialog's own `attachments` path (_absorb), the same
+        # one Inquiry's hand-off uses.
+        dlg = BoqDialog(self.cfg, [{"path": p} for p in (paths or [])], self)
         dlg.exec()
         if getattr(dlg, "owns_followup", False):
             return

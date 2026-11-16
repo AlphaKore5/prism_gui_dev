@@ -35,12 +35,13 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import (
     QAction, QPainter, QPen, QFont, QFontMetrics, QBrush, QColor, QPainterPath,
-    QLinearGradient, QRadialGradient, QPixmap,
+    QLinearGradient, QRadialGradient, QPixmap, QIcon, QImage,
 )
 from PySide6.QtWidgets import (
     QAbstractButton, QButtonGroup, QFrame, QGraphicsDropShadowEffect,
     QGridLayout, QHBoxLayout, QLabel, QLayout, QLineEdit, QMenu, QProgressBar,
-    QPushButton, QSizePolicy, QTextEdit, QVBoxLayout, QWidget,
+    QPushButton, QSizePolicy, QStatusBar, QStyle, QStyleOption, QTextEdit,
+    QVBoxLayout, QWidget,
 )
 
 import theme
@@ -85,9 +86,447 @@ def track(widget, em: float):
     return widget
 
 
+def has_wallpaper(widget) -> bool:
+    """Whether the person picked a wallpaper (Settings > Appearance). Only then
+    do cards stay frosted glass over it; by default they are flat AlphaKore
+    cards: solid white, one hairline."""
+    central = widget.window().findChild(QWidget, "central")
+    pix = getattr(central, "_bg_orig", None)
+    return bool(pix is not None and not pix.isNull())
+
+
+CARD_LIP = 5                    # px of painted shadow under a resting card
+
+
+def paint_flat_card(widget, painter, rect: QRectF, radius: float,
+                    fill=None, edge=None, lip: int = None,
+                    outside_shadow: bool = False) -> bool:
+    """Paint the flat card and return True, or return False when a wallpaper is
+    set and the caller should paint its glass instead.
+
+    `fill` (a QBrush, e.g. a gradient), `edge` (a QColor) and `lip` (px of
+    painted shadow, 0 for none) let one surface, the rail, differ from the
+    default white card with its hairline and CARD_LIP.
+
+    `outside_shadow` is set by a card whose ShadowUnder companion draws the
+    preview's soft shadow and 3.5% ring outside the body: the body is then just
+    the white fill, and the inline lip and hairline are not painted."""
+    if has_wallpaper(widget):
+        return False
+    lip = CARD_LIP if lip is None else lip
+    if outside_shadow:
+        body = rect.adjusted(0, 0, 0, -lip) if lip and rect.height() > 4 * lip else rect
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(fill or QColor(theme.CARD))
+        painter.drawRoundedRect(body, radius, radius)
+        return True
+    # The preview's resting-card shadow, painted (a QGraphicsEffect turns black
+    # on some machines): a soft lip under the bottom edge, inside the widget's
+    # own rect, so no layout or neighbour has to make room for it.
+    body = rect.adjusted(0, 0, 0, -lip) if lip and rect.height() > 4 * lip else rect
+    if body is not rect:
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor(20, 20, 18, 11))
+        for i in range(lip, 0, -1):
+            painter.drawRoundedRect(body.adjusted(1.5, i, -1.5, i), radius, radius)
+    painter.setPen(QPen(edge or QColor(theme.HAIRLINE), 1))
+    painter.setBrush(fill or QColor(theme.CARD))
+    painter.drawRoundedRect(body.adjusted(0.5, 0.5, -0.5, -0.5), radius, radius)
+    return True
+
+
+# ── painted soft shadows ────────────────────────────────────────────────────
+# The preview's box-shadows, as (dx, dy, blur, spread, (r, g, b, a)) in px at
+# 1366 wide (1rem = 14.73px), first layer on top as in CSS. A QGraphicsEffect is
+# not used (see shadows_enabled()): a ShadowUnder is a mouse-transparent sibling
+# stacked directly under its target that paints a cached pre-blurred pixmap
+# around the target's body, so nothing in any layout has to make room for it.
+SH_CARD = ((0, 1, 0, 0, (0, 0, 0, .03)),
+           (0, 10.3, 29.5, -22.1, (20, 20, 18, .28)),
+           (0, 0, 0, 1, (20, 20, 18, .035)))
+SH_DARK_BTN = ((0, 11.8, 23.5, -11.8, (0, 0, 0, .6)), (0, 2, 6, 0, (0, 0, 0, .18)))
+SH_LIGHT_BTN = ((0, 8.8, 20.6, -11.8, (20, 20, 18, .35)), (0, 1, 3, 0, (20, 20, 18, .06)))
+SH_SEND = ((0, 10.3, 20.6, -10.3, (0, 0, 0, .6)),)
+SH_MOTTO = ((0, 5.9, 14.7, -10.3, (20, 20, 18, .3)),)
+SH_DEMO = ((0, 17.7, 35.3, -23.6, (0, 0, 0, .6)), (0, 0, 0, 1, (0, 0, 0, .4)))
+SH_CHIP_HOVER = ((0, 4.4, 11.8, -7.4, (20, 20, 18, .3)),)
+SH_TILE_HOVER = ((0, 8.8, 17.7, -11.8, (20, 20, 18, .35)),)
+
+_shadow_cache: dict = {}
+
+
+def _shadow_pixmap(w: int, h: int, radius: float, layers, pads, dpr: float) -> QPixmap:
+    """The shadow of a w x h body (radius `radius`) drawn into a (w + pads) pixmap.
+    A gaussian layer is painted as concentric rounded rects whose alphas are
+    chosen so the accumulated alpha follows A * Q(d / sigma) exactly."""
+    key = (w, h, round(radius, 2), layers, pads, dpr)
+    hit = _shadow_cache.get(key)
+    if hit is not None:
+        return hit
+    pl, pt, pr, pb = pads
+    img = QImage(int((w + pl + pr) * dpr + .5), int((h + pt + pb) * dpr + .5),
+                 QImage.Format_RGBA64_Premultiplied)   # 16-bit: layers are < 1/255 each
+    img.fill(0)
+    p = QPainter(img)
+    p.setRenderHint(QPainter.Antialiasing, True)
+    p.scale(dpr, dpr)
+    p.translate(pl, pt)
+    body = QRectF(0, 0, w, h)
+    ring = QPainterPath()                       # everywhere except the body itself
+    ring.addRect(QRectF(-pl, -pt, w + pl + pr, h + pt + pb))
+    inner = QPainterPath()
+    inner.addRoundedRect(body, radius, radius)
+    ring = ring.subtracted(inner)
+    p.setClipPath(ring)
+    p.setPen(Qt.NoPen)
+
+    def rrect(rect, r):
+        r = max(0.0, min(r, rect.width() / 2, rect.height() / 2))
+        p.drawRoundedRect(rect, r, r)
+
+    for dx, dy, blur, spread, (cr, cg, cb, ca) in reversed(layers):
+        base = body.translated(dx, dy).adjusted(-spread, -spread, spread, spread)
+        r0 = max(0.0, radius + spread)
+        if blur <= 0:
+            p.setBrush(QColor.fromRgbF(cr / 255, cg / 255, cb / 255, ca))
+            rrect(base, r0)
+            continue
+        sigma = blur / 2.0
+        d_out, d_in = 2.5 * sigma, -1.0 * sigma
+        steps = max(8, int(d_out - d_in))
+        prev = 0.0
+        for i in range(steps + 1):
+            d = d_out - (d_out - d_in) * i / steps
+            cum = ca * 0.5 * math.erfc(d / (sigma * math.sqrt(2)))
+            a = (cum - prev) / (1 - prev) if prev < 1 else 0.0
+            if a > 0:
+                p.setBrush(QColor.fromRgbF(cr / 255, cg / 255, cb / 255, a))
+                rrect(base.adjusted(-d, -d, d, d), r0 + d)
+            prev = cum
+    p.end()
+    pm = QPixmap.fromImage(img)
+    pm.setDevicePixelRatio(dpr)
+    if len(_shadow_cache) > 96:
+        _shadow_cache.clear()
+    _shadow_cache[key] = pm
+    return pm
+
+
+def _shadow_pads(layers) -> tuple:
+    l = t = r = b = 0.0
+    for dx, dy, blur, spread, _c in layers:
+        reach = 1.25 * blur + max(spread, 0)
+        l = max(l, reach - dx)
+        r = max(r, reach + dx)
+        t = max(t, reach - dy)
+        b = max(b, reach + dy)
+    return tuple(int(math.ceil(v)) for v in (l, t, r, b))
+
+
+class ShadowUnder(QWidget):
+    """The preview's soft box-shadow for `target`: see the block comment above.
+    The shadow follows the target's geometry, parent, visibility and (optional)
+    hover state, and goes when the target does. `radius` None means a pill
+    (half the body height). `inset` = (l, t, r, b) px of the target's rect that
+    are not body (a Card's transparent lip). Nested cards, a Card inside a Card,
+    get none: their parent already supplies the surface."""
+
+    def __init__(self, target: QWidget, layers, radius=None,
+                 inset=(0, 0, 0, 0), hover_only: bool = False):
+        super().__init__()
+        self._t = target
+        self._layers = tuple(tuple(x) for x in layers)
+        self._radius = radius
+        self._inset = inset
+        self._hover_only = hover_only
+        self._hover = False
+        self._pads = _shadow_pads(self._layers)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        self.setAttribute(Qt.WA_NoSystemBackground, True)
+        self.setFocusPolicy(Qt.NoFocus)
+        self.hide()
+        target.installEventFilter(self)
+        target.destroyed.connect(self.deleteLater)
+        target._shadow_under = self
+        self._sync()
+
+    def active(self) -> bool:
+        """True while this shadow is drawing, so the target can leave its own
+        inline lip and edge unpainted."""
+        return self.parentWidget() is not None and not self._hover_only
+
+    def _nested(self, parent) -> bool:
+        w = parent
+        while w is not None:
+            if isinstance(w, Card):
+                return True
+            w = w.parentWidget()
+        return False
+
+    def _sync(self):
+        t = self._t
+        parent = t.parentWidget()
+        if parent is None or (isinstance(t, Card) and self._nested(parent)):
+            if self.parentWidget() is not None:
+                self.setParent(None)
+            self.hide()
+            return
+        if self.parentWidget() is not parent:
+            self.setParent(parent)
+        self.stackUnder(t)
+        il, it, ir, ib = self._inset() if callable(self._inset) else self._inset
+        pl, pt, pr, pb = self._pads
+        g = t.geometry()
+        self.setGeometry(g.x() + il - pl, g.y() + it - pt,
+                         g.width() - il - ir + pl + pr, g.height() - it - ib + pt + pb)
+        self.setVisible(t.isVisible() and (self._hover or not self._hover_only))
+        self.update()
+
+    def eventFilter(self, obj, ev):
+        if obj is getattr(self, "_t", None):
+            et = ev.type()
+            if et == QEvent.Enter:
+                self._hover = True
+            elif et == QEvent.Leave:
+                self._hover = False
+            if et in (QEvent.ParentChange, QEvent.Move, QEvent.Resize, QEvent.Show,
+                      QEvent.Hide, QEvent.Enter, QEvent.Leave, QEvent.EnabledChange):
+                self._sync()
+        return False
+
+    def paintEvent(self, event):
+        w = self.width() - self._pads[0] - self._pads[2]
+        h = self.height() - self._pads[1] - self._pads[3]
+        if w < 2 or h < 2:
+            return
+        rad = h / 2.0 if self._radius is None else float(self._radius)
+        dpr = self.devicePixelRatioF()
+        pm = _shadow_pixmap(w, h, rad, self._layers, self._pads, dpr)
+        p = QPainter(self)
+        if not self._t.isEnabled():             # .btn[disabled] { opacity: .45 } takes its shadow too
+            p.setOpacity(0.45)
+        p.drawPixmap(0, 0, pm)
+        p.end()
+
+
+def attach_shadow(widget: QWidget, layers, radius=None, inset=(0, 0, 0, 0),
+                  hover_only: bool = False) -> QWidget:
+    """Give `widget` the preview's painted soft shadow (see ShadowUnder)."""
+    ShadowUnder(widget, layers, radius, inset, hover_only)
+    return widget
+
+
+class DarkPill(QPushButton):
+    """The preview's `.btn.dark`: a dark gradient pill, a red gradient dot-icon
+    with a glow at its left, the label beside it. Painted, so the glow, the
+    inset highlight and the drop shadow match; the label stays the button's
+    own text() and clicked/enabled/tooltips behave as on any QPushButton.
+    Default metrics are the preview's `.btn.sm` (33px, 13px label, 25px dot)."""
+
+    BODY_H = 33
+    LIP = 0                     # px of painted drop shadow under the body
+    FONT_PX = 13
+    DOT = 25
+    PAD_L = 4.4
+    PAD_R = 17
+    GAP = 8.8
+
+    def __init__(self, text: str = "", parent=None):
+        super().__init__(text, parent)
+        self._kbd_focus = False
+        # The app sheet's `#primaryBtn { min-height: 34px; padding: 6px 20px }`
+        # adds up to a 48px minimum that beats the fixed height below wherever
+        # no header rule overrides it, so this painted pill took 48px and sat
+        # over the row beneath it (Email inquiries, "Update the register").
+        # It paints itself; the sheet must not size it.
+        height = self.BODY_H + self.LIP
+        self.setStyleSheet(f"min-height: {height}px; max-height: {height}px;"
+                           " padding: 0px; border: none;")
+        self.setFixedHeight(height)
+        # the preview's `.btn.dark` shadow; a collapsed (text-less) pill has no lip
+        attach_shadow(self, SH_DARK_BTN,
+                      inset=lambda: (0, 0, 0, self.LIP if self.text() else 0))
+
+    def _font(self) -> QFont:
+        font = QFont(theme.FONT_BODY)
+        font.setPixelSize(self.FONT_PX)
+        font.setWeight(QFont.Medium)
+        return font
+
+    def sizeHint(self) -> QSize:
+        collapsed = not self.text()
+        if collapsed:
+            return QSize(48, 38)
+        text_w = QFontMetrics(self._font()).horizontalAdvance(self.text())
+        w = self.PAD_L + self.DOT + self.GAP + text_w + self.PAD_R
+        return QSize(int(w + 0.5), self.BODY_H + self.LIP)
+
+    def minimumSizeHint(self) -> QSize:
+        return self.sizeHint()
+
+    def focusInEvent(self, event):
+        self._kbd_focus = event.reason() in (
+            Qt.TabFocusReason, Qt.BacktabFocusReason, Qt.ShortcutFocusReason)
+        super().focusInEvent(event)
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        w, h = float(self.width()), float(self.height())
+        collapsed = not self.text()
+        body_h = h if collapsed else h - self.LIP
+        radius = body_h / 2
+        enabled = self.isEnabled()
+        if not enabled:                                 # .btn[disabled] { opacity: .45 }
+            p.setOpacity(0.45)
+        if self.LIP and not collapsed and not self._shadow_under.active():   # inline fallback
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor(0, 0, 0, 16))
+            for i in range(self.LIP, 0, -1):
+                p.drawRoundedRect(QRectF(3 + (self.LIP - i), i + 1,
+                                         w - 6 - 2 * (self.LIP - i), body_h),
+                                  radius, radius)
+        body = QRectF(0, 0, w, body_h)
+        top, bottom = ("#4a4a48", "#1c1c1b") if self.underMouse() else ("#3a3a38", "#0c0c0b")
+        if self.isDown():
+            top = bottom = "#0c0c0b"
+        g = QLinearGradient(0, 0, 0, body_h)
+        g.setColorAt(0, QColor(top))
+        g.setColorAt(1, QColor(bottom))
+        p.setPen(QPen(QColor(0, 0, 0, 90), 1))
+        p.setBrush(QBrush(g))
+        p.drawRoundedRect(body.adjusted(0.5, 0.5, -0.5, -0.5), radius, radius)
+        p.setPen(QPen(QColor(255, 255, 255, 41), 1))    # inset top highlight
+        p.setBrush(Qt.NoBrush)
+        p.drawRoundedRect(body.adjusted(1.5, 1.5, -1.5, -1.5), radius - 1, radius - 1)
+        if self._kbd_focus and self.hasFocus():
+            p.setPen(QPen(QColor(255, 255, 255, 200), 2))
+            p.drawRoundedRect(body.adjusted(2, 2, -2, -2), radius - 2, radius - 2)
+        # the red dot with its pixel plus
+        d = float(self.DOT) if not collapsed else 30.0
+        cx = w / 2 if collapsed else self.PAD_L + d / 2
+        cy = body_h / 2
+        dot = QRectF(cx - d / 2, cy - d / 2, d, d)
+        clip = QPainterPath()
+        clip.addRoundedRect(body, radius, radius)
+        p.setClipPath(clip)
+        glow = QRadialGradient(QPointF(cx, cy), d / 2 + 9)
+        glow.setColorAt(0.0, QColor(222, 48, 36, 105))
+        glow.setColorAt(d / 2 / (d / 2 + 9), QColor(222, 48, 36, 90))
+        glow.setColorAt(1.0, QColor(222, 48, 36, 0))
+        p.setPen(Qt.NoPen)
+        p.setBrush(QBrush(glow))
+        p.drawEllipse(QPointF(cx, cy), d / 2 + 9, d / 2 + 9)
+        p.setClipping(False)
+        rg = QLinearGradient(0, dot.top(), 0, dot.bottom())
+        rg.setColorAt(0, QColor("#F4523A"))
+        rg.setColorAt(1, QColor("#C81A1C"))
+        p.setBrush(QBrush(rg))
+        p.drawEllipse(dot)
+        p.setPen(QPen(QColor(255, 255, 255, 120), 1))   # inset top highlight
+        p.setBrush(Qt.NoBrush)
+        p.drawArc(dot.adjusted(1, 1, -1, -1), 30 * 16, 120 * 16)
+        u = 16.2 / 18                                   # the symbol's 18-unit grid, 1.1rem wide
+        ox, oy = cx - 9 * u, cy - 9 * u
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor("#FFFFFF"))
+        for x, y in ((8, 2), (8, 5), (2, 8), (5, 8), (8, 8), (11, 8), (14, 8),
+                     (8, 11), (8, 14)):
+            p.drawRect(QRectF(ox + x * u, oy + y * u, 2 * u, 2 * u))
+        if collapsed:
+            return
+        p.setFont(self._font())
+        p.setPen(QColor("#FFFFFF"))
+        x0 = self.PAD_L + d + self.GAP
+        p.drawText(QRectF(x0, 0, w - x0 - 8, body_h),
+                   Qt.AlignVCenter | Qt.AlignLeft, self.text())
+
+
+class PrismStatusBar(QStatusBar):
+    """The window's status bar. Looks only: the preview's black footer, 24px
+    tall, with a green square before the "Ready." message. The message itself
+    is still set with showMessage() by the window."""
+
+    _SQ = 5
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedHeight(24)
+        self.setSizeGripEnabled(False)
+        self.messageChanged.connect(self._on_message)
+
+    def _on_message(self, text: str) -> None:
+        ready = text.strip() == "Ready."
+        if bool(self.property("ready")) != ready:
+            self.setProperty("ready", ready)
+            self.style().unpolish(self)
+            self.style().polish(self)
+        self.update()
+
+    def paintEvent(self, event):
+        # QStatusBar draws its message at a fixed 6px and ignores QSS padding,
+        # so the box (QSS) and the message are drawn here: 14px in, and 11.6px
+        # further after the green square when the message is "Ready.".
+        p = QPainter(self)
+        opt = QStyleOption()
+        opt.initFrom(self)
+        self.style().drawPrimitive(QStyle.PE_Widget, opt, p, self)
+        text = self.currentMessage()
+        if not text:
+            return
+        x = 14.0
+        if self.property("ready"):
+            p.fillRect(QRectF(x, (self.height() - self._SQ) / 2, self._SQ, self._SQ),
+                       QColor("#3FB46F"))
+            x += self._SQ + 6.6
+        p.setFont(self.font())
+        p.setPen(QColor("#A9A8A3"))
+        p.drawText(QRectF(x, 0, self.width() - x, self.height()),
+                   Qt.AlignVCenter | Qt.AlignLeft, text)
+
+
+class _Kicker(QLabel):
+    """Uppercase mono label led by the AlphaKore red square (.kick)."""
+
+    _SQ = 6                     # square edge
+    _GAP = 7                    # square to text (.label gap: .5rem = 7.4px)
+
+    def __init__(self, text: str, parent=None):
+        super().__init__(text, parent)
+        self._inset = 0
+        self._tracked = None
+        self.setContentsMargins(self._SQ + self._GAP, 0, 0, 0)
+
+    def set_tracked(self, spacing_px: float, colour: str) -> None:
+        """Draw the text with absolute letter spacing (QSS cannot set it, and a
+        stylesheet font would discard one set on the QFont)."""
+        self._tracked = (spacing_px, QColor(colour))
+        self.update()
+
+    def set_inset(self, px: int) -> None:
+        """Shift the square and the text right by `px` (the rail's .label margin)."""
+        self._inset = px
+        self.setContentsMargins(px + self._SQ + self._GAP, 0, 0, 0)
+
+    def paintEvent(self, event):
+        if self._tracked is None:
+            super().paintEvent(event)
+        p = QPainter(self)
+        if self._tracked is not None:
+            font = QFont(self.font())
+            font.setLetterSpacing(QFont.AbsoluteSpacing, self._tracked[0])
+            p.setFont(font)
+            p.setPen(self._tracked[1])
+            p.drawText(QRectF(self.contentsMargins().left(), 0, self.width(), self.height()),
+                       Qt.AlignVCenter | Qt.AlignLeft, self.text())
+        p.fillRect(self._inset, (self.height() - self._SQ) // 2, self._SQ, self._SQ,
+                   QColor(theme.BRAND_RED))
+        p.end()
+
+
 def kicker(text: str, muted: bool = False) -> QLabel:
-    """Condensed, tracked, uppercase section label (.kick)."""
-    lbl = QLabel(text.upper())
+    """Mono, tracked, uppercase section label with a red square (.kick)."""
+    lbl = _Kicker(text.upper())
     lbl.setObjectName("kickMuted" if muted else "kick")
     return track(lbl, 0.12)
 
@@ -322,7 +761,7 @@ class Card(QFrame):
     blueprint registration marks the old design cornered its panels with.
     """
 
-    def __init__(self, stripe: bool = False, radius: int = 18,
+    def __init__(self, stripe: bool = False, radius: int = 17,
                  raised: bool = False, parent=None):
         super().__init__(parent)
         self.setObjectName("card")
@@ -335,6 +774,7 @@ class Card(QFrame):
             f"border: none; }}"
         )
         elevate(self, theme.SHADOW_RAISED if raised else theme.SHADOW_CARD)
+        attach_shadow(self, SH_CARD, radius, inset=(0, 0, 0, CARD_LIP))
 
     def body(self, margins=None, spacing: int = 0) -> QVBoxLayout:
         """The card's own column, inset past the stripe."""
@@ -353,6 +793,13 @@ class Card(QFrame):
 
         r = QRectF(self.rect())
         radius = float(self._radius)
+        soft = self._shadow_under.active()
+        if paint_flat_card(self, painter, r, radius, outside_shadow=soft):
+            if self._stripe:
+                painter.setPen(Qt.NoPen)
+                painter.setBrush(QColor(theme.INK))
+                painter.drawRect(QRectF(r.left() + radius, r.top(), r.width() - 2 * radius, 3))
+            return
 
         # ── Clip all painting to the rounded rect ──────────────────────────
         clip = QPainterPath()
@@ -435,6 +882,13 @@ class Pill(QLabel):
         "warn": (theme.WARN_BG, theme.WARN_INK),
         "err": (theme.ERR_BG, theme.ERR_INK),
         "quiet": (theme.NEUTRAL[100], theme.NEUTRAL[700]),
+        # The mono add-on tag on a History row: ink on the soft stone fill.
+        "tag": ("#EFEEEA", theme.INK),
+        # The preview's `.st`: mono caps with a square before the word.
+        "st_ok": (theme.BRAND_OK_BG, theme.BRAND_OK),
+        "st_err": (theme.BRAND_ERR_BG, theme.BRAND_ERR),
+        "st_warn": ("#F6EDD6", "#7A5A0E"),
+        "st_neutral": ("#EFEEEA", "#2A2A28"),
     }
 
     @classmethod
@@ -461,11 +915,43 @@ class Pill(QLabel):
     def set_tone(self, tone: str):
         tones = self._tones()
         bg, ink = tones.get(tone, tones["neutral"])
+        self._tone_name = tone if tone in tones else "neutral"
         family, px, weight, _ink = theme.T_LABEL
+        self._mark = tone.startswith("st_")
+        if self._mark:
+            # Caps come from the font, so text() keeps the words it was given.
+            font = self.font()
+            font.setCapitalization(QFont.AllUppercase)
+            self.setFont(font)
+            track(self, 0.07)
+            self.setStyleSheet(
+                f"background: {bg}; color: {ink}; border-radius: 7px;"
+                f" font-family: {theme.FONT_MONO_STACK}; font-size: 11px;"
+                f" font-weight: 500; padding: 6px 9px 6px 21px;")
+            self.update()
+            return
+        if tone == "tag":
+            font = self.font()
+            font.setCapitalization(QFont.AllUppercase)
+            self.setFont(font)
+            track(self, 0.06)
+            self.setStyleSheet(
+                f"background: {bg}; color: {ink}; border-radius: 6px;"
+                f" font-family: {theme.FONT_MONO_STACK}; font-size: 11px;"
+                f" font-weight: 500; padding: 4px 7px;")
+            return
         self.setStyleSheet(
             f"background: {bg}; color: {ink}; border-radius: {theme.R_PILL}px;"
             f" font-size: {px}px; font-weight: {weight};"
             f" padding: 3px {theme.SPACE_3 - 1}px;")
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        if getattr(self, "_mark", False):
+            p = QPainter(self)
+            p.fillRect(9, (self.height() - 6) // 2, 6, 6,
+                       QColor(self._tones()[self._tone_name][1]))
+            p.end()
 
 
 class ToolBadge(QLabel):
@@ -848,6 +1334,30 @@ _VARIANTS = {
 }
 
 
+def brand_dot_icon(size: int = 22, glyph: str = "arrow") -> QIcon:
+    """The AlphaKore primary-button mark: a red dot carrying a pixel arrow
+    (glyph="arrow") or a pixel plus (glyph="plus")."""
+    ratio = 2
+    pm = QPixmap(size * ratio, size * ratio)
+    pm.setDevicePixelRatio(ratio)
+    pm.fill(Qt.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing, True)
+    p.setPen(Qt.NoPen)
+    p.setBrush(QColor(theme.BRAND_RED))
+    p.drawEllipse(QRectF(0, 0, size, size))
+    p.setRenderHint(QPainter.Antialiasing, False)
+    p.setBrush(QColor("#FFFFFF"))
+    u = max(2.0, size / 11)                       # one "pixel" of the arrow
+    cx, cy = size / 2, size / 2
+    cells = (((-1.5, 0), (0, 0), (1.5, 0), (0, -1.5), (0, 1.5)) if glyph == "plus"
+             else ((-2.5, 0), (-1.0, 0), (0.5, 0), (2.0, 0), (0.5, -1.5), (0.5, 1.5)))
+    for dx, dy in cells:
+        p.drawRect(QRectF(cx + dx * u - u / 2, cy + dy * u - u / 2, u, u))
+    p.end()
+    return QIcon(pm)
+
+
 def button(text: str, variant: str = "secondary", icon_name: str = "",
            small: bool = False, on_click=None) -> QPushButton:
     """One button, in one of the four variants.
@@ -865,7 +1375,7 @@ def button(text: str, variant: str = "secondary", icon_name: str = "",
     expressible without a second rule — and a primary action that wants to be
     small is usually a secondary action that has not admitted it yet.
     """
-    btn = QPushButton(text)
+    btn = DarkPill(text) if variant == "primary" else QPushButton(text)
     name = _VARIANTS.get(variant, "")
     if small and variant == "secondary":
         name = "smallBtn"
@@ -874,8 +1384,14 @@ def button(text: str, variant: str = "secondary", icon_name: str = "",
     btn.setCursor(Qt.PointingHandCursor)
     # Even the small step clears the minimum target: 28px is the floor for
     # anything you can click, not a suggestion that shrinks with the label.
-    btn.setMinimumHeight(MIN_TARGET)
-    if icon_name:
+    # Every primary wears the brand's red dot, whatever icon the call site
+    # asked for: the preview has one primary look, not a tick here and a plus
+    # there. DarkPill paints the dot and the label itself.
+    if variant != "primary":
+        btn.setMinimumHeight(MIN_TARGET)
+    if variant == "primary":
+        pass
+    elif icon_name:
         ink = {"primary": theme.CARD, "destructive": theme.ERR_INK}.get(
             variant, theme.ACCENT_RAMP[700] if variant in ("tertiary", "link")
             else theme.NEUTRAL[800])
@@ -1010,7 +1526,17 @@ class _StatusDot(QWidget):
             mid = self.SIZE / 2
             painter.drawLine(QRectF(2, mid, 0, 0).topLeft(),
                              QRectF(self.SIZE - 2, mid, 0, 0).topLeft())
-        else:                                   # check / cross
+        elif kind in ("check", "cross"):
+            # The AlphaKore preview marks done and failed with the same small
+            # square as its other labels, not a tick or cross in a disc; the
+            # word beside it says which. (The tick/cross painting below is
+            # kept for any caller that asks for the old look.)
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(ink)
+            side = 6.0
+            painter.drawRect(QRectF((self.SIZE - side) / 2, (self.SIZE - side) / 2,
+                                    side, side))
+        else:                                   # legacy tick / cross in a disc
             painter.setPen(Qt.NoPen)
             painter.setBrush(ink)
             painter.drawEllipse(box)
@@ -1099,8 +1625,8 @@ class StatusBadge(QFrame):
         self._detail.setStyleSheet(theme.type_css("META", theme.c(ink).name())
                                    + " background: transparent;")
         self.setStyleSheet(
-            f"#statusBadge {{ background: {bg}; border: 2px solid {bg};"
-            f" border-radius: {theme.R_PILL}px; }}"
+            f"#statusBadge {{ background: {bg}; border: 2px solid transparent;"
+            f" border-radius: 4px; }}"
             f"#statusBadge:focus {{ border-color: {ink}; }}")
         # What a screen reader says. The visual is a coloured dot; without
         # this, that is all it is.
@@ -1124,6 +1650,10 @@ class PageHeader(QFrame):
     and one or two secondary ones. Exactly one primary per surface.
     """
 
+    _INSET = 0           # the preview's phead is flush with the page (x 285.7, y 14)
+    _INSET_TOP = 0
+    _INSET_BOTTOM = 0
+
     def __init__(self, title: str, subtitle: str = "", actions: list = None,
                  parent=None):
         super().__init__(parent)
@@ -1132,8 +1662,10 @@ class PageHeader(QFrame):
         self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
 
         row = QHBoxLayout(self)
-        row.setContentsMargins(theme.PAGE_PAD, theme.SPACE_4,
-                               theme.PAGE_PAD, theme.SPACE_4)
+        # The band is a white rounded card floating on the stone page (the
+        # AlphaKore preview's .phead): inset so the card edge clears the page
+        # sides, with the text padded inside it.
+        row.setContentsMargins(24, 12, 16, 17)
         row.setSpacing(theme.SPACE_4)
 
         col = QVBoxLayout()
@@ -1142,7 +1674,7 @@ class PageHeader(QFrame):
         self.title = QLabel(title)
         self.title.setObjectName("pageTitle")
         self.title.setTextFormat(Qt.RichText)
-        track(self.title, -0.015)
+        track(self.title, -0.035)
         col.addWidget(self.title)
         # Parented at creation: setVisible below runs before col.addWidget, and
         # setVisible(True) on a parentless widget flashes it as a top-level OS
@@ -1161,7 +1693,7 @@ class PageHeader(QFrame):
         row.addLayout(col, stretch=1)
 
         self.actions_row = QHBoxLayout()
-        self.actions_row.setContentsMargins(0, 0, 0, 0)
+        self.actions_row.setContentsMargins(0, 5, 0, 0)     # centres on the card, not the text block
         self.actions_row.setSpacing(theme.SPACE_2)
         row.addLayout(self.actions_row)
         for widget in actions or []:
@@ -1172,6 +1704,14 @@ class PageHeader(QFrame):
         painter.setRenderHint(QPainter.Antialiasing, True)
         painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
         r = QRectF(self.rect())
+
+        if not has_wallpaper(self):
+            card = r.adjusted(self._INSET, self._INSET_TOP, -self._INSET,
+                              -self._INSET_BOTTOM)
+            painter.setBrush(QColor(theme.CARD))
+            painter.setPen(QPen(QColor(theme.HAIRLINE), 1))
+            painter.drawRoundedRect(card.adjusted(0.5, 0.5, -0.5, -0.5), 16, 16)
+            return
 
         central = self.window().findChild(QWidget, "central")
         if central and hasattr(central, "get_blurred_pixmap"):
@@ -1248,7 +1788,7 @@ class SectionHeader(QWidget):
         row.addLayout(col, stretch=1)
 
         self.actions_row = QHBoxLayout()
-        self.actions_row.setContentsMargins(0, 0, 0, 0)
+        self.actions_row.setContentsMargins(0, 5, 0, 0)     # centres on the card, not the text block
         self.actions_row.setSpacing(theme.SPACE_2)
         row.addLayout(self.actions_row)
         for widget in actions or []:
@@ -1512,6 +2052,59 @@ class SearchField(QLineEdit):
         super().keyPressEvent(event)
 
 
+class _CountChip(QPushButton):
+    """A filter chip whose count is drawn small, mono and muted after the
+    label (the preview's `.seg .n`). text() stays "All  9", so everything that
+    reads the chip still reads the same words."""
+
+    def __init__(self, text: str, count, parent=None):
+        super().__init__(f"{text}  {count}" if count is not None else text,
+                         parent)
+        self._label, self._count = text, count
+        self._mono = QFont(theme.FONT_MONO)
+        self._mono.setPixelSize(11)
+        self._mono.setWeight(QFont.Medium)
+
+    def _fonts(self):
+        label = QFont(self.font())
+        label.setPixelSize(14)
+        label.setWeight(QFont.Normal)
+        return label, self._mono
+
+    def sizeHint(self):
+        label, mono = self._fonts()
+        w = QFontMetrics(label).horizontalAdvance(self._label) + 28
+        if self._count is not None:
+            w += 8 + QFontMetrics(mono).horizontalAdvance(str(self._count))
+        return QSize(w, max(MIN_TARGET, 32))
+
+    def paintEvent(self, event):
+        from PySide6.QtWidgets import QStyle, QStyleOptionButton
+        p = QPainter(self)
+        opt = QStyleOptionButton()
+        self.initStyleOption(opt)
+        opt.text = ""
+        self.style().drawControl(QStyle.CE_PushButtonBevel, opt, p, self)
+        label, mono = self._fonts()
+        on = self.isChecked()
+        lm, mm = QFontMetrics(label), QFontMetrics(mono)
+        count = str(self._count) if self._count is not None else ""
+        total = lm.horizontalAdvance(self._label) + (
+            8 + mm.horizontalAdvance(count) if count else 0)
+        x = (self.width() - total) / 2
+        mid = self.height() / 2
+        p.setFont(label)
+        p.setPen(QColor("#FFFFFF" if on else "#2A2A28"))
+        p.drawText(QPointF(x, mid + (lm.ascent() - lm.descent()) / 2),
+                   self._label)
+        if count:
+            p.setFont(mono)
+            p.setPen(QColor(theme.FAINT if on else theme.MUTE))
+            p.drawText(QPointF(x + lm.horizontalAdvance(self._label) + 8,
+                               mid + (mm.ascent() - mm.descent()) / 2), count)
+        p.end()
+
+
 class FilterChips(QWidget):
     """A row of exclusive filter chips — "All · Completed · Failed".
 
@@ -1530,14 +2123,25 @@ class FilterChips(QWidget):
 
     def __init__(self, options: list, current: str = "", parent=None):
         super().__init__(parent)
+        # One white pill holding the chips, the selected one dark inside it
+        # (the preview's segmented filter), not a row of separate outlines.
+        self.setObjectName("filterChips")
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Preferred)
         # A FlowLayout, not a QHBoxLayout: AI tools feeds this eleven
         # categories, and a one-line row reports their whole width (742 px) as
         # its minimum, which forced the page's scroll content wider than the
         # viewport and clipped the right-hand column of cards at the app's
         # default width (seen in the real window, 1 Oct 2026). Chips now step
         # down a line instead.
-        row = FlowLayout(self, margin=0, h_space=theme.SPACE_2 - 2,
-                         v_space=theme.SPACE_2 - 2)
+        if len(options) <= 6:
+            # A short row is one segmented pill that hugs its chips.
+            row = QHBoxLayout(self)
+            row.setContentsMargins(3, 3, 3, 3)
+            row.setSpacing(2)
+        else:
+            self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
+            row = FlowLayout(self, margin=3, h_space=2, v_space=2)
         self._group = QButtonGroup(self)
         self._group.setExclusive(True)
         self._buttons: dict[str, QPushButton] = {}
@@ -1549,7 +2153,7 @@ class FilterChips(QWidget):
             else:
                 value = text = option
                 count = None
-            btn = QPushButton(f"{text}  {count}" if count is not None else text)
+            btn = _CountChip(text, count)
             btn.setObjectName("chipBtn")
             btn.setCheckable(True)
             btn.setCursor(Qt.PointingHandCursor)
@@ -1752,18 +2356,25 @@ class FileItem(QFrame):
     activated = Signal()
 
     def __init__(self, name: str, detail: str = "", icon: str = "file",
-                 actions: list = None, parent=None, leading: QWidget = None):
+                 actions: list = None, parent=None, leading: QWidget = None,
+                 flat: bool = False):
         super().__init__(parent)
-        self.setObjectName("listRow")
+        # `flat`: a band inside a Card (hairline between rows), like History's
+        # runs, instead of the boxed row the rail and output cards use.
+        self.setObjectName("rowFlat" if flat else "listRow")
         self.setAttribute(Qt.WA_StyledBackground, True)
-        self.setMinimumHeight(MIN_TARGET + 14)
+        self.setMinimumHeight(MIN_TARGET + (22 if flat else 14))
         self.setFocusPolicy(Qt.TabFocus)
         self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
 
         row = QHBoxLayout(self)
-        row.setContentsMargins(theme.SPACE_3, theme.SPACE_2,
-                               theme.SPACE_2, theme.SPACE_2)
-        row.setSpacing(theme.SPACE_3)
+        if flat:
+            row.setContentsMargins(17, 10, 15, 10)
+            row.setSpacing(15)
+        else:
+            row.setContentsMargins(theme.SPACE_3, theme.SPACE_2,
+                                   theme.SPACE_2, theme.SPACE_2)
+            row.setSpacing(theme.SPACE_3)
         # `leading` lets a caller show the file's own content (e.g. a real
         # image thumbnail) instead of a generic glyph — everything else about
         # the row stays identical, so Artifacts can look like a gallery
@@ -1780,6 +2391,9 @@ class FileItem(QFrame):
         col.addWidget(self.name)
         self.detail = QLabel(detail, self)
         self.detail.setObjectName("meta")
+        if flat:
+            self.detail.setStyleSheet(
+                f"font-size: 12px; font-weight: 400; color: {theme.MUTE};")
         self.detail.setVisible(bool(detail))
         col.addWidget(self.detail)
         row.addLayout(col, stretch=1)
@@ -2349,7 +2963,7 @@ class WaveDots(QWidget):
         painter.setRenderHint(QPainter.Antialiasing, True)
         painter.setPen(Qt.NoPen)
 
-        c = QColor(self._custom_color) if self._custom_color else theme.c(theme.NEUTRAL[800])
+        c = QColor(self._custom_color) if self._custom_color else QColor(theme.BRAND_RED)
         painter.setBrush(QBrush(c))
 
         center_y = self.height() / 2.0

@@ -424,7 +424,7 @@ class IndustryTakeoffDialog(QDialog):
         if industries.has_ai_tag_recheck(self.industry):
             self.ocr_cb.setToolTip(i18n.t(
                 "OCR always runs locally. If an OpenRouter key is set in "
-                "Settings → AI tools, a second, AI-based read also runs to "
+                "Settings → Agents, a second, AI-based read also runs to "
                 "catch tags OCR missed -- the whole drawing is never sent; "
                 "only small cropped pieces are, each time, and only after "
                 "you confirm. No key set: this box runs OCR only."))
@@ -477,6 +477,7 @@ class IndustryTakeoffDialog(QDialog):
         self.extract_btn = C.button(i18n.t("Extract"), "primary", icon_name="check",
                                     small=True, on_click=self._extract)
         self.extract_btn.setEnabled(False)
+        self.extract_btn.setToolTip(i18n.t("Pick a PDF first, then confirm what each line colour is."))
         col.addWidget(self.extract_btn, alignment=Qt.AlignLeft)
 
         self.status = QLabel("")
@@ -511,6 +512,7 @@ class IndustryTakeoffDialog(QDialog):
         self.use_btn = C.button(i18n.t("Use these measurements"), "primary",
                                 on_click=self._confirm)
         self.use_btn.setEnabled(False)
+        self.use_btn.setToolTip(i18n.t("Extract the measurements and tick the scale check first."))
         btn_row.addWidget(self.use_btn)
         col.addLayout(btn_row)
 

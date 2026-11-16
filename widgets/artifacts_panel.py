@@ -53,7 +53,7 @@ _KINDS = {
 # label reaching the screen.
 _ICON_FOR_KIND = {"image": "image", "video": "video", "code": "code"}
 
-_THUMB = 30   # matches IconPad's own default size — drop-in for the same slot
+_THUMB = 38   # the preview's .thumbsm tile
 
 
 def _thumbnail(path: str):
@@ -75,7 +75,7 @@ def _thumbnail(path: str):
     painter = QPainter(out)
     painter.setRenderHint(QPainter.Antialiasing)
     clip = QPainterPath()
-    clip.addRoundedRect(0, 0, _THUMB, _THUMB, theme.R_CONTROL, theme.R_CONTROL)
+    clip.addRoundedRect(0, 0, _THUMB, _THUMB, 9, 9)
     painter.setClipPath(clip)
     painter.drawPixmap(0, 0, src)
     painter.end()
@@ -83,6 +83,23 @@ def _thumbnail(path: str):
     label.setFixedSize(_THUMB, _THUMB)
     label.setPixmap(out)
     return label
+
+
+def _tile(icon: str):
+    """The preview's file tile: ink line glyph on a soft stone square."""
+    pad = C.IconPad(icon, theme.INK, _THUMB, 9, 15)
+    pad.setStyleSheet("background: #EFEEEA; border-radius: 9px;")
+    return pad
+
+
+def _open_button(on_click):
+    """The preview's per-row "Open" pill (same slot, same handler as the old
+    glyph-only button; the tooltip stays)."""
+    btn = C.button(i18n.t("Open"), "secondary", icon_name="external",
+                   small=True, on_click=on_click)
+    btn.setProperty("pill", True)
+    btn.setToolTip(i18n.t("Open"))
+    return btn
 
 
 import re as _re
@@ -234,13 +251,22 @@ class ArtifactsPanel(Page):
                 groups.append((bucket, []))
             groups[-1][1].append(path)
 
-        for bucket, items in groups:
-            self._col.addWidget(C.SectionHeader(
+        for n, (bucket, items) in enumerate(groups):
+            head = C.SectionHeader(
                 i18n.t(bucket),
-                i18n.t("1 file") if len(items) == 1
-                else i18n.t("{n} files").format(n=len(items))))
-            for path in items:
-                self._col.addWidget(self._row(path))
+                (i18n.t("1 file") if len(items) == 1
+                 else i18n.t("{n} files").format(n=len(items))).upper())
+            head.subtitle.setProperty("mono", True)
+            # Same day-heading rhythm as History (the preview's .day).
+            head.layout().setContentsMargins(4, 6 if n == 0 else 17, 4, 10)
+            self._col.addWidget(head)
+            card = C.Card()
+            col = card.body((0, 0, 0, 0), spacing=0)
+            for i, path in enumerate(items):
+                if i:
+                    col.addWidget(C.hairline())
+                col.addWidget(self._row(path))
+            self._col.addWidget(card)
         self._col.addStretch(1)
 
     def _row(self, path: str) -> C.FileItem:
@@ -255,9 +281,7 @@ class ArtifactsPanel(Page):
         # already tried to derive from it.
         detail = " · ".join(p for p in (kind_label({"kind": kind, "name": name}),
                                         size_label(path)) if p)
-        actions = [C.icon_button(
-            "external", i18n.t("Open"),
-            lambda _=False, p=path: self._open_file(p))]
+        actions = [_open_button(lambda _=False, p=path: self._open_file(p))]
         if kind == "video" and _editable_reel(path):
             actions.append(C.icon_button(
                 "pencil", i18n.t("Edit the layout"),
@@ -267,9 +291,10 @@ class ArtifactsPanel(Page):
             actions.append(C.icon_button(
                 "globe", i18n.t("Open the chat that made this"),
                 lambda _=False, u=link: self._open_link(u)))
-        leading = _thumbnail(path) if kind == "image" else None
+        leading = ((_thumbnail(path) if kind == "image" else None)
+                   or _tile(_ICON_FOR_KIND.get(kind, "file")))
         row = C.FileItem(name, detail, _ICON_FOR_KIND.get(kind, "file"),
-                         actions, leading=leading)
+                         actions, leading=leading, flat=True)
         row.setToolTip(path)
         row.activated.connect(lambda p=path: self._open_file(p))
         return row
@@ -284,8 +309,7 @@ class ArtifactsPanel(Page):
         single_target = self._single_deliverable(path)
         target_path = single_target if single_target else path
 
-        actions = [C.icon_button(
-            "external", i18n.t("Open"),
+        actions = [_open_button(
             lambda _=False, p=target_path: self._open_file(p))]
 
         reel_target = (single_target if single_target and single_target.lower().endswith(".mp4") and _editable_reel(single_target)
@@ -310,7 +334,8 @@ class ArtifactsPanel(Page):
             if kind == "image":
                 leading = _thumbnail(single_target)
 
-        row = C.FileItem(name, detail, icon, actions, leading=leading)
+        row = C.FileItem(name, detail, icon, actions,
+                         leading=leading or _tile(icon), flat=True)
         row.setToolTip(path)
         row.activated.connect(lambda p=target_path: self._open_file(p))
         return row

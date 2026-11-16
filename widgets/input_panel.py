@@ -21,7 +21,7 @@ why the registration marks were retired in favour of the stripe.
 from __future__ import annotations
 import os
 
-from PySide6.QtCore import Signal, QTimer, Qt
+from PySide6.QtCore import QSize, Signal, QTimer, Qt
 from PySide6.QtGui import QTextCursor
 from PySide6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QFrame, QLabel, QTextEdit, QPushButton,
@@ -457,6 +457,8 @@ class InputPanel(Card):
 
         self.route_btn = QPushButton(i18n.t("Make a plan"))
         self.route_btn.setObjectName("primaryBtn")
+        self.route_btn.setIcon(C.brand_dot_icon(22))
+        self.route_btn.setIconSize(QSize(22, 22))
         self.route_btn.setCursor(Qt.PointingHandCursor)
         self.route_btn.setToolTip(i18n.t(
             "Press Enter to make the plan. Shift+Enter starts a new line."))
