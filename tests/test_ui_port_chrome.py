@@ -100,8 +100,10 @@ class TheRail(unittest.TestCase):
     def test_add_on_tiles_use_the_preview_glyph_names(self):
         rail = _rail()
         names = {r._icon_name for r in rail.findChildren(AddonRow)}
+        # "box" (BOM & Stock) left the rail on 2026-11-16 with BOM
+        # (addons/bom/addon.py status=OFF); it comes back with BOM.
         self.assertTrue({"inbox", "sheet", "chip", "cube", "mail", "user",
-                         "message", "box"} <= names)
+                         "message"} <= names)
 
     def test_new_task_is_a_tall_pill_with_the_dot_at_the_left(self):
         rail = _rail()

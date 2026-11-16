@@ -1,7 +1,7 @@
 """BOM — Bill of Materials, the parts list to fabricate a drawing or spec."""
 from __future__ import annotations
 
-from addons import names
+from addons import manifest, names
 from addons.manifest import ACCENT, RAIL, HOME, Addon, Offer
 
 MANIFEST = Addon(
@@ -16,6 +16,11 @@ MANIFEST = Addon(
     # rows that DO use setText.
     label="BOM & Stock",
     chip="BOM",                 # the history pill, where there is no room
+    # SWITCHED OFF 2026-11-16 (owner: "remove BOM and Stock for now from
+    # UI"). Off every shelf, out of Help and Lumi, and the shell opens
+    # nothing for it; code, licence key, past runs and tests are untouched.
+    # To bring it back, change OFF to LIVE on the next line. That is all.
+    status=manifest.OFF,
     # Rides "boq" by design: BOQ and BOM are ONE add-on ("BOQ & BOM" in
     # plans.FEATURES), and BOM ships as a mode inside the BOQ dialog, so
     # BOQ's route is the one that has to be guarded. There is no "bom"

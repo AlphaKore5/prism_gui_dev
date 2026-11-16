@@ -64,6 +64,13 @@ def by_key(key: str) -> Addon | None:
     return _BY_KEY.get(key)
 
 
+def is_off(key: str) -> bool:
+    """True when `key` is an add-on that is switched off (manifest.OFF).
+    Anything else, including a key that is not an add-on at all, is False."""
+    a = _BY_KEY.get(key)
+    return bool(a and a.is_off())
+
+
 def keys() -> tuple[str, ...]:
     return tuple(a.key for a in REGISTRY)
 
@@ -108,6 +115,8 @@ def feature_of_agent(agent: str) -> str:
 def offering(intent: str) -> tuple[Addon, str]:
     """Who does `intent`, and through which handler. ("", "") if nobody."""
     for a in REGISTRY:
+        if a.is_off():
+            continue
         for offer in a.offers:
             if offer.intent == intent:
                 return a, offer.handler
@@ -165,6 +174,6 @@ def resolve(dotted: str):
     return getattr(module, attr) if attr else module
 
 
-__all__ = ["REGISTRY", "EXPECTED", "by_key", "keys", "shelf", "screens",
+__all__ = ["REGISTRY", "EXPECTED", "by_key", "is_off", "keys", "shelf", "screens",
            "kind_of", "feature_of_agent", "offering", "engine_modules",
            "addon_modules", "resolve", "manifest"]

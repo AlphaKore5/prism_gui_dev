@@ -200,6 +200,12 @@ AGENT_FEATURES = {agent: addon.feature
                   for addon in registry.REGISTRY
                   for agent in addon.agents}
 
+# Screens of add-ons that are switched off (manifest.OFF). The page stays in
+# the stack so SCREENS and every index after it are unchanged; _show_screen()
+# simply refuses to go there.
+_SWITCHED_OFF = {addon.screen for addon in registry.REGISTRY
+                 if addon.is_off() and addon.screen}
+
 
 class DashboardCentral(QWidget):
     """Central widget that paints the wallpaper background cleanly scaled to cover,
@@ -730,6 +736,12 @@ class MainWindow(QMainWindow):
 
     def _show_screen(self, name: str = "workbench"):
         """Switch the body stack and keep the rail's highlight in step."""
+        if name in _SWITCHED_OFF:
+            # Nothing draws a way here; this is for anything that still asks
+            # (an old Lumi answer, a stale command). Stay put and say why.
+            self.statusBar().showMessage(
+                i18n.t("That add-on isn't available in this version."), 6000)
+            return
         # Leaving the Email inquiry automation working screen: stop its auto-check
         # timer (see InquiryDialog.on_leave) and pick up whatever it wrote —
         # it saves its own settings and reading bookmark, works the register

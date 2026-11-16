@@ -103,7 +103,11 @@ class TheRailFitsAt1366x768(unittest.TestCase):
         rail.resize(262, 768 - 24)
         rail.show()
         rows = rail.findChildren(AddonRow)
-        self.assertGreaterEqual(len(rows), 8)
+        # 7 since BOM & Stock was switched off (2026-11-16); still every
+        # add-on on the rail shelf.
+        from addons import manifest, registry
+        self.assertEqual(len(rows), len(registry.shelf(manifest.RAIL)))
+        self.assertGreaterEqual(len(rows), 7)
         for r in rows:
             # stage 4b: 38 or 37 so tops follow the preview's 39.7px pitch
             self.assertIn(r.sizeHint().height(), (37, 38))

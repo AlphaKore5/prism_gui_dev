@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
 import i18n
 import licensing
 import theme
+from addons import registry
 from dialogs.base import PrismDialog
 from widgets import icons
 from widgets.controls import heading, kicker, meta
@@ -46,6 +47,7 @@ class Topic:
     action: str = ""            # a sidebar command key
     action_label: str = ""
     feature: str = ""           # the entitlement it needs, "" if always on
+    addon: str = ""             # the add-on it describes; skipped while that is off
 
 
 TOPICS: tuple[Topic, ...] = (
@@ -144,7 +146,7 @@ TOPICS: tuple[Topic, ...] = (
         "list", "BOM & Stock",
         "Match a parts list against what you actually have in stock and get "
         "the shortage list.",
-        feature="boq",
+        feature="boq", addon="bom",
     ),
     # ── settings ───────────────────────────────────────────────────────
     Topic(
@@ -183,6 +185,8 @@ class GuideDialog(PrismDialog):
 
         state = licensing.state()
         for topic in TOPICS:
+            if topic.addon and registry.is_off(topic.addon):
+                continue
             unlocked = not topic.feature or state.has(topic.feature)
             self.body.addWidget(
                 _TopicCard(topic, unlocked, self.command_requested))

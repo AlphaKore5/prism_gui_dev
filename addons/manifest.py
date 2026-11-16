@@ -38,9 +38,14 @@ from dataclasses import dataclass, field
 # for. LIVE registers and appears; SOON appears as a caption and cannot be
 # opened; HIDDEN is reachable by command but has no shelf row (which is what
 # reel and motion actually are today, whatever the two tables imply).
+# OFF is built, licensed and tested but switched off for now: on no shelf,
+# offered to no other add-on, and the shell opens nothing for it. Its code,
+# data and runs stay exactly as they are; setting the status back to LIVE is
+# the whole of turning it on again.
 LIVE = "live"
 SOON = "soon"
 HIDDEN = "hidden"
+OFF = "off"
 
 # ── shelves ──────────────────────────────────────────────────────────────
 # Where a row is drawn. An add-on can sit on several, and the difference
@@ -158,7 +163,10 @@ class Addon:
         return self.chip or self.label
 
     def on_shelf(self, shelf: str) -> bool:
-        return shelf in self.shelves and self.status != HIDDEN
+        return shelf in self.shelves and self.status not in (HIDDEN, OFF)
 
     def is_live(self) -> bool:
         return self.status == LIVE
+
+    def is_off(self) -> bool:
+        return self.status == OFF
