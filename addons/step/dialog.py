@@ -56,7 +56,8 @@ from addons.step import workbench as WB
 from widgets.loader import Loader
 from widgets import controls as C
 from widgets import icons
-from widgets.ask_panel import AskPanel
+from widgets.ask_panel import AskPanel, MoreOptions
+from widgets.usage_chip import UsageChip
 
 MODEL_EXTS = (".step", ".stp")
 
@@ -170,6 +171,10 @@ class StepDialog(PrismDialog):
             # the one place.
             self.setWindowFlags(Qt.Widget)
             self.setModal(False)
+            # As a screen it sits on the page's stone canvas like every other
+            # screen: the header and the three columns are the white cards.
+            self.setObjectName("stepWork")
+            self.setStyleSheet("#stepWork, #dialogBody { background: transparent; }")
         self.resize(1240, 800)
         self.setMinimumSize(1000, 640)
         self.cfg = cfg
@@ -223,28 +228,41 @@ class StepDialog(PrismDialog):
         self.header.setVisible(False)
         self.footer.setVisible(False)
         root = self.body
-        root.setSpacing(theme.SPACE_3)
-        root.setContentsMargins(theme.SPACE_4, theme.SPACE_3, theme.SPACE_4,
-                                theme.SPACE_4)
+        root.setSpacing(0)
+        root.setContentsMargins(0, 0, 0, 0)
         self.setAcceptDrops(True)
 
         # ── top bar: STEP · the promise · output folder · options · close ──
-        top = QHBoxLayout()
+        # A white header card, like every ported screen's page header.
+        head_card = QFrame()
+        head_card.setObjectName("stepHead")
+        head_card.setAttribute(Qt.WA_StyledBackground, True)
+        head_card.setStyleSheet(
+            "#stepHead { background: #ffffff; border: none;"
+            f" border-radius: {WB.R_PANE}px; }}")
+        head_card.setFixedHeight(60)
+        C.attach_shadow(head_card, C.SH_CARD, WB.R_PANE)
+        top = QHBoxLayout(head_card)
+        top.setContentsMargins(21, 12, 15, 12)
         top.setSpacing(theme.SPACE_3)
         title = QLabel("STEP")
         title.setStyleSheet(
-            f"font-family: '{theme.FONT_HEADING}'; font-size: 28px;"
-            " font-weight: 600; letter-spacing: 1px;")
+            f"font-family: '{theme.FONT_HEADING}'; font-size: 28.7px;"
+            " font-weight: 400; letter-spacing: -1px; color: #111110;")
         top.addWidget(title)
-        lock = WB.chip("●  " + i18n.t("Measured here — never uploaded"), "ok")
+        lock = QLabel("■  " + i18n.t("Measured here — never uploaded").upper())
         lock.setToolTip(
             "The STEP file never leaves this machine. Draft, Ask and Edit "
             "show an AI only the measured NUMBERS and Prism's own plain "
             "render of the parts — never the model, never a path. Edits are "
             "made here, on a copy.")
-        lock.setStyleSheet(lock.styleSheet().replace("font-size: 10.5px",
-                                                     "font-size: 12px")
-                           + " padding: 4px 10px;")
+        lock.setObjectName("stepTrust")
+        lock.setFixedHeight(29)
+        lock.setStyleSheet(
+            f"#stepTrust {{ font-family: '{theme.FONT_MONO}'; font-size: 10.9px;"
+            " font-weight: 500; color: #1F6B43; background: #E4EFE7;"
+            " border: none; border-radius: 7px; padding: 0 10px; }")
+        C.track(lock, 0.05)
         top.addWidget(lock)
         top.addStretch(1)
         self.open_btn = self.button(i18n.t("Open in browser"), "secondary",
@@ -260,11 +278,23 @@ class StepDialog(PrismDialog):
         top.addWidget(self.folder_btn)
         self.opt_toggle = self.button("", "secondary", small=True,
                                       on_click=self._toggle_options)
+        # Drawn as the preview's select (it opens the measuring options).
+        self.opt_toggle.setObjectName("stepSelect")
+        self.opt_toggle.setStyleSheet(
+            "#stepSelect { background: #F6F5F2; border: 1px solid #D8D7D2;"
+            " border-radius: 10px; padding: 0 12px; min-height: 33px;"
+            " max-height: 33px; font-size: 13.7px; font-weight: 500;"
+            " color: #111110; }"
+            " #stepSelect:hover { background: #EFEEEA; }")
         top.addWidget(self.opt_toggle)
-        top.addWidget(self.button("✕", "secondary", small=True,
-                                  on_click=self._close_clicked,
-                                  tooltip=i18n.t("Close")))
-        root.addLayout(top)
+        self.close_btn = C.icon_button("x", i18n.t("Close"),
+                                       on_click=self._close_clicked,
+                                       colour=theme.MUTE)
+        self.close_btn.setStyleSheet(
+            "#iconBtn { background: transparent; border: 1px solid #D8D7D2;"
+            " border-radius: 10px; } #iconBtn:hover { background: #F6F5F2; }")
+        top.addWidget(self.close_btn)
+        root.addWidget(head_card)
 
         # The options live in a popover under the top bar's button.
         opt_box = QFrame(self, Qt.Popup)
@@ -336,7 +366,9 @@ class StepDialog(PrismDialog):
         self.mode_combo.currentTextChanged.connect(lambda _t: self._sync_opt_label())
 
         cols = QHBoxLayout()
-        cols.setSpacing(theme.SPACE_3)
+        cols.setSpacing(13)
+        # The page body's padding (.pbody): the cards' shadows fall into it.
+        cols.setContentsMargins(23, 19, 23, 18)
         root.addLayout(cols, stretch=1)
 
         # The AskPanel is kept — it holds the question box, Speak, and the
@@ -352,16 +384,20 @@ class StepDialog(PrismDialog):
 
         # ── left · models, their history, the drop zone ──────────────────
         self.models_card = WB.Card(i18n.t("Models"), counter=True)
-        self.models_card.setFixedWidth(280)
+        self.models_card.setFixedWidth(250)
         cols.addWidget(self.models_card)
         self.model_list = WB.ModelList()
         self.model_list.selected.connect(self._select_model)
         self.model_list.removed.connect(self._remove_model)
         self.model_list.trashed.connect(self._delete_model_files)
         self.models_card.lay.addWidget(self.model_list)
+        self.models_card.lay.addWidget(WB.divider())
         self.hist_head = WB.heading(i18n.t("History"))
-        self.hist_head.setContentsMargins(16, 10, 16, 0)
-        self.models_card.lay.addWidget(self.hist_head)
+        hist_host = QWidget()
+        hh = QHBoxLayout(hist_host)
+        hh.setContentsMargins(15, 13, 15, 4)
+        hh.addWidget(self.hist_head)
+        self.models_card.lay.addWidget(hist_host)
         self.history = WB.RunList()
         self.history.chosen.connect(self.load_session)
         self.history.delete_requested.connect(self._delete_chat)
@@ -387,18 +423,11 @@ class StepDialog(PrismDialog):
         bar = QFrame()
         bar.setStyleSheet(f"border: none; border-bottom: 1px solid {WB._HAIR};")
         bar_l = QHBoxLayout(bar)
-        bar_l.setContentsMargins(14, 10, 14, 10)
+        bar_l.setContentsMargins(12, 10, 12, 10)
         seg = QFrame()
         seg.setObjectName("stepSegBar")
         seg.setAttribute(Qt.WA_StyledBackground, True)
-        seg.setStyleSheet(
-            f"#stepSegBar {{ background: {theme.NEUTRAL[200]};"
-            f" border: none; border-radius: {theme.R_CONTROL + 2}px; }}"
-            "QPushButton#stepSeg { padding: 7px 22px; font-weight: 700;"
-            " border: 1px solid transparent; background: transparent;"
-            f" border-radius: {theme.R_CONTROL}px; color: {theme.NEUTRAL[700]}; }}"
-            f"QPushButton#stepSeg:checked {{ background: #ffffff;"
-            f" color: {theme.TEXT}; border: 1px solid {theme.NEUTRAL[300]}; }}")
+        seg.setStyleSheet(WB.SEG_QSS)
         seg_row = QHBoxLayout(seg)
         seg_row.setContentsMargins(3, 3, 3, 3)
         seg_row.setSpacing(2)
@@ -482,7 +511,12 @@ class StepDialog(PrismDialog):
         model_hint.setWordWrap(True)
         model_hint.setStyleSheet(
             f"color: {theme.NEUTRAL[600]}; font-size: 12px; border: none;")
-        step2_v.addWidget(model_hint)
+        # Everything past the question goes in one fold, shut by default:
+        # who answers, the styled-copy tick and the catalog lookup. Same
+        # widgets, same handlers; only where they sit has changed.
+        self.more = MoreOptions("More options")
+        self.more.add(model_host)
+        self.more.add(model_hint)
         self._ask_only = (self.ask.edit, mic_host, model_host, model_hint)
 
         # Off by default: checked against Prism's own drawing, ChatGPT's
@@ -497,7 +531,9 @@ class StepDialog(PrismDialog):
             "Not an independent check of the numbers — only a different "
             "look."))
         self.ai_draft_cb.setChecked(bool(self.cfg.get("step_ai_draft")))
-        step2_v.addWidget(self.ai_draft_cb)
+        # The fold's own text size: at 1366 wide the centre column is ~350px.
+        self.ai_draft_cb.setStyleSheet("QCheckBox { font-size: 12.5px; }")
+        self.more.add(self.ai_draft_cb)
 
         # Material/mould lookup: the shop's own reference sheet (CSV/XLSX
         # of Sr Nos), attached once and left attached in cfg — a shop
@@ -546,10 +582,14 @@ class StepDialog(PrismDialog):
         catalog_hint.setStyleSheet(
             f"color: {theme.NEUTRAL[600]}; font-size: 12px; border: none;")
         catalog_v.addWidget(catalog_hint)
-        step2_v.addWidget(self.catalog_box)
+        self.more.add(self.catalog_box)
+        step2_v.addWidget(self.more)
         self._refresh_catalog_label()
 
         run_row = QHBoxLayout()
+        # What a run costs, once Prism's server can say; hidden until then.
+        self.usage_chip = UsageChip()
+        run_row.addWidget(self.usage_chip)
         run_row.addStretch(1)
         draft_label, draft_icon = ACTION_BUTTON["draft"]
         self.generate_btn = self.button(i18n.t(draft_label), "primary",
@@ -565,19 +605,26 @@ class StepDialog(PrismDialog):
         # ── right · Measured · Answer · Plan · Files ─────────────────────
         right = WB.Card()
         self.right_card = right
-        right.setFixedWidth(420)
+        right.setFixedWidth(WB.RIGHT_W)
         cols.addWidget(right)
-        tabs_row = QHBoxLayout()
-        tabs_row.setContentsMargins(8, 8, 8, 4)
+        tabs_bar = QFrame()
+        tabs_bar.setStyleSheet(f"border: none; border-bottom: 1px solid {WB._HAIR};")
+        tabs_row = QHBoxLayout(tabs_bar)
+        tabs_row.setContentsMargins(12, 10, 12, 10)
         self.out_tabs = C.Tabs([i18n.t("Measured"), i18n.t("Chat"),
                                 i18n.t("Plan"), i18n.t("Files")])
+        # The same pill segments as Draft / Ask / Edit (local style only).
+        self.out_tabs.setStyleSheet(WB.TABS_QSS)
         tabs_row.addWidget(self.out_tabs)
         tabs_row.addStretch(1)
-        self.wide_btn = self.button("⤢", "secondary", small=True,
-                                    on_click=self._toggle_wide,
-                                    tooltip=i18n.t("Make this panel wider"))
+        self.wide_btn = C.icon_button("expand", i18n.t("Make this panel wider"),
+                                      on_click=self._toggle_wide,
+                                      colour=theme.MUTE)
+        self.wide_btn.setStyleSheet(
+            "#iconBtn { background: transparent; border: none;"
+            " border-radius: 10px; } #iconBtn:hover { background: #F6F5F2; }")
         tabs_row.addWidget(self.wide_btn)
-        right.lay.addLayout(tabs_row)
+        right.lay.addWidget(tabs_bar)
         self.out_stack = QStackedWidget()
         right.lay.addWidget(self.out_stack, stretch=1)
         self.out_tabs.changed.connect(self.out_stack.setCurrentIndex)
@@ -752,7 +799,7 @@ class StepDialog(PrismDialog):
     def _toggle_wide(self):
         """Give the results panel the room to read a chat in."""
         wide = self.right_card.width() < 500
-        self.right_card.setFixedWidth(660 if wide else 420)
+        self.right_card.setFixedWidth(660 if wide else WB.RIGHT_W)
         self.wide_btn.setToolTip(i18n.t("Make this panel narrower") if wide
                                  else i18n.t("Make this panel wider"))
 

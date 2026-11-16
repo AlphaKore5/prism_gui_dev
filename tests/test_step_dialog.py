@@ -1614,6 +1614,10 @@ class TheWorkbenchLayout(unittest.TestCase):
     def test_the_question_box_belongs_to_ask_and_edit_only(self):
         dlg = _dialog()
         dlg._on_files_added(["/nowhere/Assem1.STEP"])
+        # UI port stage 13: the styled-copy tick and "Answer with" live in
+        # the step's "More options" fold (shut by default); open it, then the
+        # per-action rules below are exactly what they were.
+        dlg.more.toggle.click()
         self.assertTrue(dlg.ai_draft_cb.isVisibleTo(dlg))          # Draft
         self.assertFalse(dlg.ask.edit.isVisibleTo(dlg))
         dlg._action_buttons["ask"].setChecked(True)
