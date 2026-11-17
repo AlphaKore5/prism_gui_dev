@@ -525,15 +525,32 @@ class StepDialog(PrismDialog):
         # differently-styled picture for sending to someone outside the
         # shop is still a real, if occasional, reason to want one; it is
         # just no longer something Draft spends a minute on unasked.
-        self.ai_draft_cb = QCheckBox(i18n.t(
-            "Also ask ChatGPT for a styled copy (optional)"))
-        self.ai_draft_cb.setToolTip(i18n.t(
-            "Not an independent check of the numbers — only a different "
-            "look."))
+        #
+        # The words are a wrapping label beside a bare tick box, not the
+        # QCheckBox's own text: a checkbox cannot wrap, so its one-line text set
+        # the centre column's minimum width, and with Windows font metrics that
+        # minimum was wider than the window allows at 1366 (the results pane ran
+        # 2 px off the right edge). A label wraps to whatever room there is.
+        styled_copy = i18n.t("Also ask ChatGPT for a styled copy (optional)")
+        styled_tip = i18n.t("Not an independent check of the numbers — only a different look.")
+        self.ai_draft_cb = QCheckBox()
+        self.ai_draft_cb.setAccessibleName(styled_copy)
+        self.ai_draft_cb.setToolTip(styled_tip)
         self.ai_draft_cb.setChecked(bool(self.cfg.get("step_ai_draft")))
+        self.ai_draft_label = QLabel(styled_copy)
+        self.ai_draft_label.setWordWrap(True)
+        self.ai_draft_label.setToolTip(styled_tip)
         # The fold's own text size: at 1366 wide the centre column is ~350px.
-        self.ai_draft_cb.setStyleSheet("QCheckBox { font-size: 12.5px; }")
-        self.more.add(self.ai_draft_cb)
+        self.ai_draft_label.setStyleSheet("QLabel { font-size: 12.5px; }")
+        self.ai_draft_label.setCursor(Qt.PointingHandCursor)
+        self.ai_draft_label.mouseReleaseEvent = lambda _e: self.ai_draft_cb.toggle()
+        self.ai_draft_row = QWidget()
+        draft_row = QHBoxLayout(self.ai_draft_row)
+        draft_row.setContentsMargins(0, 0, 0, 0)
+        draft_row.setSpacing(6)
+        draft_row.addWidget(self.ai_draft_cb, alignment=Qt.AlignTop)
+        draft_row.addWidget(self.ai_draft_label, stretch=1)
+        self.more.add(self.ai_draft_row)
 
         # Material/mould lookup: the shop's own reference sheet (CSV/XLSX
         # of Sr Nos), attached once and left attached in cfg — a shop
@@ -818,7 +835,7 @@ class StepDialog(PrismDialog):
             w.setVisible(action in ("ask", "edit"))
         self.model_label.setText(i18n.t("Suggest the change with:")
                                  if action == "edit" else i18n.t("Answer with:"))
-        self.ai_draft_cb.setVisible(action == "draft")
+        self.ai_draft_row.setVisible(action == "draft")
         self.catalog_box.setVisible(action == "draft")
         if hasattr(self, "composer"):
             self._sync_composer()

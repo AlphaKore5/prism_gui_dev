@@ -2286,12 +2286,30 @@ class EverythingIsReadableAtTheSmallestSize(unittest.TestCase):
         self.dialog.close()
 
     def test_no_tab_title_is_ever_cut_short(self):
+        import re
+        import paths
+        # Measure with the font the stylesheet PAINTS the tab titles in, read from
+        # style.qss itself. bar.fontMetrics() is the widget's own font, which Qt
+        # does not always size the tab with: on the Windows runner the tab rect was
+        # sized from the painted font and came out 137 px against a 143 px
+        # estimate made with the widget font, although nothing was cut. The rule
+        # for the tab text is the one Qt paints; the title must fit inside it.
+        qss = open(paths.resource("style.qss"), encoding="utf-8").read()
+        rule = re.search(r"\nQTabBar::tab\s*\{([^}]*)\}", qss).group(1)
+        family = re.search(r'font-family:\s*"([^"]+)"', rule).group(1)
+        px = int(re.search(r"font-size:\s*(\d+)px", rule).group(1))
+        weight = int(re.search(r"font-weight:\s*(\d+)", rule).group(1))
+        pad = int(re.search(r"padding:\s*\d+px\s+(\d+)px", rule).group(1))
+        border = int(re.search(r"border:\s*(\d+)px", rule).group(1))
+        from PySide6.QtGui import QFont, QFontMetrics
+        painted = QFont(family)
+        painted.setPixelSize(px)
+        painted.setWeight(QFont.Weight(weight))
+        fm = QFontMetrics(painted)
         bar = self.dialog.tabs.tabBar()
-        fm = bar.fontMetrics()
         for index in range(bar.count()):
             text = bar.tabText(index)
-            # padding 6px 15px + 2px border each side, from style.qss
-            needed = fm.horizontalAdvance(text) + 2 * 15 + 2 * 2
+            needed = fm.horizontalAdvance(text) + 2 * pad + 2 * border
             self.assertGreaterEqual(bar.tabRect(index).width(), needed, text)
 
     def _show_tab(self, key):

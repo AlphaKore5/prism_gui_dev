@@ -151,6 +151,40 @@ something you did not run.
 
 ## Issue log (newest first)
 
+### ISS-024 — Fixing the four red tests of 1.8.0 found a real product bug and a gate bug (2026-11-18) — FIXED in code, CI rerun pending
+- **Motion rhythm (PROVEN):** `rhythm.probe_video` asked `ffprobe` for the video size. The FFmpeg Prism ships (`imageio-ffmpeg`)
+  has no ffprobe beside it and customers have none on PATH, so the check returned None for every customer; this dev machine
+  hid it with `/usr/bin/ffprobe`. Reproduced by running the test with an empty PATH (red), fixed in the engine (`ad85769`:
+  size read from `ffmpeg -i`), green with and without ffprobe. Rule: a test that shells out must be run once with a bare PATH.
+- **STEP (LIKELY cause, Windows CI decides):** the "Also ask ChatGPT for a styled copy" QCheckBox could not wrap, so its one-line text
+  set the centre column's minimum width: on Linux 291 of 315 px, on the Windows runner about 340 (column about 372, 2 px past the window).
+  It is now a tick box plus a wrapping label; a new test doubles the text and must still fit (red with wrapping off: 1068 > 1066).
+- **Inquiry tabs (LIKELY, Windows CI decides):** the test measured titles with the widget font, but the stylesheet paints (and the
+  Windows runner sized the tab rect with) the `QTabBar::tab` font; it now reads that font from `style.qss`.
+- **Drop test:** Qt hands local files on as `C:/x`, `os.path.join` makes `C:\\x`; compared as normalised paths (not a product bug).
+- **Gate bug:** `prerelease_check.py` never honoured whole-file entries in `prerelease_removed_ok.txt`, so the listed removals of
+  `ai_directory_dialog.py` etc. stayed red; it now does. The 31 inherited removals (Hitarth 8fb1c2a, Harsh Bhatt 1369936, BOQ
+  industries tests) are listed with their source commit but were NOT reviewed by the release session.
+- **macOS:** matrix entries commented out with a switch note (owner's decision for dev 1.8.1: Windows + Linux only). Re-enable before any
+  build that must reach Mac users; Mac installs get nothing from 1.8.1.
+- **Process:** actionlint 1.7.12 (checksum-verified) is in `~/tools/actionlint/`; run it on every workflow edit. Run prerelease_check
+  with a sandbox HOME and `PLAYWRIGHT_BROWSERS_PATH` pointing at the real browser cache, or its self-test sees a "!" line.
+
+### ISS-023 — Dev 1.8.0 tagged without CI on the combined code; the gate was red and macOS CI cannot start (2026-11-17) — SUPERSEDED by 1.8.1 (ISS-024); v1.8.0 was never published
+- **Seen:** tag v1.8.0 (commit 611a864, reskin + AI through the server) built fine for Windows (runner smoke test passed) and Linux, but
+  `Tests · Windows` had 4 new failures and `Tests · Linux` 1; macOS jobs were cancelled at once with "The configuration
+  'macos-14-arm64-us-default' is not supported". `release` needs build and tests, so nothing was published. Run 44144776180.
+- **Causes:** the branch had never run CI (CI runs on main, PRs and tags only), so the first Windows run of the reskin was the tag run.
+  Three failures are Windows-only layout/path checks (tab title 137 px < 143, STEP 2 px overflow, `/` vs `\` in a drop test); one
+  (test_motion_rhythm ProbeVideo) fails on both runners, LIKELY ffprobe missing next to the bundled ffmpeg. The macOS error is a
+  runner configuration issue (cause not investigated). Also found: the branch commit's engine gitlink was still d0165dd while the tested
+  engine (via the symlink) was dce2760, and dce2760 was not on the repository `.gitmodules` pointed at; the pin needed `.gitmodules` ->
+  AlphaKore5/prism_terminal.
+- **Rule/check:** before tagging a branch that was never in CI, run the workflow on it (workflow_dispatch) and read the Windows tests
+  job first. Check `git ls-tree HEAD prism_terminal` against the engine you tested, and that the commit exists at the `.gitmodules` URL.
+  The macOS runner label must be fixed before any tag can publish (the release job needs the whole matrix).
+- Details: ui-port/stages/18-windows-dev-release.md.
+
 ### ISS-022 — Review found Uninstall could delete a person's own folder (2026-10-28) — FIXED before tagging 1.6.13
 - **Found by:** the two-axis code review (standards + spec) run on today's diffs, before the dev tag.
 - **What was wrong, all confirmed in the code:** "everything" removed any folder named "Prism..." that the person had

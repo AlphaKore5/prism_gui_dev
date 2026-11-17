@@ -114,6 +114,16 @@ class TheLayout(unittest.TestCase):
                 self.assertLessEqual(_right_edge(d.close_btn, host), w)
                 self.assertLessEqual(_right_edge(d.generate_btn, host), w)
 
+    def test_wider_text_than_this_machines_fonts_still_fits(self):
+        """The Windows runner's fonts made the fold's tick-box text 2 px too wide for the
+        window (a Linux run cannot see that). Text twice as long must still wrap, not push."""
+        host, d = _screen(1066, 716, attached=True)
+        d.ai_draft_label.setText(d.ai_draft_label.text() + " " + d.ai_draft_label.text())
+        d.more.toggle.click()
+        host.layout().activate()
+        d.layout().activate()
+        self.assertLessEqual(_right_edge(d.right_card, host), 1066)
+
     def test_the_wide_toggle_goes_out_and_back(self):
         _h, d = _screen()
         d.wide_btn.click()
@@ -266,8 +276,18 @@ class SegmentsAndPanes(unittest.TestCase):
 
     def test_no_checkbox_was_lost(self):
         _h, d = _screen()
-        self.assertEqual([c.text() for c in d.findChildren(QCheckBox)],
+        # The words are a wrapping label (a checkbox cannot wrap, and its one-line
+        # text set the column's minimum width); the tick box carries them as its name.
+        self.assertEqual([c.accessibleName() for c in d.findChildren(QCheckBox)],
                          ["Also ask ChatGPT for a styled copy (optional)"])
+        self.assertEqual(d.ai_draft_label.text(), "Also ask ChatGPT for a styled copy (optional)")
+        self.assertTrue(d.ai_draft_label.wordWrap())
+
+    def test_clicking_the_words_ticks_the_box(self):
+        _h, d = _screen()
+        self.assertFalse(d.ai_draft_cb.isChecked())
+        d.ai_draft_label.mouseReleaseEvent(None)
+        self.assertTrue(d.ai_draft_cb.isChecked())
 
 
 if __name__ == "__main__":

@@ -10,6 +10,25 @@ Tests: **1966 passing** (6 skipped, 8 Sep 2026 after Round 16 landed on main —
 
 ---
 
+# 1.8.1 — Same as 1.8.0, with the Windows and Linux test failures fixed (DEV build, 18 Nov 2026)
+
+**Dev channel only. Windows and Linux only: there is no macOS build of this version.** The owner deferred macOS for this
+dev release because GitHub refuses the Apple Silicon runner ("macos-14-arm64-us-default is not supported"); the macOS code,
+steps and `macos-arm64-app` channel are still in the repository and the workflow carries a commented switch to bring them
+back. macOS testers stay on their current build. Everything in 1.8.0 below applies (including that AI is live only for the
+owner's test licence). 1.8.0 was tagged but never published.
+
+- **Motion's rhythm check works for customers.** It read a video's size with `ffprobe`, which the FFmpeg that ships with Prism
+  does not include, so on any machine without a separate FFmpeg install it silently measured nothing. It now reads the size
+  from FFmpeg itself (engine `ad85769`).
+- **STEP:** the "Also ask ChatGPT for a styled copy" tick now wraps its words instead of forcing the middle column wider, so
+  the results pane cannot run off the right edge of a 1366-wide window with Windows fonts.
+- **Tests:** the Windows-only checks were corrected (tab titles are measured with the font the stylesheet paints, a dropped
+  file's path is compared as a path, not as `/` against `\`).
+- Not run on a real Windows or Mac PC. The Windows layout fixes are confirmed only by the Windows test job.
+
+---
+
 # 1.8.0 — New look, and AI through Prism's server (DEV build, 17 Nov 2026)
 
 **Dev channel only. Read the first point before installing: AI is switched off for most licences.**

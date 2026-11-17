@@ -97,3 +97,40 @@ widgets/home_panel.py::_ToolTile
 widgets/home_panel.py::_ToolTile.__init__
 widgets/home_panel.py::_ToolTile.keyPressEvent
 widgets/home_panel.py::_ToolTile.mousePressEvent
+
+# 1.8.1 (2026-11-18): 31 removals that came in from dev main (not made by the AI-via-server or reskin work).
+# Recorded with their source commit so the gate stays readable; this release did NOT review them beyond that.
+# Leads restructure by Harsh Bhatt, commit 1369936 (2026-11-13): cards/sequences/tabs rebuilt (Companies, Deals, Due today, Stats, Sequences).
+addons/leads/cockpit.py::_LeadCard
+addons/leads/cockpit.py::_LeadCard.__init__
+addons/leads/cockpit.py::_LeadCard.mousePressEvent
+addons/leads/cockpit.py::LeadsCockpit._fit_badge
+addons/leads/cockpit.py::_SequencesTab
+addons/leads/cockpit.py::_SequencesTab.__init__
+tests/test_leads_cockpit.py::WorkspaceSurface.test_six_tabs_over_six_screens
+# STEP agent-chain/Groq-plan paths and their tests removed by Hitarth, commit 8fb1c2a (1.7.0, 2026-11-06, STEP hole tagging).
+addons/step/dialog.py::StepDialog._agents
+addons/step/dialog.py::StepDialog._ask_via_chain
+addons/step/dialog.py::StepDialog._on_answer_followup_agent_done
+addons/step/dialog.py::StepDialog._on_asked_by_tool
+addons/step/dialog.py::StepDialog._planner
+addons/step/dialog.py::StepDialog._plan_via_groq
+tests/test_step_dialog.py::AFollowUpTypedInsideTheAnswerPopup.test_an_agent_followup_resumes_the_same_chat_not_a_fresh_one
+tests/test_step_dialog.py::AFollowUpTypedInsideTheAnswerPopup.test_a_silent_agent_followup_warns_instead_of_updating
+tests/test_step_dialog.py::AFollowUpTypedInsideTheAnswerPopup.test_a_successful_agent_followup_updates_response_link_and_agent
+tests/test_step_dialog.py::AFollowUpTypedInsideTheAnswerPopup.test_a_successful_groq_followup_updates_the_response_and_popup
+tests/test_step_dialog.py::AFollowUpTypedInsideTheAnswerPopup.test_groq_gets_the_earlier_answer_as_context
+tests/test_step_dialog.py::AFollowUpTypedInsideTheAnswerPopup.test_switching_agent_on_a_followup_does_not_resume_the_old_chat
+tests/test_step_dialog.py::ChoosingAStrongerModelThanGroq
+tests/test_step_dialog.py::ChoosingAStrongerModelThanGroq._pick
+tests/test_step_dialog.py::ChoosingAStrongerModelThanGroq.test_a_chosen_model_builds_the_ask_stage_with_no_engine_failover
+tests/test_step_dialog.py::ChoosingAStrongerModelThanGroq.test_a_real_answer_stops_the_chain_and_records_its_agent
+tests/test_step_dialog.py::ChoosingAStrongerModelThanGroq.test_a_silent_tool_falls_through_to_the_next_in_the_fixed_order
+tests/test_step_dialog.py::ChoosingAStrongerModelThanGroq.test_exhausting_the_chain_fails_cleanly_not_silently_to_groq
+tests/test_step_dialog.py::ChoosingAStrongerModelThanGroq.test_groq_still_needs_its_own_key_but_the_others_do_not
+tests/test_step_dialog.py::TheGuardsSpeakBeforeAnythingRuns.test_edit_without_a_reasoning_tool_is_refused
+tests/test_stepfile.py::ThePromptsCarryNumbersNotTheModel.test_groq_hears_the_figures_and_the_confidentiality
+# BOQ industries tests removed in Hitarth's BOQ rounds (df8f8ca..e0cfae2, 2026-11-05..13); exact commit not pinned down.
+tests/test_boq_industries.py::AnIndustryWithNoRuleSetRaisesRatherThanGuessing.test_review_rows_is_just_empty_not_an_error
+tests/test_boq_industries.py::AnIndustryWithNoRuleSetRaisesRatherThanGuessing.test_roles_and_scales_are_just_empty_not_an_error
+tests/test_boq_industries.py::AnIndustryWithNoRuleSetRaisesRatherThanGuessing.test_summary_text_raises_for_an_unbuilt_industry

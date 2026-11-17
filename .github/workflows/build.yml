@@ -49,8 +49,16 @@ jobs:
             label: Linux
           - os: windows-latest
             label: Windows
-          - os: macos-14
-            label: macOS
+          # MACOS DEFERRED for the dev 1.8.1 release (owner, 2026-11-18): GitHub
+          # refuses the runner ("The configuration 'macos-14-arm64-us-default' is
+          # not supported"), the job is cancelled at once, and `release` needs the
+          # whole matrix, so it blocked the publish for Windows and Linux too.
+          # To switch macOS back on: uncomment the two lines below AND the macOS
+          # entry in the `build` matrix, then fix the runner. Every macOS step
+          # (`if: runner.os == 'macOS'`), packaging/codesign.py and the
+          # macos-arm64-app channel stay in the repo untouched.
+          # - os: macos-14
+          #   label: macOS
 
     steps:
       - uses: actions/checkout@v4
@@ -119,8 +127,9 @@ jobs:
             label: Linux (x64)   # binaries built against a newer libc
           - os: windows-latest
             label: Windows (x64)
-          - os: macos-14         # Apple Silicon
-            label: macOS (Apple Silicon)
+          # MACOS DEFERRED (see the same note in the `tests` matrix above).
+          # - os: macos-14         # Apple Silicon
+          #   label: macOS (Apple Silicon)
           # No Intel Mac target. macos-15-intel built fine but failed its smoke
           # test, and `release` needs the whole matrix — one red leg blocks the
           # publish for every platform. Dropped rather than debugged, because

@@ -606,7 +606,10 @@ class TheFrontDoorLeadsWithTheDropZone(unittest.TestCase):
         p.files_chosen.connect(got.append)
         ev = _drop(p.drop_zone, [f])
         p.drop_zone.dropEvent(ev)
-        self.assertEqual(got, [[f]])
+        # Qt hands local files on with forward slashes even on Windows ("C:/x/site.dxf"
+        # against os.path.join's "C:\\x\\site.dxf"); both name the same file, so compare as paths.
+        norm = lambda q: os.path.normcase(os.path.normpath(q))      # noqa: E731
+        self.assertEqual([[norm(x) for x in g] for g in got], [[norm(f)]])
 
     def test_choose_a_drawing_hands_the_picked_files_on_and_cancel_does_nothing(self):
         p = self._panel()

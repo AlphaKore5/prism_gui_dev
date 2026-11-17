@@ -161,7 +161,10 @@ def check_removed(tag: str) -> None:
                              capture_output=True, text=True).stdout
         path = ROOT / f
         if not path.exists():
-            gone.append(f"{f}  (the whole file)")
+            # A whole-file removal is allowed by listing the bare path (the
+            # list's own entries for dialogs/ai_directory_dialog.py etc. do).
+            if f not in ok_list:
+                gone.append(f"{f}  (the whole file)")
             continue
         new = path.read_text(encoding="utf-8", errors="replace")
         for name in sorted(names_in(old) - names_in(new)):
