@@ -32,6 +32,7 @@ import plans  # noqa: E402
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import sample_jobs  # noqa: E402
 from test_gates import GateTest  # noqa: E402
+from widgets import send_to_ai
 from addons.step import dialog as SD  # noqa: E402
 from addons.step import sessions as SES  # noqa: E402
 from addons.step.dialog import StepDialog  # noqa: E402
@@ -557,14 +558,20 @@ class ThePictureLeavesOnlyWithConsentAskedOnce(unittest.TestCase):
     yes — asked once per dialog session, worded "Prism AI" (the owner's
     own instruction), not the model's real name."""
 
+    def setUp(self):
+        send_to_ai.reset_session()      # "asked once" is per run of the app
+
     def test_the_popup_names_prism_ai_not_the_model(self):
         dlg = _dialog()
         dlg._vision_consent = None       # undo _dialog()'s own safety default
         m = _fake_measured(dlg)
-        with mock.patch.object(SD.QMessageBox, "question",
-                              return_value=SD.QMessageBox.No) as q:
+        shown = []
+        def spy(self_):
+            shown.append(" ".join(l.text() for l in self_.findChildren(SD.QLabel)))
+            return send_to_ai.SendConsentDialog.Rejected
+        with mock.patch.object(send_to_ai.SendConsentDialog, "exec", spy):
             dlg._attachments_for(m)
-        title, text = q.call_args[0][1], q.call_args[0][2]
+        text = shown[0]
         self.assertIn("Prism AI", text)
         self.assertNotIn("Claude", text)
         self.assertNotIn("Haiku", text)
@@ -574,8 +581,8 @@ class ThePictureLeavesOnlyWithConsentAskedOnce(unittest.TestCase):
         dlg = _dialog()
         dlg._vision_consent = None
         m = _fake_measured(dlg)
-        with mock.patch.object(SD.QMessageBox, "question",
-                              return_value=SD.QMessageBox.Yes):
+        with mock.patch.object(send_to_ai.SendConsentDialog, "exec",
+                               return_value=send_to_ai.SendConsentDialog.Accepted):
             attachments = dlg._attachments_for(m)
         self.assertEqual(len(attachments), 1)
         self.assertEqual(attachments[0]["kind"], "image")
@@ -585,8 +592,8 @@ class ThePictureLeavesOnlyWithConsentAskedOnce(unittest.TestCase):
         dlg = _dialog()
         dlg._vision_consent = None
         m = _fake_measured(dlg)
-        with mock.patch.object(SD.QMessageBox, "question",
-                              return_value=SD.QMessageBox.No) as q:
+        with mock.patch.object(send_to_ai.SendConsentDialog, "exec",
+                               return_value=send_to_ai.SendConsentDialog.Rejected) as q:
             first = dlg._attachments_for(m)
             second = dlg._attachments_for(m)
         self.assertEqual(first, [])
@@ -600,7 +607,7 @@ class ThePictureLeavesOnlyWithConsentAskedOnce(unittest.TestCase):
         dlg._vision_consent = None
         m = _fake_measured(dlg)
         m["drawn"] = {}
-        with mock.patch.object(SD.QMessageBox, "question") as q:
+        with mock.patch.object(send_to_ai.SendConsentDialog, "exec") as q:
             attachments = dlg._attachments_for(m)
         self.assertEqual(attachments, [])
         q.assert_not_called()

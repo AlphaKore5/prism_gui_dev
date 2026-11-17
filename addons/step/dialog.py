@@ -48,6 +48,7 @@ import paths as appfiles
 import theme
 from dialogs.base import PrismDialog
 from workers import AutomationWorker
+from widgets import send_to_ai
 from addons.step.workers import (StepApplyWorker, StepAskWorker,
                                  StepCatalogExplainWorker, StepMeasureWorker,
                                  StepPlanWorker, image_attachment)
@@ -2107,13 +2108,12 @@ class StepDialog(PrismDialog):
         not something this prompt needs to spell out."""
         if self._vision_consent is not None:
             return self._vision_consent
-        answer = QMessageBox.question(
-            self, i18n.t("Send the drawing to AI?"),
-            i18n.t("This picture is about to leave your computer, to "
-                   "Prism AI — continue?"),
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-        self._vision_consent = answer == QMessageBox.Yes
-        return self._vision_consent
+        # `_consent_path` is the picture about to be sent (set by _attachments_for).
+        ok = send_to_ai.ask_consent(self, self.cfg, getattr(self, "_consent_path", ""),
+                                    what=i18n.t("drawing"))
+        # Asked once per session either way; "Don't ask again" is kept by send_to_ai.
+        self._vision_consent = ok
+        return ok
 
     def _attachments_for(self, m: dict) -> list:
         """Prism's own rendered drawing-sheet PNG for this model, as the
@@ -2124,6 +2124,7 @@ class StepDialog(PrismDialog):
         png = (m.get("drawn") or {}).get("png")
         if not png or not os.path.exists(png):
             return []
+        self._consent_path = png
         if not self._drawing_consent():
             return []
         return [image_attachment(png)]
@@ -2149,7 +2150,26 @@ class StepDialog(PrismDialog):
         self._ask_worker.done.connect(
             lambda text, model=model: self._on_suggested(text, agent=model))
         self._ask_worker.failed.connect(self._on_failed)
+        self._show_sending(m)
         self._ask_worker.start()
+
+    def _show_sending(self, m: dict):
+        """The 'Sending to Prism AI' panel, only when a picture goes with the call."""
+        self._hide_sending()
+        png = (m.get("drawn") or {}).get("png")
+        if not png or not getattr(self._ask_worker, "attachments", None):
+            return
+        self._sending = send_to_ai.SendingPanel(self, png)
+        self._sending.show_over()
+
+    def _hide_sending(self):
+        panel = getattr(self, "_sending", None)
+        if panel is not None:
+            self._sending = None
+            try:
+                panel.finish()
+            except RuntimeError:
+                pass
 
     # ── the conversation, saved to one file per model ──────────────────────
     # "ask · stem" is already scoped to the model, not the exact question —
@@ -2196,6 +2216,7 @@ class StepDialog(PrismDialog):
         """The answer arrives — in the Chat tab, not a window. Ask is done
         (the answer is the deliverable, the box below it carries on the
         conversation). Edit goes straight on to plan the changes."""
+        self._hide_sending()
         m = self._current
         report = m["report"]
         key = f"ask · {report['stem']}"
@@ -2588,6 +2609,7 @@ class StepDialog(PrismDialog):
                           [], seconds=10)
 
     def _on_failed(self, error: str):
+        self._hide_sending()
         self._set_busy(False, "")
         self._render_models()
         self._set_canvas()
