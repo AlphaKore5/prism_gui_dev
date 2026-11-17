@@ -32,6 +32,7 @@ import i18n
 from widgets.loader import LoadingDialog
 import identity
 import licensing
+import ai_server
 import paths
 import theme
 import updater
@@ -3610,6 +3611,46 @@ class MainWindow(QMainWindow):
         self._workers.append(worker)
         worker.start()
 
+    def _followup_as_local_file(self, responses: dict) -> bool:
+        """Server mode: "give me this as a PDF/Word/Excel" changes only the
+        FORMAT. Write the answer Prism already has to a real file here, with no
+        AI call and no repeated step. True when it did."""
+        import docexport
+        text = getattr(self, "_followup_text", "")
+        if not ai_server.active() or not docexport.is_pure_format_request(text):
+            return False
+        answer = docexport.latest_answer(responses)
+        if not answer:
+            return False
+        ext = docexport.requested_ext(text)
+        sess = getattr(self, "_followup_session", None) or {}
+        folder = sess.get("artifacts_dir") or CB.config.current_run_dir()
+        if not folder:
+            import tempfile
+            folder = tempfile.mkdtemp(prefix="prism-doc-")
+        path, _note = docexport.export_answer(answer, ext, folder,
+                                              stem="prism-answer")
+        if not path:
+            return False
+        self.statusBar().showMessage(
+            i18n.t("Saved {name} — made on this computer from your earlier "
+                   "answer, nothing was asked again.").format(
+                name=os.path.basename(path)), 12000)
+        self._last_local_file = path
+        box = QMessageBox(self)
+        box.setWindowTitle(i18n.t("Your file is ready"))
+        box.setText(i18n.t("{name} is saved in this task's folder.").format(
+            name=os.path.basename(path)))
+        open_btn = box.addButton(i18n.t("Open file"), QMessageBox.AcceptRole)
+        show_btn = box.addButton(i18n.t("Show in folder"), QMessageBox.ActionRole)
+        box.addButton(i18n.t("Close"), QMessageBox.RejectRole)
+        box.exec()
+        if box.clickedButton() is open_btn:
+            paths.open_result(path)
+        elif box.clickedButton() is show_btn:
+            paths.reveal_result(path)
+        return True
+
     def _resolve_stage_agent(self, stage: str) -> str:
         """Resolve which tool should run a stage in follow-up."""
         agent = (self._stage_agents.get(stage)
@@ -3641,6 +3682,8 @@ class MainWindow(QMainWindow):
         """
         responses = getattr(self, "_followup_responses", {})
         if not responses:
+            return
+        if self._followup_as_local_file(responses):
             return
         links = getattr(self, "_followup_links", {}) or {}
         atts = getattr(self, "_followup_attachments", [])
