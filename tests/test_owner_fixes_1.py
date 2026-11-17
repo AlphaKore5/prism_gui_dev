@@ -11,7 +11,7 @@ _HOME = tempfile.mkdtemp(prefix="prism-s19-")
 os.environ["HOME"] = _HOME
 os.environ["USERPROFILE"] = _HOME
 
-from PySide6.QtWidgets import QApplication, QLabel, QPushButton   # noqa: E402
+from PySide6.QtWidgets import QApplication, QFrame, QLabel, QPushButton   # noqa: E402
 _app = QApplication.instance() or QApplication([])
 
 import ai_server                                                   # noqa: E402
@@ -68,3 +68,25 @@ class ServerModeNames(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ReaderDialog(unittest.TestCase):
+    MD = "# Title\n\nSome **bold** text.\n\n- a\n- b\n\n| x | y |\n|---|---|\n| 1 | 2 |\n"
+
+    def test_renders_markdown_not_raw_text(self):
+        d = CD.StageResultDialog("content", "ChatGPT", self.MD, "")
+        html = d.reader.toHtml()
+        self.assertNotIn("**bold**", d.reader.toPlainText())
+        self.assertIn("<table", html)
+        self.assertIn("font-weight", html)
+        self.assertEqual(d.reader.frameShape(), QFrame.NoFrame)
+        self.assertEqual(d._text, self.MD)              # data unchanged
+
+    def test_save_as_each_format(self):
+        d = CD.StageResultDialog("content", "ChatGPT", self.MD, "")
+        folder = tempfile.mkdtemp()
+        for ext, magic in ((".pdf", b"%PDF-"), (".docx", b"PK"), (".md", b"# Title"),
+                           (".txt", b"Title")):
+            p = d.save_to(os.path.join(folder, "a" + ext))
+            self.assertTrue(p.endswith(ext))
+            self.assertTrue(open(p, "rb").read().startswith(magic), ext)

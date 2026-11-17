@@ -6,6 +6,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTextEdit,
     QFrame, QApplication, QDialogButtonBox, QScrollArea, QWidget,
+    QTextBrowser, QFileDialog, QMessageBox,
 )
 
 import os
@@ -70,23 +71,85 @@ class StageResultDialog(PrismDialog):
             link.setTextFormat(Qt.RichText)
             link.setOpenExternalLinks(True)
             root.addWidget(link)
-        body = QTextEdit()
+        body = QTextBrowser()
+        self.reader = body
+        body.setObjectName("answerReader")
         body.setReadOnly(True)
+        body.setOpenExternalLinks(True)
+        body.setFrameShape(QFrame.NoFrame)
+        body.setStyleSheet(
+            f"QTextBrowser#answerReader {{ background: transparent; border: none;"
+            f" color: {theme.TEXT}; selection-background-color: {theme.ACCENT_RAMP[200]}; }}")
+        # The reader keeps a comfortable line length: the text sits in a
+        # centred column however wide the window is made.
+        body.document().setDocumentMargin(24)
+        body.document().setDefaultStyleSheet(_READER_CSS)
         if text:
-            body.setHtml(render_markdown(text))
+            body.document().setMarkdown(text)
         elif url:
             body.setPlainText(
                 "No text was captured here — the link above is where this step "
                 "landed, and it is the one to open.")
         else:
             body.setPlainText("(no response text captured)")
-        root.addWidget(body)
+        root.addWidget(body, stretch=1)
+        self._text = text or ""
         self.footer.add_utility(self.button(
             i18n.t("Copy"), "secondary", icon_name="copy", small=True,
             on_click=lambda: QApplication.clipboard().setText(
                 text or body.toPlainText())))
+        self.save_btn = self.button(
+            i18n.t("Save as…"), "secondary", icon_name="folder", small=True,
+            on_click=self._save_as)
+        self.footer.add_utility(self.save_btn)
         self.footer.set_primary(
             self.button(i18n.t("Close"), "primary", on_click=self.accept))
+
+    def save_to(self, path: str) -> str:
+        """Write the answer to `path`; the extension picks the format
+        (.txt .md .docx .pdf). Returns the path written, "" when it could not."""
+        import docexport
+        ext = os.path.splitext(path)[1].lower()
+        text = self._text or self.reader.toPlainText()
+        if ext in (".docx", ".pdf"):
+            folder, name = os.path.split(path)
+            made, _ = docexport.export_answer(text, ext, folder,
+                                              os.path.splitext(name)[0])
+            return made if made.lower().endswith(ext) else ""
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(text if ext == ".md" else self.reader.toPlainText())
+        return path
+
+    def _save_as(self):
+        path, _ = QFileDialog.getSaveFileName(
+            self, i18n.t("Save this answer"), "answer.pdf",
+            "PDF (*.pdf);;Word (*.docx);;Markdown (*.md);;Text (*.txt)")
+        if not path:
+            return
+        if not os.path.splitext(path)[1]:
+            path += ".pdf"
+        try:
+            ok = self.save_to(path)
+        except OSError:
+            ok = ""
+        if not ok:
+            QMessageBox.warning(self, i18n.t("Could not save"),
+                                i18n.t("Prism could not write that file. Try another "
+                                       "folder or another format."))
+
+
+_READER_CSS = (
+    f"body {{ font-size: 15px; line-height: 160%; color: {theme.TEXT}; }}"
+    "h1 { font-size: 26px; font-weight: 500; margin-top: 6px; margin-bottom: 10px; }"
+    "h2 { font-size: 21px; font-weight: 500; margin-top: 18px; margin-bottom: 6px; }"
+    "h3 { font-size: 17px; font-weight: 600; margin-top: 14px; margin-bottom: 4px; }"
+    "p { margin-top: 0px; margin-bottom: 10px; }"
+    "li { margin-bottom: 4px; }"
+    f"code, pre {{ font-family: 'Geist Mono','JetBrains Mono',Consolas,monospace;"
+    f" font-size: 13px; background-color: {theme.NEUTRAL[100]}; }}"
+    f"th {{ background-color: {theme.NEUTRAL[100]}; font-weight: 600; }}"
+    f"a {{ color: {theme.ACCENT_RAMP[700]}; }}"
+)
 
 
 class _StageRow(QFrame):
