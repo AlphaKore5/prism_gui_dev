@@ -194,7 +194,12 @@ class TheWordsAreNeverLost(unittest.TestCase):
         self.assertIn("Word document", note)
 
     def test_a_pdf_request_is_answered_honestly(self):
+        # A real PDF now; the Word fallback (said out loud) only when Qt is missing.
         path, note = C.document_from_text("body", self.tmp, "x", ".pdf")
+        self.assertTrue(path.endswith(".pdf"))
+        self.assertEqual(open(path, "rb").read(5), b"%PDF-")
+        with mock.patch.object(C, "_write_pdf", side_effect=ImportError):
+            path, note = C.document_from_text("body", self.tmp, "x", ".pdf")
         self.assertTrue(path.endswith(".docx"))
         self.assertIn("PDF", note)
 
