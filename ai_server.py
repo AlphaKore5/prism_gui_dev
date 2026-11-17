@@ -81,6 +81,19 @@ def active() -> bool:
     return _ai().active()
 
 
+PRISM_AI = "Prism AI"
+
+
+def display_agent(name: str) -> str:
+    """What a person sees for a step's tool. In server mode there are no
+    websites any more, so every site name (ChatGPT, Claude ...) reads
+    "Prism AI"; the old direct path keeps the real names."""
+    name = name or ""
+    if name and active():
+        return PRISM_AI
+    return name
+
+
 # ── this run's cost ──────────────────────────────────────────────────────────
 RUN_COST_EVERY = 8           # seconds between run-cost asks while a run goes
 _run: dict = {"id": "", "mc": None, "at": 0.0, "fetching": False}

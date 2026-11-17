@@ -42,6 +42,7 @@ from PySide6.QtWidgets import (
 
 import i18n
 from widgets.loader import Loader
+import ai_server
 import paths
 import theme
 from widgets import icons
@@ -355,9 +356,9 @@ class StageCard(QWidget):
         # Provider. A tool's brand colour is allowed on 16-20px of badge and
         # nowhere larger — the app belongs to Prism.
         self._head = head
-        self.tool_badge = C.ToolBadge(self.agent or "?", 20, theme.R_CHIP)
+        self.tool_badge = C.ToolBadge(ai_server.display_agent(self.agent) or "?", 20, theme.R_CHIP)
         head.addWidget(self.tool_badge)
-        self.tool_name = QLabel(self.agent)
+        self.tool_name = QLabel(ai_server.display_agent(self.agent))
         self.tool_name.setStyleSheet(
             theme.type_css("META", theme.NEUTRAL[700]) + " background: transparent;")
         head.addWidget(self.tool_name)
@@ -496,19 +497,20 @@ class StageCard(QWidget):
             if note_swap:
                 self.set_note(i18n.t(
                     "{failed} could not finish this step — Prism handed it to "
-                    "{agent}.").format(failed=self.agent, agent=agent))
+                    "{agent}.").format(failed=ai_server.display_agent(self.agent),
+                            agent=ai_server.display_agent(agent)))
         self.agent = agent
         # Swapped rather than restyled: ToolBadge owns its own metrics, and
         # re-deriving them here is how a second, slightly-different badge gets
         # into the app.
-        fresh = C.ToolBadge(agent, 20, theme.R_CHIP)
+        fresh = C.ToolBadge(ai_server.display_agent(agent), 20, theme.R_CHIP)
         old = self._head.replaceWidget(self.tool_badge, fresh)
         if old is not None:
             self.tool_badge.hide()   # before setParent(None): avoids ghost-window flash
             self.tool_badge.setParent(None)
             self.tool_badge.deleteLater()
         self.tool_badge = fresh
-        self.tool_name.setText(agent)
+        self.tool_name.setText(ai_server.display_agent(agent))
         self._paint_facts()
 
     def set_note(self, text: str, echoes_body: bool = False):
@@ -613,7 +615,7 @@ class StageCard(QWidget):
             # Which tools this step went through, and — the part that used to
             # live for fifteen seconds in the status bar and nowhere else —
             # the engine's own reason for the handover.
-            hand = " → ".join(self._tried + [self.agent])
+            hand = " → ".join(ai_server.display_agent(a) for a in self._tried + [self.agent])
             bits.append(f"{hand} ({self._handover})" if self._handover
                         else hand)
         span = self._elapsed()
@@ -754,10 +756,14 @@ class StageCard(QWidget):
             return False
 
     def set_waiting(self, seconds: int):
+        if ai_server.active():
+            self.set_state("waiting", i18n.t("up to {n}s").format(n=seconds),
+                           note=i18n.t("Prism AI is working on this step."))
+            return
         self.set_state("waiting", i18n.t("up to {n}s").format(n=seconds),
                        note=i18n.t("Waiting for {tool} to answer. Prism is "
                                    "watching the tab, not asking again.")
-                       .format(tool=self.agent or i18n.t("the tool")))
+                       .format(tool=ai_server.display_agent(self.agent) or i18n.t("the tool")))
 
     def set_done(self, texts: list[str], url: str, timed_out: bool = False,
                  blocked: str = "", exhausted: bool = False, count: int = None,
@@ -1123,7 +1129,8 @@ class OutputPanel(QWidget):
         self._running = bool(running)
         self.stop_btn.setVisible(running)
         self.skip_btn.setVisible(running)
-        self.fallback_btn.setVisible(running)
+        # No websites to fall back to when AI runs through Prism's server.
+        self.fallback_btn.setVisible(running and not ai_server.active())
         if running:
             self._finished = False
             self.stop_btn.setEnabled(True)
@@ -1474,7 +1481,7 @@ class OutputPanel(QWidget):
         if self._live and self._cards.get(self._live):
             card = self._cards[self._live]
             return card.state(), i18n.t("{tool} · {step}").format(
-                tool=card.agent or "?", step=card._title)
+                tool=ai_server.display_agent(card.agent) or "?", step=card._title)
         if self._finished or tally["finished"] >= tally["total"]:
             if tally["problem"]:
                 return ("failed" if any(

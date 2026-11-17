@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
 import os
 
 import i18n
+import ai_server
 import paths
 import theme
 from dialogs.base import PrismDialog
@@ -27,6 +28,7 @@ class StageResultDialog(PrismDialog):
     def __init__(self, stage: str, agent: str, text: str, url: str, parent=None,
                  unfinished: bool = False):
         icon_name, title, _ = STAGE_COPY.get(stage, ("grid", stage.title(), ""))
+        agent = ai_server.display_agent(agent)
         super().__init__(title, agent, icon=icon_name, parent=parent,
                          closable=False)
         self.setWindowTitle(f"{title} · {agent}")
@@ -116,7 +118,7 @@ class _StageRow(QFrame):
         name = QLabel(title)
         name.setObjectName("h5")
         head.addWidget(name)
-        tool = QLabel(info["agent"])
+        tool = QLabel(ai_server.display_agent(info["agent"]))
         tool.setObjectName("tagNeutral")
         head.addWidget(tool)
         if info.get("timed_out"):
@@ -170,8 +172,9 @@ class _TaskHeader(QFrame):
         stages = group.get("stages", [])
         tools = []
         for s in stages:                       # ordered, de-duplicated
-            if s.get("agent") and s["agent"] not in tools:
-                tools.append(s["agent"])
+            a = ai_server.display_agent(s.get("agent", ""))
+            if a and a not in tools:
+                tools.append(a)
         if group.get("error"):
             head.addWidget(Chip("failed", "alert", "tagErr"))
         else:
