@@ -124,6 +124,21 @@ class TheLayout(unittest.TestCase):
         d.layout().activate()
         self.assertLessEqual(_right_edge(d.right_card, host), 1066)
 
+    def test_a_row_that_cannot_wrap_never_pushes_the_window(self):
+        """Independent of this machine's fonts: put a 700 px rigid row in the fold (far
+        more than any font could add). The centre column's minimum is its own stated
+        number, so the results pane and buttons stay inside the window."""
+        host, d = _screen(1066, 716, attached=True)
+        rigid = QLabel("x")
+        rigid.setMinimumWidth(700)
+        d.more.add(rigid)
+        d.more.toggle.click()
+        host.layout().activate()
+        d.layout().activate()
+        self.assertLessEqual(d.minimumSizeHint().width(), 1000)
+        for w in (d.right_card, d.close_btn, d.generate_btn):
+            self.assertLessEqual(_right_edge(w, host), 1066)
+
     def test_the_wide_toggle_goes_out_and_back(self):
         _h, d = _screen()
         d.wide_btn.click()
@@ -279,8 +294,8 @@ class SegmentsAndPanes(unittest.TestCase):
         # The words are a wrapping label (a checkbox cannot wrap, and its one-line
         # text set the column's minimum width); the tick box carries them as its name.
         self.assertEqual([c.accessibleName() for c in d.findChildren(QCheckBox)],
-                         ["Also ask ChatGPT for a styled copy (optional)"])
-        self.assertEqual(d.ai_draft_label.text(), "Also ask ChatGPT for a styled copy (optional)")
+                         ["Also ask Prism AI for a styled copy (optional)"])
+        self.assertEqual(d.ai_draft_label.text(), "Also ask Prism AI for a styled copy (optional)")
         self.assertTrue(d.ai_draft_label.wordWrap())
 
     def test_clicking_the_words_ticks_the_box(self):

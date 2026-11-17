@@ -37,7 +37,7 @@ from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QButtonGroup, QCheckBox, QComboBox, QFileDialog, QFrame, QGroupBox,
     QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPlainTextEdit,
-    QPushButton, QScrollArea, QStackedWidget, QTextBrowser,
+    QPushButton, QScrollArea, QSizePolicy, QStackedWidget, QTextBrowser,
     QVBoxLayout, QWidget,
 )
 
@@ -419,6 +419,13 @@ class StepDialog(PrismDialog):
 
         # ── centre · one action at a time, over the canvas ───────────────
         centre_card = WB.Card()
+        # The centre column never sets the window's minimum width: with some
+        # platform fonts (Windows) one row inside it asked for 2 px more than
+        # a 1366 window has and pushed the results pane off the right edge.
+        # Ignored policy + a stated minimum makes the layout use OUR number,
+        # not whatever the fonts of the day add up to.
+        centre_card.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Expanding)
+        centre_card.setMinimumWidth(240)
         cols.addWidget(centre_card, stretch=1)
         bar = QFrame()
         bar.setStyleSheet(f"border: none; border-bottom: 1px solid {WB._HAIR};")
@@ -505,8 +512,7 @@ class StepDialog(PrismDialog):
         model_row.addStretch(1)
         step2_v.addWidget(model_host)
         model_hint = QLabel(i18n.t(
-            "Both are called directly with your own OpenRouter key — "
-            "never a browser tab. Haiku answers in seconds; Sonnet is "
+            "Both run through your Prism plan — nothing to sign in to. Haiku answers in seconds; Sonnet is "
             "stronger but slower and costs more per question."))
         model_hint.setWordWrap(True)
         model_hint.setStyleSheet(
@@ -531,7 +537,7 @@ class StepDialog(PrismDialog):
         # the centre column's minimum width, and with Windows font metrics that
         # minimum was wider than the window allows at 1366 (the results pane ran
         # 2 px off the right edge). A label wraps to whatever room there is.
-        styled_copy = i18n.t("Also ask ChatGPT for a styled copy (optional)")
+        styled_copy = i18n.t("Also ask Prism AI for a styled copy (optional)")
         styled_tip = i18n.t("Not an independent check of the numbers — only a different look.")
         self.ai_draft_cb = QCheckBox()
         self.ai_draft_cb.setAccessibleName(styled_copy)
