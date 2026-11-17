@@ -415,16 +415,16 @@ class QuotationDialog(PrismDialog):
         self._ai_pending = False
         self._ai_worker = None
         api_key = (self.cfg.get("openrouter_api_key") or "").strip()
+        self._ai_offered = False
         if len(self.requests) < 2:
-            if api_key:
-                self._ai_pending = True
-            else:
-                free_requests, unmatched = quoting.find_free_text_requests(
-                    autoquote.inquiry_text(row), items)
-                if len(free_requests) >= 2:
-                    self.requests = free_requests
-                    self._unmatched_free_text = unmatched
-                    self._lines_from_free_text = True
+            # Local matching shows at once; AI only when the person asks.
+            self._ai_offered = bool(api_key)
+            free_requests, unmatched = quoting.find_free_text_requests(
+                autoquote.inquiry_text(row), items)
+            if len(free_requests) >= 2:
+                self.requests = free_requests
+                self._unmatched_free_text = unmatched
+                self._lines_from_free_text = True
         self._lines_mode = len(self.requests) >= 2 or self._ai_pending
 
         layout = self.body
@@ -557,6 +557,18 @@ class QuotationDialog(PrismDialog):
         self._filling_lines = False
         self.lines_note = C.label("", level="SUPPORT", wrap=True)
         layout.addWidget(self.lines_note)
+        # AI matching spends the customer's credits, so it only starts when
+        # they press this (shown for a fewer-than-two-code inquiry).
+        self.ai_match_btn = self.button(
+            i18n.t("Match with AI"), "secondary", icon_name="sparkles",
+            on_click=self._on_match_with_ai_clicked,
+            tooltip=i18n.t("Ask AI to read the whole mail and match every "
+                           "item to your rate list. Uses AI credits."))
+        self.ai_match_btn.setVisible(False)
+        ai_row = QHBoxLayout()
+        ai_row.addWidget(self.ai_match_btn)
+        ai_row.addStretch(1)
+        layout.addLayout(ai_row)
         layout.addWidget(self.lines_table)
         # item 56: while DeepSeek is still reading the mail -- shown in
         # place of the lines table/single-item form, neither of which has
@@ -742,8 +754,7 @@ class QuotationDialog(PrismDialog):
         # single_form...) exists -- this screen has no plumbing to defer
         # construction otherwise, and starting the worker any earlier
         # risks the `done` signal landing before __init__ has returned.
-        if self._ai_pending:
-            self._start_ai_match()
+        self.ai_match_btn.setVisible(self._ai_offered)
 
     def _populate_lines_table(self):
         """Fills self.lines_table from self.requests, or shows the "AI is
@@ -822,6 +833,12 @@ class QuotationDialog(PrismDialog):
         self.unmatched_note.setVisible(bool(self._unmatched_free_text))
 
     # ── item 56: AI matching for a free-text, no-code inquiry ──────────────
+    def _on_match_with_ai_clicked(self):
+        self.ai_match_btn.setVisible(False)
+        self._ai_pending = True
+        self._populate_lines_table()
+        self._start_ai_match()
+
     def _start_ai_match(self):
         api_key = (self.cfg.get("openrouter_api_key") or "").strip()
         self._ai_worker = AIMatchWorker(
@@ -869,6 +886,7 @@ class QuotationDialog(PrismDialog):
             "Couldn't ask AI to match the items in this mail ({error}) — "
             "matching them by wording instead.").replace("{error}", error))
         self._fall_back_to_local_matching()
+        self.ai_match_btn.setVisible(True)
 
     def _compare(self):
         _CompareDialog(self).exec()

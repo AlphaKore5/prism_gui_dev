@@ -219,6 +219,10 @@ class AutomationWorker(_Worker):
             self.failed.emit(f"Automation deps not available ({err}).")
             return
         automation = CB.get_automation()
+        # Tag every AI call of this run so the chip can show what it cost.
+        import uuid
+        import ai_server
+        ai_server.begin_run("r" + uuid.uuid4().hex[:16])
         try:
             kwargs = {}
             if self.custom_stages is not None:
@@ -259,6 +263,8 @@ class AutomationWorker(_Worker):
             self.done.emit(responses, links)
         except Exception as e:
             self.failed.emit(str(e))
+        finally:
+            ai_server.end_run()
 
 
 class FollowupRouteWorker(_Worker):

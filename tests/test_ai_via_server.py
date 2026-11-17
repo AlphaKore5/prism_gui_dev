@@ -47,6 +47,7 @@ class FakeAi:
         self.calls: list[dict] = []
         self.text = '{"title": "Test job"}'
         self.error = None               # (http status, code, message, detail)
+        self.run_costs: dict = {}       # run_id -> {"mc": n, ...} for /v1/ai/run-cost
         self.status_body = {"api": 1, "ready": True, "reason": "", "mc_per_credit": 1000,
                             "balance_mc": 40_000, "allowance_mc": 100_000,
                             "plan": {"key": "pro", "name": "Pro"},
@@ -71,7 +72,8 @@ class FakeAi:
                     return self._json(200, {"min_mc": 1, "typical_mc": 5, "max_mc": 20, "balance_mc": 40_000,
                                             "enough": True})
                 if self.path == "/v1/ai/run-cost":
-                    return self._json(200, {"runs": {}, "mc_per_credit": 1000})
+                    return self._json(200, {"runs": {r: outer.run_costs[r] for r in body.get("run_ids", [])
+                                                     if r in outer.run_costs}, "mc_per_credit": 1000})
                 if self.path == "/v1/ai/image":
                     return self._json(200, {"images": [PNG], "images_count": 1, "charged_mc": 40,
                                             "balance_mc": 39_960})
@@ -126,6 +128,8 @@ def ai(monkeypatch):
     monkeypatch.setattr(licensing, "device_fingerprint", lambda: "fp-test-0123456789")
     monkeypatch.setattr(licensing, "lease_bearer", lambda: "PRSMLv1.test-lease")
     monkeypatch.setattr(licensing.client, "server_url", lambda: fake.url)
+    from core import agents as _agents
+    _snap = {k: dict(v, agents=list(v["agents"])) for k, v in _agents.CATEGORIES.items()}
     ai_server.install()
     ai_server._cache.update({"at": 0.0, "status": None, "error": ""})
 
@@ -144,6 +148,8 @@ def ai(monkeypatch):
         json.dump({"api_key": REAL_GROQ, "openrouter_api_key": REAL_OR, "onboarded": True,
                    "agents": {"brains": "Claude"}}, f)
     yield fake
+    _agents.CATEGORIES.clear()
+    _agents.CATEGORIES.update(_snap)
     ai_client.set_auth_provider(None)
     ai_client.set_usage_listener(None)
     from widgets import usage_chip

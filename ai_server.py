@@ -71,10 +71,63 @@ def install() -> None:
     ai.set_usage_listener(_heard)
     from widgets import usage_chip
     usage_chip.set_provider(usage)
+    if ai.active():
+        # Tools Prism's plan does not include are no longer offered anywhere.
+        from core import agents
+        agents.prune_for_server()
 
 
 def active() -> bool:
     return _ai().active()
+
+
+# ── this run's cost ──────────────────────────────────────────────────────────
+RUN_COST_EVERY = 8           # seconds between run-cost asks while a run goes
+_run: dict = {"id": "", "mc": None, "at": 0.0, "fetching": False}
+
+
+def begin_run(run_id: str) -> None:
+    """A pipeline/task run starts on THIS thread: tag its calls with `run_id`
+    and start showing its cost. Call from the thread that makes the calls."""
+    if not active():
+        return
+    _ai().set_run_id(run_id)
+    with _lock:
+        _run.update({"id": run_id, "mc": None, "at": 0.0})
+
+
+def end_run() -> None:
+    """The run finished: stop tagging, take one last cost reading."""
+    if not active():
+        return
+    _ai().set_run_id("")
+    with _lock:
+        _run["at"] = 0.0
+    _fetch_run_cost(force=True)
+
+
+def _fetch_run_cost(force: bool = False) -> None:
+    with _lock:
+        rid = _run["id"]
+        if (not rid or _run["fetching"]
+                or (not force and time.time() - _run["at"] < RUN_COST_EVERY)):
+            return
+        _run["fetching"] = True
+        _run["at"] = time.time()
+
+    def work():
+        mc = None
+        try:
+            got = (_ai().run_cost([rid]).get("runs") or {}).get(rid)
+            if got is not None:
+                mc = int(got.get("mc") or 0)
+        except Exception:                                   # noqa: BLE001
+            pass
+        with _lock:
+            if _run["id"] == rid and mc is not None:
+                _run["mc"] = mc
+            _run["fetching"] = False
+    threading.Thread(target=work, daemon=True, name="prism-ai-runcost").start()
 
 
 def _heard(note: dict) -> None:
@@ -163,4 +216,8 @@ def usage() -> Optional[Usage]:
         n = int(cycle["days_left"])
         renews = (i18n.t("Renews in {n} days").format(n=n) if n != 1
                   else i18n.t("Renews tomorrow"))
-    return Usage(credits_left=left, credits_total=total, renews=renews)
+    _fetch_run_cost()
+    with _lock:
+        run_mc = _run["mc"] if _run["id"] else None
+    run_cost = None if run_mc is None else -(-run_mc // per)   # whole credits, rounded up
+    return Usage(credits_left=left, credits_total=total, run_cost=run_cost, renews=renews)

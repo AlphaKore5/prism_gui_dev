@@ -254,10 +254,15 @@ class WizardPanel(QWidget):
         col.setSpacing(theme.SPACE_4)
 
         col.addWidget(kicker(i18n.t("Step 3 of 3")))
-        title = QLabel(i18n.t("Sign in to your tools"))
+        import ai_server
+        served = ai_server.active()
+        title = QLabel(i18n.t("You're all set") if served
+                       else i18n.t("Sign in to your tools"))
         title.setObjectName("h2")
         col.addWidget(title)
         col.addWidget(label(
+            i18n.t("Prism's AI runs through your Prism plan, so there is "
+                   "nothing to sign in to.") if served else
             i18n.t("Prism drives your REAL, logged-in Chrome — it stores no "
                    "passwords."), level="SUPPORT", wrap=True))
 
@@ -269,6 +274,7 @@ class WizardPanel(QWidget):
             i18n.t("Open login tabs"), "secondary", icon_name="lock",
             on_click=self._open_login_tabs)
         col.addWidget(self.open_login_btn)
+        self.open_login_btn.setVisible(not served)
         col.addStretch(1)
         return page
 
@@ -280,7 +286,9 @@ class WizardPanel(QWidget):
             item = self._sites_col.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
-        sites = CB.resolved_agents(self._agents_picker.current_agents())
+        import ai_server
+        sites = ([] if ai_server.active()
+                 else CB.resolved_agents(self._agents_picker.current_agents()))
         for name, url in sites:
             self._sites_col.addWidget(self._site_card(name, url))
 

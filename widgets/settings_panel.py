@@ -1011,7 +1011,7 @@ class SettingsPanel(QDialog):
         body.addWidget(C.kicker(i18n.t("Bring my settings from my normal Prism")))
         body.addWidget(C.label(
             i18n.t("This is a development build, so it has its own empty settings: no Groq key (the "
-                   "microphone and every AI step need one), no browser logins, no History. Copy what you "
+                   "microphone needs one), no browser logins, no History. Copy what you "
                    "want from your normal Prism. Your normal Prism is only read, never changed."),
             level="META", wrap=True))
         for key, (label, _files, _folders) in dev_import.CHOICES.items():
@@ -1306,7 +1306,8 @@ class SettingsPanel(QDialog):
         # "Which tools you'll sign into" is a direct consequence of which
         # tools you picked, so it belongs beside the pick rather than on the
         # separate Connections page.
-        sites = self._login_sites()
+        import ai_server
+        sites = [] if ai_server.active() else self._login_sites()
         if sites:
             col.addWidget(self._head(
                 i18n.t("Where 'Open login tabs' will take you"),
@@ -1314,9 +1315,10 @@ class SettingsPanel(QDialog):
                        "own Chrome profile so the sign-in sticks.")))
             col.addWidget(self._sites_card(sites))
 
-        col.addWidget(self._buttons([
-            C.button(i18n.t("Open login tabs"), "secondary",
-                     on_click=self.login_tabs.emit)]))
+        if not ai_server.active():
+            col.addWidget(self._buttons([
+                C.button(i18n.t("Open login tabs"), "secondary",
+                         on_click=self.login_tabs.emit)]))
 
     def _agents_editor(self, chosen: dict, premium: set) -> Card:
         """The picker and its premium tick-boxes, one editable card. Picking

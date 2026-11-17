@@ -359,12 +359,10 @@ class TheQuotationWindowSplitsARealMultiItemMailIntoLines(unittest.TestCase):
         self.assertFalse(window._lines_mode)
 
 
-class TheQuotationWindowAsksAiWhenAKeyIsConfigured(unittest.TestCase):
-    """item 56 (4 Nov 2026): the owner's own words -- "replace this with
-    the AI... no ask AI buttons needed." A real OpenRouter key means the
-    screen starts AIMatchWorker itself, no button, the moment it opens
-    on a fewer-than-two-code inquiry; AIMatchWorker itself is mocked so
-    no real network call is ever made in a test (CLAUDE.md)."""
+class TheQuotationWindowOffersAiWhenAKeyIsConfigured(unittest.TestCase):
+    """AI matching spends credits, so the screen shows the local match at
+    once and starts AIMatchWorker only when 'Match with AI' is pressed.
+    AIMatchWorker is mocked so no network call is made in a test."""
 
     def setUp(self):
         from addons.inquiry import dialog as UI
@@ -394,24 +392,40 @@ class TheQuotationWindowAsksAiWhenAKeyIsConfigured(unittest.TestCase):
             return self.UI.QuotationDialog(
                 self.cfg, self.parent._register_rows[0], LAB_ITEMS, self.parent)
 
-    def test_a_key_starts_the_ai_worker_not_the_local_matcher_directly(self):
+    def _click(self, window):
+        with mock.patch.object(Q, "AIMatchWorker", return_value=self.fake_worker) as cls:
+            self.worker_cls = cls
+            window.ai_match_btn.click()
+
+    def test_opening_the_screen_never_starts_ai_and_shows_the_local_match(self):
         window = self._window()
+        self.worker_cls.assert_not_called()
+        self.fake_worker.start.assert_not_called()
+        self.assertFalse(window._ai_pending)
+        self.assertTrue(window._lines_from_free_text)
+        self.assertEqual(window.lines_table.rowCount(), 8)
+        self.assertTrue(window.ai_match_btn.isVisibleTo(window))
+
+    def test_no_button_without_a_key(self):
+        self.cfg["openrouter_api_key"] = ""
+        window = self._window()
+        self.assertFalse(window.ai_match_btn.isVisibleTo(window))
+
+    def test_the_button_starts_the_ai_worker_with_the_real_text_and_rate_list(self):
+        window = self._window()
+        self._click(window)
         self.worker_cls.assert_called_once()
         self.fake_worker.start.assert_called_once()
-        self.assertTrue(window._ai_pending)
-        self.assertEqual(window.lines_table.rowCount(), 0)
-        self.assertTrue(window.ai_loading_label.isVisible()
-                        or window.ai_loading_label.isVisibleTo(window))
-
-    def test_the_worker_is_given_the_real_api_key_text_and_rate_list(self):
-        self._window()
         args = self.worker_cls.call_args[0]
         self.assertEqual(args[0], "sk-or-test")
         self.assertIn("SS Locker (4 Comp)", args[1])
         self.assertEqual(args[2], LAB_ITEMS)
+        self.assertTrue(window._ai_pending)
+        self.assertFalse(window.ai_match_btn.isVisibleTo(window))
 
     def test_ai_returning_eight_matches_fills_the_lines_table(self):
         window = self._window()
+        self._click(window)
         requests = [quoting.Request(it, Decimal(1), evidence="x",
                                     match_confident=False)
                    for it in (LAB_ITEMS * 2)[:8]]
@@ -425,6 +439,7 @@ class TheQuotationWindowAsksAiWhenAKeyIsConfigured(unittest.TestCase):
 
     def test_ai_returning_too_few_lines_falls_back_to_local_matching(self):
         window = self._window()
+        self._click(window)
         done_cb = self.fake_worker.done.connect.call_args[0][0]
         done_cb([quoting.Request(LAB_ITEMS[0], Decimal(1))], [])
         self.assertFalse(window._ai_pending)
@@ -433,12 +448,14 @@ class TheQuotationWindowAsksAiWhenAKeyIsConfigured(unittest.TestCase):
 
     def test_the_ai_call_failing_falls_back_to_local_matching_not_a_dead_end(self):
         window = self._window()
+        self._click(window)
         failed_cb = self.fake_worker.failed.connect.call_args[0][0]
         with mock.patch.object(Q.QMessageBox, "warning"):
             failed_cb("No OpenRouter key set.")
         self.assertFalse(window._ai_pending)
         self.assertTrue(window._lines_from_free_text)
         self.assertEqual(len(window.requests), 8)
+        self.assertTrue(window.ai_match_btn.isVisibleTo(window))
 
 
 if __name__ == "__main__":
