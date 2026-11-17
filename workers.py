@@ -977,6 +977,10 @@ class LoginTabsWorker(_Worker):
         self._urls = list(urls)
 
     def run(self):
+        if CB.ai_client.active():
+            self.failed.emit("Prism's AI runs through your plan; no sign-in "
+                             "tabs are opened.")
+            return
         try:
             CB.get_automation().open_login_tabs(self._urls)
             self.done.emit(len(self._urls))
