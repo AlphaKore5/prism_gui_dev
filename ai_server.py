@@ -34,8 +34,8 @@ _fetching = False
 
 
 def _ai():
-    from core import ai_client            # the engine is on sys.path via core_bridge
-    return ai_client
+    import core_bridge as CB              # the only module that imports the engine
+    return CB.ai_client
 
 
 def _auth() -> dict:
@@ -73,8 +73,8 @@ def install() -> None:
     usage_chip.set_provider(usage)
     if ai.active():
         # Tools Prism's plan does not include are no longer offered anywhere.
-        from core import agents
-        agents.prune_for_server()
+        import core_bridge as CB
+        CB.agents.prune_for_server()
 
 
 def active() -> bool:
