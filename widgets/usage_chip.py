@@ -21,11 +21,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Optional
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QTimer, Qt
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QProgressBar, QVBoxLayout
 
 import i18n
 
+RECHECK_MS = 45_000        # how often the app-wide provider is asked again
+FIRST_RECHECK_MS = 2_500
 LOW_FRACTION = 0.2          # at or under a fifth of the period's credits, say so
 
 
@@ -94,6 +96,21 @@ class UsageChip(QFrame):
         col.addWidget(self.note)
         self.setAccessibleName(i18n.t("Credits"))
         self.refresh()
+        # The app-wide provider answers from a cache it fills in the
+        # background, so the first draw can be empty; ask again shortly, then
+        # now and then. A chip with its own provider (tests) is not re-asked.
+        if provider is None:
+            self._again = QTimer(self)
+            self._again.setInterval(RECHECK_MS)
+            self._again.timeout.connect(self.refresh)
+            self._again.start()
+            QTimer.singleShot(FIRST_RECHECK_MS, self._first_recheck)
+
+    def _first_recheck(self) -> None:
+        try:
+            self.refresh()
+        except RuntimeError:        # the chip was closed before the timer fired
+            pass
 
     def refresh(self) -> None:
         """Ask the provider again and redraw. Hidden when there is no answer."""

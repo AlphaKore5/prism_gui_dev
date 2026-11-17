@@ -329,7 +329,8 @@ class FollowupRouteWorker(_Worker):
             )
             out = CB.router.groq_chat(
                 self.cfg.get("api_key", ""), self.cfg.get("model", ""),
-                prompt, json_mode=True, timeout=45)
+                prompt, json_mode=True, timeout=45,
+                role="planner", addon="core", feature="followup_route")
             data = json.loads(out)
             steps = [str(s).strip() for s in (data.get("steps") or [])
                      if str(s).strip() in keys]
@@ -822,7 +823,8 @@ class SupportWorker(_Worker):
         try:
             reply = CB.router.groq_chat(
                 self.cfg.get("api_key", ""), self.cfg.get("model", "") or "",
-                self.prompt, temperature=0.15, timeout=45, retries=1)
+                self.prompt, temperature=0.15, timeout=45, retries=1,
+                role="writer", addon="support", feature="diagnosis")
             self.done.emit((reply or "").strip())
         except Exception as e:
             self.failed.emit(str(e))

@@ -118,7 +118,9 @@ class StepAskWorker(_Worker):
                 self.cfg.get("openrouter_api_key", ""), self.model,
                 SF.ask_prompt(self.report, self.question),
                 attachments=self.attachments,
-                temperature=0.4, timeout=90).strip()
+                temperature=0.4, timeout=90,
+                role="vision" if self.attachments else "reasoner",
+                addon="step", feature="ask").strip()
             self.done.emit(text)
         except Exception as e:
             self.failed.emit(str(e))
@@ -146,7 +148,9 @@ class StepPlanWorker(_Worker):
                 self.cfg.get("openrouter_api_key", ""), self.model,
                 SF.plan_prompt(self.report, self.question, self.suggestions),
                 attachments=self.attachments,
-                temperature=0.2, timeout=90).strip()
+                temperature=0.2, timeout=90,
+                role="vision" if self.attachments else "reasoner",
+                addon="step", feature="plan").strip()
             self.done.emit(text)
         except Exception as e:
             self.failed.emit(str(e))
@@ -171,7 +175,8 @@ class StepCatalogExplainWorker(_Worker):
         try:
             text = CB.openrouter.openrouter_chat(
                 self.cfg.get("openrouter_api_key", ""), self.model,
-                self.prompt, temperature=0.3, timeout=60).strip()
+                self.prompt, temperature=0.3, timeout=60,
+                role="writer", addon="step", feature="catalog_explain").strip()
             self.done.emit(text)
         except Exception as e:
             self.failed.emit(str(e))

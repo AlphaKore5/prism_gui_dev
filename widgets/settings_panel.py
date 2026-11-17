@@ -1227,6 +1227,22 @@ class SettingsPanel(QDialog):
         return i18n.t("Your work stays in your own folder on this computer. "
                       "Nobody else on the team can see it.")
 
+    def _ai_plan_card(self) -> Card:
+        """What replaced the Groq and OpenRouter key fields."""
+        import ai_server
+        ai_server.refresh_async()
+        card = Card()
+        body = card.body((theme.CARD_PAD, theme.CARD_PAD,
+                          theme.CARD_PAD, theme.CARD_PAD), theme.SPACE_2)
+        body.addWidget(C.kicker(i18n.t("AI")))
+        body.addWidget(C.label(i18n.t(
+            "AI runs through your Prism plan. There is no key to paste "
+            "and nothing to sign up for."), level="SUPPORT", wrap=True))
+        line = ai_server.status_line()
+        if line:
+            body.addWidget(C.label(line, level="META", wrap=True))
+        return card
+
     # ── agents ────────────────────────────────────────────────────────────
     def _agents(self, col):
         chosen = dict(self.cfg.get("agents") or {})
@@ -1236,34 +1252,39 @@ class SettingsPanel(QDialog):
         # The Groq key and the agent picks are one job — "change my AI
         # setup" — even though they used to live on two different nav
         # destinations (this section and Connections).
-        key_edit = QLineEdit(self.cfg.get("api_key", ""))
-        key_edit.setEchoMode(QLineEdit.Password)
-        C.add_password_visibility(key_edit)
-        key_edit.setPlaceholderText("gsk_…")
-        col.addWidget(self._field_card(
-            i18n.t("Groq key"),
-            i18n.t("Free at console.groq.com — API Keys, then Create API "
-                   "Key. It starts with gsk_. Prism cannot route anything "
-                   "without one."),
-            key_edit, lambda: self._save_key(key_edit)))
+        if CB.ai_client.active():
+            # AI runs through Prism's server: no provider key is asked for or
+            # kept here, and a key saved by an older Prism is left untouched.
+            col.addWidget(self._ai_plan_card())
+        else:
+            key_edit = QLineEdit(self.cfg.get("api_key", ""))
+            key_edit.setEchoMode(QLineEdit.Password)
+            C.add_password_visibility(key_edit)
+            key_edit.setPlaceholderText("gsk_…")
+            col.addWidget(self._field_card(
+                i18n.t("Groq key"),
+                i18n.t("Free at console.groq.com — API Keys, then Create API "
+                       "Key. It starts with gsk_. Prism cannot route anything "
+                       "without one."),
+                key_edit, lambda: self._save_key(key_edit)))
 
-        # BOQ-CHANGES-TODO.md item 30: the BOQ add-on's two "Prism Agent"
-        # writer options (Settings → AI tools, same page as the Groq key
-        # above — same reasoning, "change my AI setup" is one job) call
-        # OpenRouter directly rather than driving a browser tab. Same
-        # field/save/verify shape as the Groq key, one key for both
-        # Prism Agent models.
-        or_edit = QLineEdit(self.cfg.get("openrouter_api_key", ""))
-        or_edit.setEchoMode(QLineEdit.Password)
-        C.add_password_visibility(or_edit)
-        or_edit.setPlaceholderText("sk-or-…")
-        col.addWidget(self._field_card(
-            i18n.t("OpenRouter key"),
-            i18n.t("Free to create at openrouter.ai/keys — add credit there "
-                   "to use it. Starts with sk-or-. Powers BOQ's \"Prism "
-                   "Agent Claude\" and \"Prism Agent Deep\" write-up "
-                   "options; every other agent still works without one."),
-            or_edit, lambda: self._save_openrouter_key(or_edit)))
+            # BOQ-CHANGES-TODO.md item 30: the BOQ add-on's two "Prism Agent"
+            # writer options (Settings → AI tools, same page as the Groq key
+            # above — same reasoning, "change my AI setup" is one job) call
+            # OpenRouter directly rather than driving a browser tab. Same
+            # field/save/verify shape as the Groq key, one key for both
+            # Prism Agent models.
+            or_edit = QLineEdit(self.cfg.get("openrouter_api_key", ""))
+            or_edit.setEchoMode(QLineEdit.Password)
+            C.add_password_visibility(or_edit)
+            or_edit.setPlaceholderText("sk-or-…")
+            col.addWidget(self._field_card(
+                i18n.t("OpenRouter key"),
+                i18n.t("Free to create at openrouter.ai/keys — add credit there "
+                       "to use it. Starts with sk-or-. Powers BOQ's \"Prism "
+                       "Agent Claude\" and \"Prism Agent Deep\" write-up "
+                       "options; every other agent still works without one."),
+                or_edit, lambda: self._save_openrouter_key(or_edit)))
 
         col.addWidget(self._agents_editor(chosen, premium))
         # Leads & Outreach runs on the credit pool: the licence server holds every

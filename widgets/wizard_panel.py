@@ -136,9 +136,26 @@ class WizardPanel(QWidget):
         head_row.addWidget(how)
         col.addLayout(head_row)
 
-        title = QLabel(i18n.t("Your Groq key"))
+        title = QLabel(i18n.t("Your AI") if CB.ai_client.active()
+                       else i18n.t("Your Groq key"))
         title.setObjectName("h2")
         col.addWidget(title)
+        if CB.ai_client.active():
+            # AI runs through Prism's server: there is no key to ask for.
+            col.addWidget(label(
+                i18n.t("Prism's AI runs through your Prism plan. There is no "
+                       "key to paste and nothing to sign up for."),
+                level="SUPPORT", wrap=True))
+            self.key_edit = QLineEdit(CB.ai_client.AI_KEY)   # unseen; keeps the page's shape
+            self.key_error = label("", wrap=True)
+            self.key_error.setVisible(False)
+            card = None
+        else:
+            card = self._groq_key_card(col)
+        self._add_profile_card(col, card)
+        return page
+
+    def _groq_key_card(self, col):
         col.addWidget(label(
             i18n.t("Prism uses Groq (free) as its routing brain — it splits "
                    "your prompt into targeted tasks for each specialist AI."),
@@ -164,7 +181,9 @@ class WizardPanel(QWidget):
                                QUrl("https://console.groq.com")))
         body.addWidget(console)
         col.addWidget(card)
+        return card
 
+    def _add_profile_card(self, col, _key_card):
         profile_card = Card()
         pbody = profile_card.body((theme.CARD_PAD, theme.CARD_PAD,
                                    theme.CARD_PAD, theme.CARD_PAD), theme.SPACE_2)
@@ -179,13 +198,14 @@ class WizardPanel(QWidget):
         col.addWidget(profile_card)
 
         col.addStretch(1)
-        return page
 
     def _key_value(self) -> str:
         raw = self.key_edit.text().strip()
         return raw
 
     def _key_valid(self, key: str) -> bool:
+        if CB.ai_client.is_server_key(key):
+            return True
         return bool(key) and key.startswith("gsk_") and len(key) > 20
 
     # ── page 2: specialists ──────────────────────────────────────────────────

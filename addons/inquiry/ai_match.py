@@ -129,5 +129,6 @@ def match(api_key: str, inquiry_text: str, items: list) -> tuple[list, list]:
     (no key, a network error, a rejected key) -- caught by
     addons/inquiry/workers.py:AIMatchWorker, off the GUI thread."""
     text = CB.openrouter.openrouter_chat(
-        api_key, MODEL, build_prompt(inquiry_text, items), temperature=0.0)
+        api_key, MODEL, build_prompt(inquiry_text, items), temperature=0.0,
+        role="classify", addon="inquiry", feature="ai_match")
     return parse_response(text, items)

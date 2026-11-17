@@ -629,7 +629,8 @@ class WriteCallsOpenrouterWithTheRightModel(unittest.TestCase):
         self.assertEqual(out, "the answer")
         chat.assert_called_once_with(
             "sk-or-x", boq_agents.PRISM_AGENT_MODELS["Prism Agent Deep"], "a prompt",
-            attachments=None, usage_out=mock.ANY, extra=W.WRITE_EXTRA)
+            attachments=None, usage_out=mock.ANY, extra=W.WRITE_EXTRA,
+            role=mock.ANY, addon="boq", feature=mock.ANY)
 
     def test_a_cut_off_answer_is_refused_not_saved_as_a_boq(self):
         """item 81, 13 Nov 2026: a real run used 65,536 output tokens and
@@ -670,7 +671,8 @@ class WriteCallsOpenrouterWithTheRightModel(unittest.TestCase):
             W.write("Prism Agent Deep", "a prompt", "sk-or-x", followup=True)
         chat.assert_called_once_with(
             "sk-or-x", boq_agents.PRISM_AGENT_FOLLOWUP_MODELS["Prism Agent Deep"], "a prompt",
-            attachments=None, usage_out=mock.ANY, extra=W.WRITE_EXTRA)
+            attachments=None, usage_out=mock.ANY, extra=W.WRITE_EXTRA,
+            role=mock.ANY, addon="boq", feature=mock.ANY)
 
 
 class HasVisionAndAttachmentGating(unittest.TestCase):
@@ -695,7 +697,8 @@ class HasVisionAndAttachmentGating(unittest.TestCase):
             W.write("Prism Agent Claude", "check it", "sk-or-x", attachments=att)
         chat.assert_called_once_with(
             "sk-or-x", boq_agents.PRISM_AGENT_MODELS["Prism Agent Claude"], "check it",
-            attachments=att, usage_out=mock.ANY, extra=W.WRITE_EXTRA)
+            attachments=att, usage_out=mock.ANY, extra=W.WRITE_EXTRA,
+            role=mock.ANY, addon="boq", feature=mock.ANY)
 
     def test_an_attachment_also_reaches_openrouter_for_deep_now(self):
         """item 38: Deep used to be the no-vision example here -- now
@@ -707,7 +710,8 @@ class HasVisionAndAttachmentGating(unittest.TestCase):
             W.write("Prism Agent Deep", "check it", "sk-or-x", attachments=att)
         chat.assert_called_once_with(
             "sk-or-x", boq_agents.PRISM_AGENT_MODELS["Prism Agent Deep"], "check it",
-            attachments=att, usage_out=mock.ANY, extra=W.WRITE_EXTRA)
+            attachments=att, usage_out=mock.ANY, extra=W.WRITE_EXTRA,
+            role=mock.ANY, addon="boq", feature=mock.ANY)
 
     def test_an_attachment_is_dropped_for_an_agent_with_no_vision(self):
         """Not an error -- the text-only question still gets answered,
@@ -724,7 +728,8 @@ class HasVisionAndAttachmentGating(unittest.TestCase):
         self.assertEqual(out, "ok")
         chat.assert_called_once_with(
             "sk-or-x", boq_agents.PRISM_AGENT_MODELS["Prism Agent Deep"], "check it",
-            attachments=None, usage_out=mock.ANY, extra=W.WRITE_EXTRA)
+            attachments=None, usage_out=mock.ANY, extra=W.WRITE_EXTRA,
+            role=mock.ANY, addon="boq", feature=mock.ANY)
 
 
 class WriteFileDispatchesByFormat(unittest.TestCase):

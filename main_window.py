@@ -2204,6 +2204,10 @@ class MainWindow(QMainWindow):
     # ── voice: record → interpret → resolve mentions ─────────────────────────
     def _toggle_mic(self):
         if self._record_worker is None:
+            if CB.ai_client.is_server_key(self.cfg.get("api_key")):
+                QMessageBox.information(self, "Voice", CB.voice.VOICE_UNAVAILABLE)
+                self.input_panel.set_recording(False)
+                return
             if not self.cfg.get("api_key"):
                 QMessageBox.warning(self, "Voice", "Set your Groq API key in Setup first.")
                 self.input_panel.set_recording(False)
@@ -4093,6 +4097,10 @@ class MainWindow(QMainWindow):
     # ── wake word ─────────────────────────────────────────────────────────────
     def toggle_wakeword(self, on: bool):
         if on:
+            if CB.ai_client.is_server_key(self.cfg.get("api_key")):
+                QMessageBox.information(self, "Wake word", CB.voice.VOICE_UNAVAILABLE)
+                self.sidebar.set_listening(False)
+                return
             if not self.cfg.get("api_key"):
                 QMessageBox.warning(self, "Wake word", "Set your Groq API key in Setup first.")
                 self.sidebar.set_listening(False)

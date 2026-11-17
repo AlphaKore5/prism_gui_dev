@@ -110,6 +110,7 @@ from core import bom as bom                # noqa: E402
 from core import lang as lang              # noqa: E402
 from core import router as router          # noqa: E402
 from core import openrouter as openrouter  # noqa: E402  (BOQ's "Prism Agent" write-up path)
+from core import ai_client as ai_client    # noqa: E402  (every AI call goes through Prism's server)
 from core import contract as contract      # noqa: E402  (what a step must produce)
 
 

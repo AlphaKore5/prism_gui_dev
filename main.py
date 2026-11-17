@@ -437,6 +437,11 @@ def main():
     # is readable on a shared workstation regardless of the umask in force.
     paths.ensure_user_dir()
 
+    # Every AI call goes through Prism's server, not a pasted key. Before any
+    # config is read: config.load() shows a stand-in key once this is on.
+    import ai_server
+    ai_server.install()
+
     # Before anything that can fail: from here on, a crash lands in
     # ~/.prism/logs instead of on a stdout a windowed build does not have.
     diagnostics.install()

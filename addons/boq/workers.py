@@ -89,7 +89,8 @@ class ElvReadWorker(_Worker):
             self.api_key, ELV_VISION_MODEL, _ELV_VISION_PROMPT,
             attachments=[{"kind": "image", "mime": "image/png", "b64": b64}],
             temperature=0.1, max_tokens=900,
-            extra={"frequency_penalty": 0.4, "reasoning": {"enabled": False}})
+            extra={"frequency_penalty": 0.4, "reasoning": {"enabled": False}},
+            role="boq.tag_vision", addon="boq", feature="elv_tags")
 
     def run(self):
         try:
@@ -138,7 +139,8 @@ class HvacTakeoffWorker(_Worker):
             # VAV tags on three runs with this code unchanged; a read that
             # is meant to be repeatable should not be sampled.
             temperature=0, max_tokens=900,
-            extra={"frequency_penalty": 0.4, "reasoning": {"enabled": False}})
+            extra={"frequency_penalty": 0.4, "reasoning": {"enabled": False}},
+            role="boq.tag_vision", addon="boq", feature="hvac_tags")
 
     def run(self):
         try:

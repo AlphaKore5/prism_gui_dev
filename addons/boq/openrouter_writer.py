@@ -81,8 +81,13 @@ def write(agent: str, prompt: str, api_key: str, *, followup: bool = False,
     if attachments and not has_vision(agent):
         attachments = None
     usage = usage_out if usage_out is not None else {}
-    text = CB.openrouter.openrouter_chat(api_key, model, prompt, attachments=attachments,
-                                         usage_out=usage, extra=WRITE_EXTRA)
+    # The server maps this role to the model (boq.agent_a = Prism Agent
+    # Claude, boq.agent_b = Prism Agent Deep); `model` stays as the hint.
+    text = CB.openrouter.openrouter_chat(
+        api_key, model, prompt, attachments=attachments, usage_out=usage,
+        extra=WRITE_EXTRA,
+        role="boq.agent_b" if agent == "Prism Agent Deep" else "boq.agent_a",
+        addon="boq", feature="followup" if followup else "write")
     # item 81 (13 Nov 2026), two real failures of the same kind, both
     # saved as finished BOQs with no warning. 5 Nov, "Prism Agent Deep",
     # twice in a row: the answer came back empty and the model's own
