@@ -70,3 +70,30 @@ tests/test_boq_dialog.py::TheHvacFlagComesOnlyFromTheAskBox.test_the_word_hvac_t
 # writer/research combo setup) -- its only two call sites are gone, so the
 # function itself is now dead code, not a lost feature.
 addons/boq/dialog.py::_preselect
+
+# 1.8.0 (dev) UI reskin + AI through Prism's server (stages 9-11 and 14 of ui-port/): the Home screen was rebuilt
+# chat-first (timeline, tool tiles, tour card, bottom strip, add-on tile helpers gone), the 'AI tools' screen and the AI directory
+# dialog were removed on purpose (owner decision, tests/test_ui_port_ai_tools_removal.py pins it), and the inquiry panel's
+# _mailboxes helper has no caller left. Not lost features: replaced by the new Home / Settings -> Agents.
+addons/inquiry/panel.py::InquiryPanel._mailboxes
+dialogs/ai_directory_dialog.py
+tests/test_dashboard_tools.py
+widgets/catalog_panel.py
+widgets/home_panel.py::HomePanel._addons_card
+widgets/home_panel.py::HomePanel._bottom_section
+widgets/home_panel.py::HomePanel._make_addon_tile
+widgets/home_panel.py::HomePanel._make_tool_tile
+widgets/home_panel.py::HomePanel._recent_activity_card
+widgets/home_panel.py::HomePanel._timeline_row
+widgets/home_panel.py::ShowcaseTourCard
+widgets/home_panel.py::ShowcaseTourCard.__init__
+widgets/home_panel.py::ShowcaseTourCard._play_demo
+widgets/home_panel.py::ShowcaseTourCard.mousePressEvent
+widgets/home_panel.py::ShowcaseTourCard.paintEvent
+widgets/home_panel.py::TimelineNode
+widgets/home_panel.py::TimelineNode.__init__
+widgets/home_panel.py::TimelineNode.paintEvent
+widgets/home_panel.py::_ToolTile
+widgets/home_panel.py::_ToolTile.__init__
+widgets/home_panel.py::_ToolTile.keyPressEvent
+widgets/home_panel.py::_ToolTile.mousePressEvent

@@ -10,6 +10,34 @@ Tests: **1966 passing** (6 skipped, 8 Sep 2026 after Round 16 landed on main —
 
 ---
 
+# 1.8.0 — New look, and AI through Prism's server (DEV build, 17 Nov 2026)
+
+**Dev channel only. Read the first point before installing: AI is switched off for most licences.**
+
+- **AI now runs through Prism's own server, with no keys to paste.** Every AI call (planning,
+  BOQ and drawing reading, STEP, Inquiry matching, email drafting, pictures) and every step that
+  used to drive a logged-in Chrome tab now goes to the licence server. Chrome sign-in is gone
+  and Settings no longer has Groq / OpenRouter key boxes. **The server's AI gateway is live only
+  for the owner's test licence.** On any other licence the AI steps stop with the server's own
+  message ("AI isn't switched on at Prism's server yet", or no credits) and nothing is charged.
+  Dictation (speech-to-text) and the wake word are not routed and say so. Leads' own AI calls
+  are unchanged. Tools that are not part of the plan (for example Canva, Midjourney, Runway)
+  are skipped with a plain note. Developers can set `PRISM_AI_DIRECT=1` to use the old
+  direct keys.
+- **Usage chip shows what this run cost**; Inquiry has a "Match with AI" button on request.
+- **New look across the app (AlphaKore brand):** Home is chat-first, and History, Artifacts,
+  Settings, Email, Leads, BOQ / HVAC / ELV and STEP are restyled. Layout and flow are meant to be
+  the same; the visual style changed.
+- **Removed on purpose:** the "AI tools" screen and AI directory dialog (Settings > Agents
+  replaces them), the Home bottom strip, and BOM & Stock is switched off in the UI.
+- Also in this build, from the dev branch and never released before (listed under 1.7.0 below):
+  live xlsx BOQ workbooks, AI-matched inquiries, HVAC AI tag re-check, .dwg support, STEP hole tagging
+  and the macOS arm64 launch-crash fix.
+- Not run on a real Windows or Mac PC; AI against the real server was only tried on the test licence.
+- The engine (`prism_terminal`) is now fetched from `AlphaKore5/prism_terminal` (commit dce2760).
+
+---
+
 # 1.7.0 — Live xlsx BOQ workbooks, AI-matched inquiries, HVAC AI tag re-check, DWG support (6 Nov 2026)
 
 - **BOQ xlsx workbooks are now live, formula-driven spreadsheets**, matching the
