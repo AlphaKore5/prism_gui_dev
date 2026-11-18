@@ -27,7 +27,7 @@ class StageResultDialog(PrismDialog):
     """One step's full output, popped out into its own window."""
 
     def __init__(self, stage: str, agent: str, text: str, url: str, parent=None,
-                 unfinished: bool = False):
+                 unfinished: bool = False, files: list | None = None):
         icon_name, title, _ = STAGE_COPY.get(stage, ("grid", stage.title(), ""))
         agent = ai_server.display_agent(agent)
         super().__init__(title, agent, icon=icon_name, parent=parent,
@@ -57,7 +57,12 @@ class StageResultDialog(PrismDialog):
             files.addWidget(where)
             files.addStretch(1)
             root.addLayout(files)
-        elif url:
+            if os.path.splitext(url)[1].lower() in (".xlsx", ".csv", ".zip",
+                                                    ".docx", ".pdf"):
+                from widgets.file_card import FileCards
+                self.file_cards = FileCards([url], preview=True)
+                root.addWidget(self.file_cards)
+        elif url and not files:
             # When Prism didn't get the text, this link is the whole result —
             # the tool keeps working in that tab after we stop watching.
             label = (f"The result is still being made in {agent} — open it"
@@ -71,6 +76,13 @@ class StageResultDialog(PrismDialog):
             link.setTextFormat(Qt.RichText)
             link.setOpenExternalLinks(True)
             root.addWidget(link)
+        if files:
+            # Files Prism built from the AI's structured answer: cards with
+            # Open / Show in folder / Save as / Convert to, and a preview
+            # table for a spreadsheet.
+            from widgets.file_card import FileCards
+            self.file_cards = FileCards(files, preview=True)
+            root.addWidget(self.file_cards)
         body = QTextBrowser()
         self.reader = body
         body.setObjectName("answerReader")
@@ -212,7 +224,7 @@ class _StageRow(QFrame):
             (lambda: paths.open_result(url)) if plays else
             (lambda: StageResultDialog(
                 stage, info["agent"], info.get("text", ""), url,
-                self.window(), unfinished).exec()))
+                self.window(), unfinished, files=info.get("files")).exec()))
         row.addWidget(open_btn)
 
 

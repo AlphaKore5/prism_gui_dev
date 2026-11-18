@@ -16,13 +16,15 @@ _FILLER = {
     "make", "convert", "to", "into", "file", "document", "spreadsheet", "send",
     "can", "you", "u", "i", "want", "also", "now", "ms", "copy", "same", "export",
     "create", "generate", "provide", "and", "just", "for", "my", "one", "of",
+    "csv",
 }
 
 
 def requested_ext(text: str) -> str:
-    """".pdf" / ".docx" / ".xlsx" when the text asks to RECEIVE one, else ""."""
+    """".pdf" / ".docx" / ".xlsx" / ".csv" when the text asks to RECEIVE one,
+    else ""."""
     ext = CB.contract.wanted_ext(text or "")
-    return ext if ext in (".pdf", ".docx", ".xlsx") else ""
+    return ext if ext in (".pdf", ".docx", ".xlsx", ".csv") else ""
 
 
 def is_pure_format_request(text: str) -> bool:
@@ -45,3 +47,37 @@ def latest_answer(responses: dict) -> str:
 def export_answer(text: str, ext: str, out_dir: str, stem: str = "answer") -> tuple[str, str]:
     """Write `text` as a real file. Returns (path, note); ("", "") when it cannot."""
     return CB.contract.document_from_text(text, out_dir, stem, ext)
+
+
+def latest_spec_file(folder: str) -> str:
+    """The newest file in `folder` that Prism built from a structured spec
+    (core/filespec: it has a `.spec.json` beside it), or "". Looked up in the
+    task's own folder and one level below."""
+    best, best_t = "", -1.0
+    for root, dirs, names in os.walk(folder or ""):
+        if root[len(folder):].count(os.sep) > 1:
+            dirs[:] = []
+        for n in names:
+            if n.endswith(".spec.json"):
+                data = os.path.join(root, n[:-len(".spec.json")])
+                try:
+                    t = os.path.getmtime(data)
+                except OSError:
+                    continue            # the spec outlived its file
+                if t > best_t:
+                    best, best_t = data, t
+    return best
+
+
+def convert_stored(folder: str, ext: str, out_dir: str) -> tuple[str, str]:
+    """"Make it a CSV / Excel / PDF / Word" for a task that made a structured
+    file: converted from its stored spec, locally, no AI call. ("", "") when
+    the task has no such file or the spec cannot become that format."""
+    src = latest_spec_file(folder)
+    if not src:
+        return "", ""
+    try:
+        rec = CB.filespec.convert(src, ext, out_dir)
+    except (CB.filespec.FileSpecError, OSError):
+        return "", ""
+    return rec["path"], "Prism converted your earlier file on this computer"

@@ -417,6 +417,10 @@ class StageCard(QWidget):
         self.body.setVisible(False)
         self.content.addWidget(self.body)
 
+        # Files Prism built from the AI's structured answer: one card each
+        # (Open, Show in folder, Save as, Convert to). Filled by set_done().
+        self.file_cards = None
+
         # Actions hide with the body: while a stage is queued or waiting there
         # is nothing to copy and no tab to open, and a row of dead buttons
         # under an empty box reads as broken rather than pending.
@@ -755,6 +759,27 @@ class StageCard(QWidget):
         except Exception:                               # noqa: BLE001
             return False
 
+    def _show_file_cards(self, files):
+        """A card per file Prism made from a structured spec (it has a stored
+        spec beside it). Other harvested files keep the plain "Saved to"
+        line."""
+        import core_bridge as CB
+        from widgets.file_card import FileCards
+        made = []
+        for f in files or []:
+            p = f.get("saved") or f.get("path") or ""
+            if p and (CB.filespec.has_spec(p) or not os.path.isfile(p)
+                      and f.get("kind") == "document"):
+                made.append(p)
+        if self.file_cards is not None:
+            self.file_cards.setParent(None)
+            self.file_cards.deleteLater()
+            self.file_cards = None
+        if made:
+            self.file_cards = FileCards(made, self)
+            self.content.insertWidget(self.content.indexOf(self.body) + 1,
+                                      self.file_cards)
+
     def set_waiting(self, seconds: int):
         if ai_server.active():
             self.set_state("waiting", i18n.t("up to {n}s").format(n=seconds),
@@ -802,6 +827,7 @@ class StageCard(QWidget):
                 # it (core/contract.document_from_text).
                 note += (f"<p style='color:{theme.NEUTRAL[600]};"
                          f"line-height:150%'>" + _escape(prism_note) + "</p>")
+        self._show_file_cards(files)
         if timed_out:
             # Our clock ran out, not the tool's: it is still generating in that
             # tab and will land the finished deck/doc/app there. Saying "done"
