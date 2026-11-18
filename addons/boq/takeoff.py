@@ -370,7 +370,8 @@ class IndustryTakeoffDialog(QDialog):
     a plain-text summary, treated from there on like any other external
     measurement."""
 
-    def __init__(self, industry: str, parent=None, cfg: dict | None = None):
+    def __init__(self, industry: str, parent=None, cfg: dict | None = None,
+                 path: str = ""):
         super().__init__(parent)
         self.industry = industry
         self.cfg = cfg if cfg is not None else {}
@@ -424,11 +425,11 @@ class IndustryTakeoffDialog(QDialog):
         self.ocr_cb = QCheckBox(i18n.t("Read text labels (OCR)"))
         if industries.has_ai_tag_recheck(self.industry):
             self.ocr_cb.setToolTip(i18n.t(
-                "OCR always runs locally. If an OpenRouter key is set in "
-                "Settings → Agents, a second, AI-based read also runs to "
-                "catch tags OCR missed -- the whole drawing is never sent; "
-                "only small cropped pieces are, each time, and only after "
-                "you confirm. No key set: this box runs OCR only."))
+                "OCR always runs on this computer. When Prism AI is available, "
+                "a second, AI-based read can also run to catch tags OCR "
+                "missed. The whole drawing is never sent, only small cropped "
+                "pieces, and only after you say yes. Without Prism AI this "
+                "box runs OCR only."))
         self.ocr_cb.setChecked(True)
         settings_row.addWidget(self.ocr_cb)
         settings_row.addStretch(1)
@@ -516,6 +517,8 @@ class IndustryTakeoffDialog(QDialog):
         self.use_btn.setToolTip(i18n.t("Extract the measurements and tick the scale check first."))
         btn_row.addWidget(self.use_btn)
         col.addLayout(btn_row)
+        if path:                       # already chosen on the BOQ screen
+            self._load_pdf(path)
 
     # ── Step 1 ───────────────────────────────────────────────────────────
 
@@ -524,6 +527,9 @@ class IndustryTakeoffDialog(QDialog):
             self, i18n.t("Tender PDF"), os.path.expanduser("~"), i18n.t("PDF (*.pdf)"))
         if not path:
             return
+        self._load_pdf(path)
+
+    def _load_pdf(self, path: str):
         self.pdf_path = path
         self.path_label.setText(os.path.basename(path))
         # A measured scale from the PREVIOUS pdf must never silently carry

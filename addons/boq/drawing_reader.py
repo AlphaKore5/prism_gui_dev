@@ -45,7 +45,8 @@ import os
 
 import core_bridge as CB
 
-DRAWING_EXTENSIONS = (".pdf", ".dwg", ".dxf")
+PICTURE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp")
+DRAWING_EXTENSIONS = (".pdf", ".dwg", ".dxf") + PICTURE_EXTENSIONS
 
 
 def _tile_bounds(w: int, h: int, max_dim: int = 2400, overlap: float = 0.08):
@@ -116,6 +117,12 @@ def read_tiled_page(pdf_path: str, tag_reader, page_index: int = 0, dpi: int = 2
     _tile_bounds() already does, which is what makes "always tiled" the
     same thing as "whole" for a small drawing, with no second code path."""
     img = render_page(pdf_path, page_index, dpi)
+    return _read_tiled_image(img, tag_reader, page_index, max_dim, overlap, log)
+
+
+def _read_tiled_image(img, tag_reader, page_index: int = 0, max_dim: int = 2400,
+                      overlap: float = 0.08, log=print) -> dict:
+    """The tiling and reading shared by a PDF page and a plain picture."""
     w, h = img.size
     tiles = _tile_bounds(w, h, max_dim=max_dim, overlap=overlap)
     log(f"  page {page_index + 1}: reading {len(tiles)} tile(s) (OCR + AI) ...")
@@ -187,6 +194,20 @@ def extract(path: str, tag_reader, dpi: int = 250, log=print) -> dict:
             "notes": conv_notes,
             "dxf": found,
             "pages": [],
+        }
+
+    if ext in PICTURE_EXTENSIONS:
+        from PIL import Image
+        log("  reading the picture, always tiled ...")
+        img = Image.open(path).convert("RGB")
+        return {
+            "tool": "drawing_reader v1",
+            "generated": datetime.now().isoformat(timespec="seconds"),
+            "source": {"file": source_name},
+            "method": "ai_tiled",
+            "notes": conv_notes,
+            "dxf": None,
+            "pages": [_read_tiled_image(img, tag_reader, 0, log=log)],
         }
 
     n_pages = page_count(path)

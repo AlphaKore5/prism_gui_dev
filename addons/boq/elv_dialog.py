@@ -34,10 +34,10 @@ from PySide6.QtWidgets import (
 import i18n
 from widgets import controls as C
 from widgets import send_to_ai
-from addons.boq import converter_dialog, converter_setup, industries
+from addons.boq import converter_dialog, converter_setup, drawing_reader, industries
 from addons.boq.workers import ElvReadWorker
 
-_DRAWING_FILTER = "Drawings (*.pdf *.dwg *.dxf)"
+_DRAWING_FILTER = "Drawings (*.pdf *.dwg *.dxf *.png *.jpg *.jpeg *.bmp *.tif *.tiff *.webp)"
 
 
 class ElvReadDialog(QDialog):
@@ -46,7 +46,8 @@ class ElvReadDialog(QDialog):
     treated from there on like any other external measurement
     (BoqDialog._use_external_measurements)."""
 
-    def __init__(self, industry: str, parent=None, cfg: dict | None = None):
+    def __init__(self, industry: str, parent=None, cfg: dict | None = None,
+                 path: str = ""):
         super().__init__(parent)
         self.industry = industry
         self.cfg = cfg if cfg is not None else {}
@@ -96,6 +97,10 @@ class ElvReadDialog(QDialog):
         self.use_btn.setToolTip(i18n.t("Read a drawing first, then use the reading."))
         btn_row.addWidget(self.use_btn)
         col.addLayout(btn_row)
+        if path:                       # the drawing is already chosen on the BOQ screen
+            self.pdf_path = path
+            self.path_label.setText(os.path.basename(path))
+            self.read_btn.setEnabled(True)
 
     def _pick_pdf(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -108,7 +113,9 @@ class ElvReadDialog(QDialog):
         self.read_btn.setEnabled(True)
 
     def _is_pdf(self) -> bool:
-        return os.path.splitext(self.pdf_path)[1].lower() == ".pdf"
+        """True when reading this file needs Prism AI: a PDF or a picture
+        (a DWG/DXF is read from its own entities first, with no AI)."""
+        return os.path.splitext(self.pdf_path)[1].lower() in (".pdf",) + drawing_reader.PICTURE_EXTENSIONS
 
     def _consent(self) -> bool:
         """Only ever asked for a PDF (or a DXF that turns out to have no
@@ -137,8 +144,9 @@ class ElvReadDialog(QDialog):
             if not api_key:
                 QMessageBox.information(self, i18n.t(
                     "{industry} drawing reading").format(industry=self.industry),
-                    i18n.t("Reading a PDF drawing needs an AI key. Add one in "
-                           "Settings → Agents."))
+                    i18n.t("Reading a PDF or picture needs Prism AI, and Prism AI "
+                           "is not set up on this computer yet. Check that "
+                           "Prism is activated and try again."))
                 return
             if not self._consent():
                 return

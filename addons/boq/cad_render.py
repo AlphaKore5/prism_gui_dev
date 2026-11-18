@@ -119,6 +119,11 @@ def render_dxf_to_png(source, out_path: str, *, dpi: int = 200) -> str:
     return out_path
 
 
+_PICTURE_MIME = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+                 ".bmp": "image/bmp", ".webp": "image/webp",
+                 ".tif": "image/tiff", ".tiff": "image/tiff"}
+
+
 def prepare_for_ai(path: str, *, tmp_dir: str = "") -> dict:
     """path -> a content block a vision-capable OpenRouter model can
     actually look at:
@@ -141,6 +146,22 @@ def prepare_for_ai(path: str, *, tmp_dir: str = "") -> dict:
                 "b64": base64.b64encode(data).decode("ascii"),
                 "name": os.path.basename(path)}
 
+    if ext in _PICTURE_MIME:
+        # A photo or screenshot of a drawing goes as it is.
+        mime = _PICTURE_MIME[ext]
+        if ext in (".bmp", ".tif", ".tiff"):        # models take PNG/JPEG/WebP
+            import io
+            from PIL import Image
+            buf = io.BytesIO()
+            Image.open(path).convert("RGB").save(buf, format="PNG")
+            data, mime = buf.getvalue(), "image/png"
+        else:
+            with open(path, "rb") as f:
+                data = f.read()
+        return {"kind": "image", "mime": mime,
+                "b64": base64.b64encode(data).decode("ascii"),
+                "name": os.path.basename(path)}
+
     if ext == ".dxf":
         png_path = os.path.join(tmp_dir, f"{stem}_render.png")
         render_dxf_to_png(path, png_path)
@@ -151,7 +172,7 @@ def prepare_for_ai(path: str, *, tmp_dir: str = "") -> dict:
     else:
         raise CadRenderError(
             f"Don't know how to show a {ext or 'this'} file to an AI — "
-            "only .pdf, .dxf and .dwg are supported.")
+            "only a PDF, a picture, .dxf and .dwg are supported.")
 
     with open(png_path, "rb") as f:
         data = f.read()
