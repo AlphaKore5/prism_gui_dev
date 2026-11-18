@@ -204,6 +204,41 @@ def load(user_dir: str) -> dict[str, Any]:
     return read_json(path(user_dir), _DEFAULT)
 
 
+def unreadable(user_dir: str) -> str:
+    """Why license.json exists but cannot be used right now, or "".
+
+    "" for a file that is simply absent (the everyday "never activated") AND
+    for one that reads fine. Anything else (locked by a scanner or a sync
+    client, truncated by a crash, a folder where the file should be) is the
+    difference between "this person never activated" and "Prism could not look
+    just now", which the start-up gate must not treat alike.
+    """
+    target = path(user_dir)
+    try:
+        with open(target, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        return ""
+    except (OSError, ValueError) as e:
+        return str(e) or e.__class__.__name__
+    return "" if isinstance(data, dict) else "the file is not a JSON object"
+
+
+# Names only ever reach a log line; never what is inside.
+STATE_FILES = (FILENAME, "authorization.json", PAYLOAD_FILENAME, "device_id")
+
+
+def inventory(user_dir: str) -> list[str]:
+    """Which licence-related files exist in `user_dir`, by name and size."""
+    found = []
+    for name in STATE_FILES:
+        try:
+            found.append(f"{name}({os.path.getsize(os.path.join(user_dir, name))}B)")
+        except OSError:
+            continue
+    return found
+
+
 def save(user_dir: str, data: dict[str, Any]) -> None:
     write_json(path(user_dir), {**_DEFAULT, **data})
 

@@ -262,6 +262,20 @@ def _leads_run_direct_by_default(request, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _the_os_keyring_is_never_the_real_one(monkeypatch):
+    """No test reads or writes the developer's real Keychain / Credential
+    Manager / Secret Service. The licence key lives there, and the start-up
+    path now re-activates silently with it, so a test that reached the real
+    store could either overwrite the developer's key with a fixture or start
+    a real activation. A test about the key passes its own backend by patching
+    `secretstore._keyring`, as several already do."""
+    from licensing import secretstore
+    monkeypatch.setattr(secretstore, "_probed", True)
+    monkeypatch.setattr(secretstore, "_backend", None)
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _isolate_ambient_state(request):
     """Close the offline-dev bypass for the duration of every test, then put
     the environment back exactly as it was; and let no licensing thread cross

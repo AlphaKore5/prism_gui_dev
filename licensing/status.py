@@ -83,6 +83,10 @@ class LicenseState:
     # server itself enforces on lease issuance; the client only repeats it.
     latest_version: str = ""
     min_supported_version: str = ""
+    # Why the state is NONE or TAMPERED, as a stable code ("absent", "empty",
+    # "unreadable", "wrong_device", "clock", ...). The activation screen reads
+    # it to say WHY it appeared and whether a retry is worth offering.
+    reason: str = ""
 
     @property
     def usable(self) -> bool:
@@ -180,12 +184,12 @@ def resolve(claims: dict[str, Any], *, now: int | None = None) -> LicenseState:
     )
 
 
-def none(message: str = "") -> LicenseState:
-    return LicenseState(status=NONE, message=message)
+def none(message: str = "", reason: str = "") -> LicenseState:
+    return LicenseState(status=NONE, message=message, reason=reason)
 
 
-def tampered(message: str) -> LicenseState:
-    return LicenseState(status=TAMPERED, message=message)
+def tampered(message: str, reason: str = "") -> LicenseState:
+    return LicenseState(status=TAMPERED, message=message, reason=reason)
 
 
 def version_tuple(text: str) -> tuple[int, ...]:

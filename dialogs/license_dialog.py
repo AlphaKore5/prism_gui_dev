@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import time
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QDesktopServices, QFont
 from PySide6.QtWidgets import (QCheckBox, QDialog, QFrame, QHBoxLayout, QLabel,
                                QLineEdit, QPushButton, QVBoxLayout, QWidget)
@@ -141,6 +141,31 @@ class _ActivateWorker(_Worker):
             self.failed.emit(f"Something went wrong activating Prism: {e}")
 
 
+class _SavedKeyWorker(_Worker):
+    """Try the licence key this computer already holds, off the UI thread.
+
+    Run before anyone is asked to type a key: a person who activated once
+    should not have to do it again because a licence file was lost, or because
+    a dev build keeps its data apart from the normal Prism.
+    """
+
+    done = Signal(str, str)
+
+    def run(self):
+        try:
+            self.done.emit(*licensing.reactivate_from_saved_key())
+        except Exception as e:                          # noqa: BLE001
+            self.done.emit("error", f"{e.__class__.__name__}: {e}")
+
+
+def _log(message: str) -> None:
+    try:
+        import diagnostics
+        diagnostics.write("INFO", message)
+    except Exception:                                   # noqa: BLE001
+        pass
+
+
 class LicenseDialog(PrismDialog):
     """Activation. `mode` picks the framing, not the mechanics."""
 
@@ -178,6 +203,7 @@ class LicenseDialog(PrismDialog):
         # reading as bare canvas.
         self.body.setSpacing(theme.ROW_GAP)
         self.body.addWidget(self._explainer())
+        self.body.addWidget(self._why_panel())
         self.body.addLayout(self._key_row())
         self.body.addWidget(self._key_hint())
         self.body.addWidget(self._legal_acknowledgement())
@@ -191,6 +217,10 @@ class LicenseDialog(PrismDialog):
         self._build_footer()
 
         self.key_edit.setFocus()
+        # After the window is up, so a slow server never delays it; a test
+        # that never runs an event loop never starts the attempt.
+        if self._mode in ("activate", "problem"):
+            QTimer.singleShot(0, self._look_for_saved_licence)
         self.tab_chain(self.key_edit, self.terms_btn, self.privacy_btn,
                        self.terms_check, self.privacy_check, self.activate_btn)
 
@@ -254,6 +284,112 @@ class LicenseDialog(PrismDialog):
         label.setObjectName("body")
         label.setWordWrap(True)
         return label
+
+    # ── why this screen is showing, and the ways back that need no typing ──
+    def _why_panel(self) -> QWidget:
+        """Says why Prism is asking and where it looked, then offers what can
+        be done without a key: try again (a transient cause), reconnect with a
+        saved key, or (dev builds) bring over the normal Prism's licence."""
+        self.why_box = QFrame()
+        self.why_box.setObjectName("licWhy")
+        self.why_box.setAttribute(Qt.WA_StyledBackground, True)
+        self.why_box.setStyleSheet(
+            f"#licWhy {{ background: {theme.WELL};"
+            f" border: 1px solid {theme.HAIRLINE};"
+            f" border-radius: {theme.R_CONTROL}px; }}")
+        col = QVBoxLayout(self.why_box)
+        col.setContentsMargins(theme.SPACE_3, theme.SPACE_2,
+                               theme.SPACE_3, theme.SPACE_2)
+        col.setSpacing(theme.SPACE_2)
+        col.addWidget(kicker(i18n.t("Why you are seeing this"), muted=True))
+        self.why_label = QLabel(licensing.why_activation(self._state)
+                                if self._mode in ("activate", "problem") else "")
+        self.why_label.setObjectName("body")
+        self.why_label.setWordWrap(True)
+        self.why_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        col.addWidget(self.why_label)
+        self.saved_label = QLabel("")
+        self.saved_label.setObjectName("body")
+        self.saved_label.setWordWrap(True)
+        self.saved_label.setVisible(False)
+        col.addWidget(self.saved_label)
+        row = QHBoxLayout()
+        row.setSpacing(theme.SPACE_2)
+        self.retry_btn = C.button(i18n.t("Try again"), "secondary", small=True,
+                                  on_click=self._try_again)
+        self.retry_btn.setVisible(False)
+        row.addWidget(self.retry_btn)
+        self.adopt_btn = C.button(
+            i18n.t("Use the licence already activated on this computer"),
+            "secondary", small=True, on_click=self._adopt)
+        self.adopt_btn.setVisible(False)
+        row.addWidget(self.adopt_btn)
+        row.addStretch(1)
+        col.addLayout(row)
+        shown = self._mode in ("activate", "problem") and bool(
+            self.why_label.text())
+        self.why_box.setVisible(shown)
+        self._refresh_ways_back()
+        return self.why_box
+
+    def _refresh_ways_back(self):
+        self.retry_btn.setVisible(licensing.can_retry(self._state))
+        self.adopt_btn.setVisible(bool(licensing.adoptable_licence_folder()))
+
+    def _look_for_saved_licence(self):
+        """Re-activate silently with the key this computer already holds."""
+        if self._worker is not None and self._worker.isRunning():
+            return
+        if self._state.reason in ("clock", "not_yet_valid"):
+            return          # a wrong clock is not cured by a new token
+        if not licensing.has_saved_key():
+            return
+        self.saved_label.setText(i18n.t(
+            "Found the licence key already saved on this computer. "
+            "Reconnecting with it\u2026"))
+        self.saved_label.setVisible(True)
+        self.why_box.setVisible(True)
+        self.retry_btn.setVisible(False)
+        self._worker = _SavedKeyWorker(self)
+        self._worker.done.connect(self._on_saved_key)
+        self._worker.start()
+
+    def _on_saved_key(self, outcome: str, words: str):
+        _log(f"licence screen: saved-key re-activation -> {outcome}")
+        if outcome == "ok":
+            self.saved_label.setText(i18n.t("Reconnected."))
+            self.accept()
+            return
+        if outcome == "refused":
+            self.saved_label.setText(i18n.t(
+                "The saved key was not accepted: {why}").format(why=words))
+        elif outcome in ("unreachable", "error"):
+            self.saved_label.setText(
+                words + " " + i18n.t(
+                    "Prism could not check it just now, so nothing was "
+                    "changed. Try again, or enter the key below."))
+            self.retry_btn.setVisible(True)
+        else:
+            self.saved_label.setVisible(False)
+
+    def _try_again(self):
+        """Read the licence again, then the saved key if that is not enough."""
+        state = licensing.reload()
+        self._state = state
+        if state.status not in (licensing.NONE, licensing.TAMPERED):
+            self.accept()
+            return
+        self.why_label.setText(licensing.why_activation(state))
+        self._refresh_ways_back()
+        self._look_for_saved_licence()
+
+    def _adopt(self):
+        ok, words = licensing.adopt_real_licence()
+        _log(f"licence screen: adopting the normal Prism's licence -> {'ok' if ok else 'failed'}")
+        if ok:
+            self.accept()
+        else:
+            self._say(words)
 
     def _key_row(self) -> QHBoxLayout:
         row = QHBoxLayout()

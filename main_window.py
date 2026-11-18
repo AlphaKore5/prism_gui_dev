@@ -532,6 +532,13 @@ class MainWindow(QMainWindow):
         except Exception:                          # noqa: BLE001
             pass
 
+    def _retry_licence(self):
+        """The banner's "Try again": renew now, and repaint as the answer lands
+        (a sleeping server can take most of a minute)."""
+        self._tick_licence()
+        for delay_ms in (2000, 8000, 20_000, 50_000):
+            QTimer.singleShot(delay_ms, self._repaint_licence)
+
     def _tick_licence(self):
         try:
             licensing.refresh()
@@ -923,6 +930,11 @@ class MainWindow(QMainWindow):
             text = ("Prism hasn't been able to reach the licence server for a "
                     "week. New work is paused until it can — History and "
                     "everything you've already made are still here.")
+            # The licence is fine; the network is not. A key box here would
+            # ask for something the person already has.
+            self._show_banner(text, tone, icon_name,
+                              action=("Try again", self._retry_licence))
+            return
         elif state.status == licensing.GRACE:
             tone, icon_name = theme.NEUTRAL[600], "clock"
             days = max(state.days_left + state.grace_days, 0)

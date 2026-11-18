@@ -81,9 +81,11 @@ from __future__ import annotations
 import dataclasses
 import os
 import threading
+import time
 from typing import Any, Callable
 
 import app_meta
+import channel
 import paths
 
 from . import (authorization, client, device, keyformat, keys, lease as _lease_mod,
@@ -107,6 +109,8 @@ __all__ = [
     "NONE", "VALID", "GRACE", "STALE", "EXPIRED", "TAMPERED",
     "authorization", "lease_state", "lease_bearer", "Decision", "Lease",
     "PROTECTED_ACTIONS", "secretstore", "store",
+    "has_saved_key", "reactivate_from_saved_key", "adoptable_licence_folder",
+    "adopt_real_licence", "why_activation", "can_retry", "diagnostics_line",
 ]
 
 # Actions the backend meters and counts against a daily allowance. These go to
@@ -149,24 +153,54 @@ def device_fingerprint() -> str:
 
 
 # ── reading the current state ──────────────────────────────────────────────
-def _compute() -> LicenseState:
+# How long start-up waits for a licence file that EXISTS but cannot be read
+# (antivirus scanning the freshly swapped files, a sync client, a renewal
+# thread mid-replace). Only ever spent in that one case: a missing file costs
+# nothing. Being asked for the key because a scanner held a file for a second
+# is the failure this exists to prevent.
+UNREADABLE_WAIT_S = 6.0
+_UNREADABLE_STEP_S = 0.5
+
+
+def _read_licence_file() -> tuple[dict[str, Any], str]:
+    """(data, reason-if-no-token). Waits a little if the file is unreadable."""
     data = store.load(user_dir())
+    if data.get("token"):
+        return data, ""
+    problem = store.unreadable(user_dir())
+    waited = 0.0
+    while problem and waited < UNREADABLE_WAIT_S:
+        time.sleep(_UNREADABLE_STEP_S)
+        waited += _UNREADABLE_STEP_S
+        data = store.load(user_dir())
+        if data.get("token"):
+            return data, ""
+        problem = store.unreadable(user_dir())
+    if problem:
+        return data, "unreadable"
+    exists = os.path.exists(store.path(user_dir()))
+    return data, "empty" if exists else "absent"
+
+
+def _compute() -> LicenseState:
+    data, why = _read_licence_file()
     if not data.get("token"):
-        return _status.none()
+        return _status.none(reason=why)
 
     if _status.clock_rolled_back(int(data.get("last_seen_utc") or 0)):
         return _status.tampered(
             "This computer's date and time look wrong — the clock has gone "
             "backwards.\n\nCheck the date and time in your computer's "
             "settings and set them to update automatically, then connect to "
-            "the internet so Prism can re-check your licence.")
+            "the internet so Prism can re-check your licence.",
+            reason="clock")
 
     try:
         claims = token.verify(data["token"],
                               device_fp=device_fingerprint(),
                               public_keys=keys.public_keys())
     except TokenError as e:
-        return _status.tampered(str(e))
+        return _status.tampered(str(e), reason=e.code)
 
     # Version advice rides on the state rather than living in its own cache so
     # the banner is drawn from the same object as everything else — one read,
@@ -191,7 +225,8 @@ def state() -> LicenseState:
                 # activation screen, which is recoverable, rather than to
                 # "expired", which looks like we took their licence away.
                 _cached = _status.none(
-                    "Prism couldn't read its licence. Please re-enter your key.")
+                    "Prism couldn't read its licence. Please re-enter your key.",
+                    reason="error")
         return _cached
 
 
@@ -413,6 +448,185 @@ def deactivate() -> None:
         pass
     store.clear(user_dir())
     reload()
+
+
+# ── coming back without asking for the key ───────────────────────────────
+def has_saved_key() -> bool:
+    """Is a licence key stored on this computer (keyring, then the file)?"""
+    try:
+        return bool(store.load_key(user_dir()))
+    except Exception:                               # noqa: BLE001
+        return False
+
+
+def reactivate_from_saved_key() -> tuple[str, str]:
+    """Activate again with the key this computer already holds.
+
+    Returns (outcome, words):
+        "ok"          activated; the state is reloaded
+        "no_key"      nothing saved
+        "refused"     the server answered no (revoked, unknown, seats full);
+                      `words` is the server's own wording
+        "unreachable" no answer at all (offline, server waking up); a retry is
+                      worth offering
+        "error"       something unexpected
+
+    Blocking network call: run it on a worker, never on the UI thread.
+    """
+    try:
+        key = store.load_key(user_dir())
+    except Exception:                               # noqa: BLE001
+        key = ""
+    if not key:
+        return "no_key", ""
+    try:
+        activate(key)
+    except ServerError as e:
+        return "refused", e.message
+    except Unreachable:
+        return "unreachable", (
+            f"Prism couldn't reach its licence server at {client.server_url()}. "
+            "Your saved licence is still on this computer.")
+    except Exception as e:                          # noqa: BLE001
+        return "error", f"{e.__class__.__name__}: {e}"
+    return "ok", ""
+
+
+def _real_licence_folder() -> str:
+    """~/.prism of the person, whatever isolation is active."""
+    return os.path.join(channel.real_home(), ".prism")
+
+
+def adoptable_licence_folder() -> str:
+    """The normal Prism's data folder, if a dev build could take its licence.
+
+    A dev build keeps its data in its own folder (channel.py), so on a machine
+    where the normal Prism is already activated the dev build starts with no
+    licence at all. This answers "is there one to offer?": only in a dev build,
+    only while this folder has no licence, only if the other folder holds a
+    token that verifies for THIS computer. "" otherwise.
+    """
+    try:
+        if not channel.is_dev() or state().status != NONE:
+            return ""
+        real = _real_licence_folder()
+        if os.path.normcase(os.path.abspath(real)) == \
+                os.path.normcase(os.path.abspath(user_dir())):
+            return ""
+        tok = str(store.read_json(store.path(real), {"token": ""}).get("token") or "")
+        if not tok:
+            return ""
+        token.verify(tok, device_fp=device_fingerprint(),
+                     public_keys=keys.public_keys())
+        return real
+    except Exception:                               # noqa: BLE001
+        return ""
+
+
+def adopt_real_licence() -> tuple[bool, str]:
+    """Copy the normal Prism's licence into this dev build's folder, once.
+
+    Read-only on the source: files are read from the real folder and written
+    to this one, nothing there is touched. Copies the licence, the lease, the
+    cached payload and (for machines whose id is a saved random one) the
+    device id. If the copy does not give a working licence it is undone.
+    """
+    real = adoptable_licence_folder()
+    if not real:
+        return False, "There is no licence to bring over."
+    mine = user_dir()
+    os.makedirs(mine, exist_ok=True)
+    copied: list[str] = []
+    try:
+        for name in store.STATE_FILES:
+            src, dst = os.path.join(real, name), os.path.join(mine, name)
+            if not os.path.isfile(src) or os.path.exists(dst):
+                continue
+            with open(src, "rb") as f:
+                blob = f.read()
+            tmp = dst + ".adopt.tmp"
+            with open(tmp, "wb") as f:
+                f.write(blob)
+            os.replace(tmp, dst)
+            copied.append(dst)
+        device.reset_cache()
+        result = reload()
+    except OSError as e:
+        result = None
+        error = str(e)
+    else:
+        error = ""
+    if result is None or result.status in (NONE, TAMPERED):
+        for dst in copied:
+            try:
+                os.unlink(dst)
+            except OSError:
+                pass
+        device.reset_cache()
+        reload()
+        return False, ("Prism couldn't use that licence" +
+                       (f" ({error})." if error else " on this build."))
+    return True, ""
+
+
+# ── saying why the key screen is showing ──────────────────────────────────
+def can_retry(current: LicenseState) -> bool:
+    """Is waiting a moment and trying again a real answer to this state?"""
+    return current.reason in ("unreadable", "error")
+
+
+def why_activation(current: LicenseState) -> str:
+    """Plain words for why Prism is asking, and where it looked. No secrets."""
+    where = user_dir()
+    dev = ("\n\nThis is a development build. It keeps its own licence folder, "
+           "separate from the normal Prism on this computer."
+           if channel.is_dev() else "")
+    reason = current.reason
+    if reason == "absent":
+        return f"No licence was found in {where}." + dev
+    if reason == "empty":
+        return (f"The licence file in {where} has no licence in it. That is "
+                "what it looks like after this computer was deactivated or the "
+                "file was cleared.") + dev
+    if reason == "unreadable":
+        return (f"Prism found its licence file in {where} but could not read it "
+                "just now. Another program (antivirus, a backup or sync tool) "
+                "may be holding it. It is still there; try again in a moment.")
+    if reason == "wrong_device":
+        return ("The licence saved in " + where + " belongs to a different "
+                "computer, or this computer's ID has changed since it was "
+                "activated.")
+    if reason in ("clock", "not_yet_valid"):
+        return current.message
+    if reason == "error":
+        return (f"Prism couldn't read the licence in {where}. "
+                "It is still there; try again in a moment.")
+    return current.message or f"Prism couldn't use the licence in {where}."
+
+
+def diagnostics_line(current: LicenseState) -> str:
+    """One log line for support: which folder, which files, where the key is.
+    Names and yes/no only: never the key, the token or the lease."""
+    folder = user_dir()
+    data = store.load(folder)
+    try:
+        keyring_ok = secretstore.available()
+        key_in_keyring = bool(secretstore.fetch_key()) if keyring_ok else False
+    except Exception:                               # noqa: BLE001
+        keyring_ok = key_in_keyring = False
+    other = ""
+    if channel.is_dev():
+        other = (" normal_prism_licence_folder="
+                 f"{'has license.json' if os.path.isfile(os.path.join(_real_licence_folder(), store.FILENAME)) else 'no license.json'}")
+    return (f"licence screen will show: status={current.status} "
+            f"reason={current.reason or '-'} folder={folder} "
+            f"files=[{', '.join(store.inventory(folder)) or 'none'}] "
+            f"key_location={data.get('key_location') or '-'} "
+            f"keyring_available={'yes' if keyring_ok else 'no'} "
+            f"key_in_keyring={'yes' if key_in_keyring else 'no'} "
+            f"key_in_file={'yes' if data.get('key') else 'no'} "
+            f"token_status={'present' if data.get('token') else 'none'} "
+            f"channel={channel.CHANNEL}{other}")
 
 
 def _refresh_once() -> LicenseState:

@@ -571,22 +571,19 @@ def _paywall(feature: str, parent, state) -> None:
 
 
 def _log_gate(state) -> None:
-    """Leave a trail when the licence screen is about to appear: why, and
-    whether license.json is there at all. "Prism asks for my key again" is
-    otherwise impossible to diagnose after the fact."""
+    """Leave a trail when the licence screen is about to appear: why, which
+    folder was looked in, which licence files exist (names only), where the key
+    is kept. "Prism asks for my key again" is otherwise impossible to diagnose
+    after the fact. Never the key, the token or the lease."""
     try:
         import licensing
         if state.status not in (licensing.NONE, licensing.TAMPERED):
             return
         import diagnostics
-        from licensing import store
-        target = store.path(paths.user_dir())
-        size = os.path.getsize(target) if os.path.exists(target) else -1
         diagnostics.write(
             "WARN",
-            f"licence screen will show: status={state.status} "
+            f"{licensing.diagnostics_line(state)} "
             f"message={str(getattr(state, 'message', ''))[:200]!r} "
-            f"license.json={'missing' if size < 0 else str(size) + ' bytes'} "
             f"version={app_meta.VERSION} frozen={paths.is_frozen()}")
     except Exception:                                   # noqa: BLE001
         pass
