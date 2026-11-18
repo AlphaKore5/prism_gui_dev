@@ -138,5 +138,19 @@ class PictureReaders(unittest.TestCase):
         self.assertTrue(dlg.extract_btn.isEnabled())
 
 
+
+
+class AScannedPdfIsSaidToBeUnmeasurable(unittest.TestCase):
+    def test_a_pdf_with_no_lines_explains_itself_instead_of_a_dead_button(self):
+        from PIL import Image
+        from addons.boq import takeoff as T
+        p = os.path.join(tempfile.mkdtemp(dir=_HOME), "scan.pdf")
+        Image.new("RGB", (600, 400), "white").save(p)
+        dlg = T.IndustryTakeoffDialog(I.HVAC, None, cfg={}, path=p)
+        self.assertFalse(dlg.extract_btn.isEnabled())
+        self.assertIn("scan", dlg.status.text())
+        self.assertIn("CAD file", dlg.extract_btn.toolTip())
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -544,6 +544,14 @@ class IndustryTakeoffDialog(QDialog):
             return
         self._fill_mapping(layers)
         self.extract_btn.setEnabled(bool(layers))
+        if not layers:
+            why = i18n.t(
+                "This PDF has no lines Prism can measure. It is probably a scan or a "
+                "picture. Use the CAD file (DXF or DWG) instead, or go back and pick "
+                "General or Electrical, where Prism AI can read it.")
+            self.status.setStyleSheet(f"color: {theme.WARN_INK};")
+            self.status.setText(why)
+            self.extract_btn.setToolTip(why)
 
     def _fill_mapping(self, layers: list[dict]):
         while self.mapping_layout.count():
