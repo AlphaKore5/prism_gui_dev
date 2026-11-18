@@ -1246,9 +1246,14 @@ class ToolChip(QAbstractButton):
             self._resize_to_text()
             self.update()
 
+    def shown(self) -> str:
+        """The words on the chip. A subclass may say something other than the
+        tool's own name (Prism AI, when no website is behind it)."""
+        return self._current
+
     def _resize_to_text(self):
         width = (self._PAD_L + self.BADGE + self._GAP
-                 + QFontMetrics(self._font).horizontalAdvance(self._current)
+                 + QFontMetrics(self._font).horizontalAdvance(self.shown())
                  + 6 + 15 + self._PAD_R)
         self.setFixedSize(width, 29)
 
@@ -1292,19 +1297,19 @@ class ToolChip(QAbstractButton):
 
         badge = QRectF(self._PAD_L, (rect.height() - self.BADGE) / 2,
                        self.BADGE, self.BADGE)
-        painter.setBrush(theme.c(theme.badge_color(self._current)))
+        painter.setBrush(theme.c(theme.badge_color(self.shown())))
         painter.drawRoundedRect(badge, theme.R_MICRO, theme.R_MICRO)
         painter.setPen(theme.c("#ffffff"))
         painter.setFont(self._badge_font)
         painter.drawText(badge, Qt.AlignCenter,
-                         theme.badge_initial(self._current))
+                         theme.badge_initial(self.shown()))
 
         painter.setPen(theme.c(text_color))
         painter.setFont(self._font)
         text_x = int(badge.right()) + self._GAP
         painter.drawText(QRect(text_x, 0, rect.width() - text_x - self._PAD_R - 15,
                                rect.height()),
-                         Qt.AlignVCenter | Qt.AlignLeft, self._current)
+                         Qt.AlignVCenter | Qt.AlignLeft, self.shown())
 
         chevron = icons.pixmap("chevron-down", 15, chev_color)
         painter.drawPixmap(rect.width() - self._PAD_R - 15,

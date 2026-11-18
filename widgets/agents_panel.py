@@ -43,6 +43,7 @@ from PySide6.QtWidgets import (
     QSizePolicy, QMenu,
 )
 
+import ai_server
 import core_bridge as CB
 import i18n
 import theme
@@ -176,10 +177,21 @@ class PlanToolChip(ToolChip):
     """
 
     def __init__(self, tools, current="", suggested="", named="", reason="",
-                 parent=None):
+                 parent=None, stage=""):
         self._named = named or ""
         self._reason = reason or ""
+        self._stage = stage or ""
         super().__init__(tools, current, suggested, parent)
+
+    def shown(self) -> str:
+        """Server mode: there is no website to choose, so the chip says
+        'Prism AI · writer' (the role the step runs as)."""
+        return ai_server.display_agent(self._current, self._stage)
+
+    def _open_menu(self):
+        if ai_server.active():
+            return          # nothing to choose between: Prism picks the helper
+        self._open_site_menu()
 
     def set_reason(self, reason: str):
         self._reason = reason or ""
@@ -198,7 +210,7 @@ class PlanToolChip(ToolChip):
                 picks.append(name)
         return picks
 
-    def _open_menu(self):
+    def _open_site_menu(self):
         if not self._tools:
             return
         A = CB.agents
@@ -381,8 +393,13 @@ class PlanRow(QFrame):
 
         tools = meta_data.get("agents", []) or ([current] if current else [])
         self.chip = PlanToolChip(tools, forced or current, suggested or "",
-                                 named=forced or "", reason=self._reason)
-        self.chip.setToolTip(i18n.t("Click to run this step with a different tool"))
+                                 named=forced or "", reason=self._reason,
+                                 stage=stage)
+        self.chip.setToolTip(
+            i18n.t("Prism AI does this step. Prism picks the helper for each "
+                   "kind of step, so there is nothing to choose.")
+            if ai_server.active() else
+            i18n.t("Click to run this step with a different tool"))
         # controls.ToolChip has always emitted `changed` and nothing has ever
         # connected it — so until Start was pressed, swapping a tool updated
         # no count, no estimate and no licence check. It does now.
@@ -597,10 +614,11 @@ class PlanRow(QFrame):
         }
         self.origin_tag.setToolTip(tips.get(self._origin, ""))
 
-        show_why = self._origin == ORIGIN_SUGGESTED and bool(self._reason)
+        show_why = (self._origin == ORIGIN_SUGGESTED and bool(self._reason)
+                    and not ai_server.active())
         if show_why:
             self.why.setText(i18n.t("Prism suggests {tool} — {why}").format(
-                tool=self._suggested, why=self._reason))
+                tool=ai_server.display_agent(self._suggested), why=self._reason))
         self.why.setVisible(show_why)
 
     # ── include / exclude ─────────────────────────────────────────────────
@@ -681,9 +699,12 @@ class PlanRow(QFrame):
         makes = _makes_copy(kind)
         if makes:
             bits.append(makes)
-        bits += [b for b in (entry.get("cost"), entry.get("avg")) if b]
-        if wait:
-            bits.append(i18n.t("waits up to {t}").format(t=_minutes(wait)))
+        if not ai_server.active():
+            # Price bands and waiting times describe the websites; on Prism's
+            # server they would describe something that is not running.
+            bits += [b for b in (entry.get("cost"), entry.get("avg")) if b]
+            if wait:
+                bits.append(i18n.t("waits up to {t}").format(t=_minutes(wait)))
         self.engine_meta.setText("  ·  ".join(bits))
         self.engine_meta.setVisible(bool(bits))
         self.engine_meta.setToolTip(entry.get("specialty") or "")
@@ -1022,12 +1043,13 @@ class AgentsPanel(QWidget):
         line = QHBoxLayout()
         line.setSpacing(theme.SPACE_2)
         line.setContentsMargins(0, 0, 0, 0)
-        line.addWidget(C.ToolBadge(tool, 20, theme.R_MICRO))
-        who = QLabel(tool)
+        line.addWidget(C.ToolBadge(ai_server.display_agent(tool) or tool, 20,
+                                   theme.R_MICRO))
+        who = QLabel(ai_server.display_agent(tool, stage))
         who.setObjectName("meta")
         line.addWidget(who, stretch=1)
         col.addLayout(line)
-        card.setToolTip(blurb or tool)
+        card.setToolTip(blurb or ai_server.display_agent(tool))
         return card
 
     def set_query(self, query: str):
@@ -1115,11 +1137,12 @@ class AgentsPanel(QWidget):
                 (i18n.t("Prism reads your {n} attached file with ChatGPT "
                         "first, before step 1.") if self._attached == 1 else
                  i18n.t("Prism reads your {n} attached files with ChatGPT "
-                        "first, before step 1.")).format(n=self._attached))
+                        "first, before step 1.")).format(n=self._attached)
+                .replace("ChatGPT", ai_server.display_agent("ChatGPT")))
         for _stage, tool, _qs in self._extras:
             lines.append(i18n.t(
                 "After the last step, {tool} folds every answer into one "
-                "final summary.").format(tool=tool))
+                "final summary.").format(tool=ai_server.display_agent(tool)))
         self.extras.setText("\n".join(lines))
         self.extras.setVisible(bool(lines) and bool(self._rows))
 

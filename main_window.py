@@ -3284,8 +3284,9 @@ class MainWindow(QMainWindow):
             self._stage_agents[stage] = agent
             self.statusBar().showMessage(
                 i18n.t("{failed} {why} — trying {agent} instead…")
-                .replace("{failed}", failed).replace("{why}", why)
-                .replace("{agent}", agent), 15000)
+                .replace("{failed}", ai_server.display_agent(failed))
+                .replace("{why}", why)
+                .replace("{agent}", ai_server.display_agent(agent)), 15000)
             # NOT stage_started(): that built a second card and orphaned the
             # first in the timeline, where nothing could update it and the
             # problem counter no longer saw it. The card now holds RETRYING,
@@ -3326,7 +3327,8 @@ class MainWindow(QMainWindow):
             licensing.meter.record("stage", tool=agent, stage=stage, ok=True)
             self.statusBar().showMessage(
                 i18n.t("{agent} finished the {stage} step.")
-                .replace("{agent}", agent).replace("{stage}", stage), 8000)
+                .replace("{agent}", ai_server.display_agent(agent))
+                .replace("{stage}", stage), 8000)
         elif kind == "stage_unrecovered":
             self.statusBar().showMessage(
                 i18n.t("No other tool could finish the {stage} step either.")

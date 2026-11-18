@@ -104,6 +104,7 @@ def install() -> None:
         import core_bridge as CB
         CB.agents.prune_for_server()
         i18n.set_rewording(_SERVER_WORDS)
+        CB.get_ui().set_rewriter(server_words)
 
 
 WARM_EVERY = 240             # seconds; Render sleeps after ~15 idle minutes
@@ -139,15 +140,65 @@ def active() -> bool:
 
 PRISM_AI = "Prism AI"
 
+# What each server role is called to a person. The role is the only choice
+# left when AI runs on Prism's server, so it is the only thing worth showing.
+ROLE_WORDS = {"writer": "writer", "reasoner": "thinker", "search": "research",
+              "code": "builder", "summary": "summary", "vision": "reader",
+              "image": "pictures", "planner": "planner"}
 
-def display_agent(name: str) -> str:
+
+def role_word(stage: str, agent: str = "") -> str:
+    """'writer', 'thinker' ... for a step, or '' when the stage is unknown."""
+    if not stage:
+        return ""
+    try:
+        import core_bridge as CB
+        role = ("image" if stage in ("visual", "artwork")
+                else CB.server_session.role_for(stage, agent or ""))
+    except Exception:                                       # noqa: BLE001
+        return ""
+    return i18n.t(ROLE_WORDS.get(role, role))
+
+
+def display_agent(name: str, stage: str = "") -> str:
     """What a person sees for a step's tool. In server mode there are no
     websites any more, so every site name (ChatGPT, Claude ...) reads
-    "Prism AI"; the old direct path keeps the real names."""
+    "Prism AI" -- and, when the step is known, "Prism AI · writer" (the role
+    is the only difference between two steps). The old direct path keeps the
+    real names."""
     name = name or ""
     if name and active():
-        return PRISM_AI
+        word = role_word(stage, name)
+        return f"{PRISM_AI} \u00b7 {word}" if word else PRISM_AI
     return name
+
+
+_SITE_RE = None
+
+
+def server_words(text: str) -> str:
+    """A line of the engine's log, with the browser-era words taken out: no
+    site name and no wait budget for something that is not a site. Used by
+    the engine's console and the log a person can read; the direct switch
+    leaves lines as they are."""
+    global _SITE_RE
+    if not text or not active():
+        return text
+    import re
+    if _SITE_RE is None:
+        try:
+            import core_bridge as CB
+            names = sorted({n for n in CB.agents.AGENT_REGISTRY if n}, key=len,
+                           reverse=True)
+        except Exception:                                   # noqa: BLE001
+            names = []
+        names += ["ChatGPT", "Claude", "Perplexity", "Gemini", "Grok"]
+        _SITE_RE = re.compile(r"\b(?:%s)\b" % "|".join(
+            re.escape(n) for n in dict.fromkeys(names)))
+    text = re.sub(r"waiting up to \d+s for [^\n]*? to finish", "Prism AI is "
+                  "working on this step", text)
+    text = re.sub(r"waiting up to \d+ min for ", "waiting for ", text)
+    return _SITE_RE.sub(PRISM_AI, text)
 
 
 # ── this run's cost ──────────────────────────────────────────────────────────

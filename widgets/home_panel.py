@@ -50,6 +50,7 @@ from PySide6.QtWidgets import (
     QPushButton, QScrollArea, QSizePolicy, QVBoxLayout, QWidget,
 )
 
+import ai_server
 import dashboard_data as DATA
 import festivals
 import i18n
@@ -498,7 +499,7 @@ class _RunCard(C.Card):
         title.setStyleSheet(title.styleSheet() + " font-size: 13px; color: #111110;")
         col.addWidget(title)
         tools = run.get("tools") or []
-        source = tools[0] if tools else "Prism"
+        source = ai_server.display_agent(tools[0]) if tools else "Prism"
         when = run.get("when", "")
         meta = _Elided(f"{source} · {when}" if when else source, "META")
         meta.setStyleSheet(meta.styleSheet()

@@ -113,6 +113,7 @@ from core import openrouter as openrouter  # noqa: E402  (BOQ's "Prism Agent" wr
 from core import ai_client as ai_client    # noqa: E402  (every AI call goes through Prism's server)
 from core import contract as contract      # noqa: E402  (what a step must produce)
 from core import filespec as filespec      # noqa: E402  (JSON file specs -> real files)
+from core import server_session as server_session  # noqa: E402  (a step's server role)
 
 
 def reset_run() -> None:

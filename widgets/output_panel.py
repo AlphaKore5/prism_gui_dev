@@ -356,9 +356,9 @@ class StageCard(QWidget):
         # Provider. A tool's brand colour is allowed on 16-20px of badge and
         # nowhere larger — the app belongs to Prism.
         self._head = head
-        self.tool_badge = C.ToolBadge(ai_server.display_agent(self.agent) or "?", 20, theme.R_CHIP)
+        self.tool_badge = C.ToolBadge(self._shown(self.agent) or "?", 20, theme.R_CHIP)
         head.addWidget(self.tool_badge)
-        self.tool_name = QLabel(ai_server.display_agent(self.agent))
+        self.tool_name = QLabel(self._shown(self.agent))
         self.tool_name.setStyleSheet(
             theme.type_css("META", theme.NEUTRAL[700]) + " background: transparent;")
         head.addWidget(self.tool_name)
@@ -485,6 +485,11 @@ class StageCard(QWidget):
     def set_index(self, index: int):
         self.number.setText(str(index) if index else "")
 
+    def _shown(self, agent: str) -> str:
+        """The tool as a person reads it: the site's name, or in server mode
+        'Prism AI · writer' (the step's role is the only thing that differs)."""
+        return ai_server.display_agent(agent, self.stage)
+
     def set_agent(self, agent: str, note_swap: bool = True):
         """Point this step at a different tool.
 
@@ -501,20 +506,20 @@ class StageCard(QWidget):
             if note_swap:
                 self.set_note(i18n.t(
                     "{failed} could not finish this step — Prism handed it to "
-                    "{agent}.").format(failed=ai_server.display_agent(self.agent),
-                            agent=ai_server.display_agent(agent)))
+                    "{agent}.").format(failed=self._shown(self.agent),
+                            agent=self._shown(agent)))
         self.agent = agent
         # Swapped rather than restyled: ToolBadge owns its own metrics, and
         # re-deriving them here is how a second, slightly-different badge gets
         # into the app.
-        fresh = C.ToolBadge(ai_server.display_agent(agent), 20, theme.R_CHIP)
+        fresh = C.ToolBadge(self._shown(agent), 20, theme.R_CHIP)
         old = self._head.replaceWidget(self.tool_badge, fresh)
         if old is not None:
             self.tool_badge.hide()   # before setParent(None): avoids ghost-window flash
             self.tool_badge.setParent(None)
             self.tool_badge.deleteLater()
         self.tool_badge = fresh
-        self.tool_name.setText(ai_server.display_agent(agent))
+        self.tool_name.setText(self._shown(agent))
         self._paint_facts()
 
     def set_note(self, text: str, echoes_body: bool = False):
@@ -549,6 +554,8 @@ class StageCard(QWidget):
         self._state = key
         if detail is not None:
             self._detail = detail
+        elif key == "completed":
+            self._detail = ""        # "up to 300s" means nothing once it is done
         if note is not None:
             self.set_note(note, note_echoes_body)
 
@@ -619,7 +626,7 @@ class StageCard(QWidget):
             # Which tools this step went through, and — the part that used to
             # live for fifteen seconds in the status bar and nowhere else —
             # the engine's own reason for the handover.
-            hand = " → ".join(ai_server.display_agent(a) for a in self._tried + [self.agent])
+            hand = " → ".join(self._shown(a) for a in self._tried + [self.agent])
             bits.append(f"{hand} ({self._handover})" if self._handover
                         else hand)
         span = self._elapsed()
@@ -782,13 +789,15 @@ class StageCard(QWidget):
 
     def set_waiting(self, seconds: int):
         if ai_server.active():
-            self.set_state("waiting", i18n.t("up to {n}s").format(n=seconds),
+            # The wait budget is a browser-era detail; the clock beside the
+            # badge already says how long it has been.
+            self.set_state("waiting", "",
                            note=i18n.t("Prism AI is working on this step."))
             return
         self.set_state("waiting", i18n.t("up to {n}s").format(n=seconds),
                        note=i18n.t("Waiting for {tool} to answer. Prism is "
                                    "watching the tab, not asking again.")
-                       .format(tool=ai_server.display_agent(self.agent) or i18n.t("the tool")))
+                       .format(tool=self._shown(self.agent) or i18n.t("the tool")))
 
     def set_done(self, texts: list[str], url: str, timed_out: bool = False,
                  blocked: str = "", exhausted: bool = False, count: int = None,
@@ -1395,8 +1404,8 @@ class OutputPanel(QWidget):
         card._handover = why
         card.set_agent(agent, note_swap=False)
         card.set_retrying(i18n.t("{failed} stopped: {why} — trying {agent}.")
-                          .format(failed=failed or i18n.t("the tool"),
-                                  why=why, agent=agent))
+                          .format(failed=card._shown(failed) or i18n.t("the tool"),
+                                  why=why, agent=card._shown(agent)))
         self._live = stage
         self._refresh_header()
 
@@ -1407,8 +1416,8 @@ class OutputPanel(QWidget):
         card.set_done(texts or [], url, False)
         if failed:
             card.set_note(i18n.t("{agent} finished this step after {failed} "
-                                 "could not.").format(agent=agent,
-                                                      failed=failed))
+                                 "could not.").format(agent=card._shown(agent),
+                                                      failed=card._shown(failed)))
         if self._live == stage:
             self._live = ""
         self._refresh_header()
@@ -1507,7 +1516,7 @@ class OutputPanel(QWidget):
         if self._live and self._cards.get(self._live):
             card = self._cards[self._live]
             return card.state(), i18n.t("{tool} · {step}").format(
-                tool=ai_server.display_agent(card.agent) or "?", step=card._title)
+                tool=card._shown(card.agent) or "?", step=card._title)
         if self._finished or tally["finished"] >= tally["total"]:
             if tally["problem"]:
                 return ("failed" if any(

@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+import ai_server
 import dashboard_data as DATA
 import i18n
 import theme
@@ -192,7 +193,8 @@ class HistoryPanel(Page):
 
     def _hits(self, run: dict, query: str) -> bool:
         parts = [(run.get("title") or "").lower()]
-        parts += [t.lower() for t in (run.get("tools") or [])]
+        parts += [ai_server.display_agent(t).lower()
+                  for t in (run.get("tools") or [])]
         kind = _kind_of(run.get("title", ""))
         if kind:
             parts.append(ADDONS[kind].lower())

@@ -36,7 +36,8 @@ class ServerModeNames(unittest.TestCase):
             panel = OP.OutputPanel()
             panel.stage_started("write", "ChatGPT")
             card = panel._cards["write"]
-            self.assertEqual(card.tool_name.text(), "Prism AI")
+            # 26: the step role rides along ("Prism AI · writer")
+            self.assertEqual(card.tool_name.text(), "Prism AI \u00b7 writer")
             self.assertEqual(card.agent, "ChatGPT")          # logic keeps the real key
             self.assertIn("Prism AI", panel._header_status()[1]
                           if hasattr(panel, "_header_status") else "Prism AI")
