@@ -10,6 +10,28 @@ Tests: **1966 passing** (6 skipped, 8 Sep 2026 after Round 16 landed on main —
 
 ---
 
+# 1.8.2 — Reels as videos, real files, Usage screen, one-tap Home (DEV build, 18 Nov 2026)
+
+**Dev channel only. Windows and Linux only (macOS deferred, as in 1.8.1).** AI runs through the Prism licence server and is
+enabled only for test licences, so on any other licence the AI steps stop with the server's message. Do not promote this build.
+
+- **Reel and video requests plan as a video** (script, scenes, pictures, local render to an mp4) instead of a lone picture; Prism
+  fills in its own picture and video tools; no AI step opens Chrome; the plan shows "about N credits".
+- **Real files.** The model returns a JSON file spec and Prism writes real XLSX, CSV, DOCX and PDF files locally; a rejected
+  spec is sent back for a repair turn; "make it a CSV/Excel/PDF" converts from the stored spec with no AI call. Files appear as
+  cards with Open, Show in folder, Save as and Convert to; spreadsheets have a preview. PowerPoint is not supported.
+- **The answer window is a Markdown reader** with Save as (pdf, docx, md, txt).
+- **Prism AI replaces ChatGPT and other site names** on the run screen, step cards and result titles; "Use fallback" is gone.
+- **STEP:** a "Sending to Prism AI" panel with a one-time consent ("Don't ask again") replaces the Yes/No box; the Haiku/Sonnet
+  choice is sent to the server; the Windows 2 px overflow fix.
+- **Settings > Usage** shows balance, this cycle, today, by add-on, 30 days and recent calls from the server.
+- **Home:** one submit plans the task (no second tap); tapping Tasks during a run shows the run.
+- **Opening big files no longer freezes the window**; the server is pinged to wake when Home is shown.
+- Not done in this build: chat-style conversations, the DWG converter installer (the BOQ message is unchanged), the sending
+  panel for BOQ/Inquiry, narration for reels, Hindi/Gujarati text for the new screens.
+
+---
+
 # 1.8.1 — Same as 1.8.0, with the Windows and Linux test failures fixed (DEV build, 18 Nov 2026)
 
 **Dev channel only. Windows and Linux only: there is no macOS build of this version.** The owner deferred macOS for this
