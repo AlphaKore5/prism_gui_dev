@@ -47,6 +47,7 @@ from __future__ import annotations
 import os
 import platform
 import sys
+import sysconfig
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
@@ -436,6 +437,28 @@ def _get(url: str, *, timeout: int, fetch: Callable[..., Any] | None = None,
     return b"".join(chunks)
 
 
+def _arch_tag() -> str:
+    """x64 / arm64 for the channel name: the architecture of THIS BUILD.
+
+    On Windows, Python 3.12's platform.machine() asks WMI for the hardware, so
+    the x64 build running through emulation on a Windows-on-ARM laptop says
+    "ARM64". The old lookup had no "ARM64" entry, so that laptop asked for
+    `manifest.windows-ARM64.signed`, got a 404 and never saw an update. The
+    interpreter's own build (sysconfig: win-amd64 / win-arm64) is the answer
+    that matches the files this install actually holds. Mirrored in
+    packaging/build.py, which names the build the same way.
+    """
+    if sys.platform.startswith("win"):
+        built = sysconfig.get_platform().lower()
+        if built == "win-amd64":
+            return "x64"
+        if built == "win-arm64":
+            return "arm64"
+    machine = platform.machine()
+    return {"x86_64": "x64", "amd64": "x64", "aarch64": "arm64",
+            "arm64": "arm64"}.get(machine.lower(), machine)
+
+
 def platform_tag() -> str:
     """The exact `<os>-<arch>` string packaging/build.py's STEM uses
     (its OS_TAG-ARCH). Duplicated here rather than imported — build.py is a
@@ -456,8 +479,7 @@ def platform_tag() -> str:
         os_tag = "macos"
     else:
         os_tag = "linux"
-    arch = {"x86_64": "x64", "AMD64": "x64", "aarch64": "arm64",
-           "arm64": "arm64"}.get(platform.machine(), platform.machine())
+    arch = _arch_tag()
     if os_tag == "macos":
         # A NEW channel name, deliberately. Every macOS build before 1.4.1
         # swapped `Prism.app/Contents/MacOS` instead of the bundle (see

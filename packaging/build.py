@@ -52,6 +52,7 @@ import platform
 import shutil
 import subprocess
 import sys
+import sysconfig
 import tarfile
 import zipfile
 
@@ -81,8 +82,21 @@ IS_WIN = sys.platform.startswith("win")
 IS_MAC = sys.platform == "darwin"
 IS_LINUX = sys.platform.startswith("linux")
 OS_TAG = "windows" if IS_WIN else "macos" if IS_MAC else "linux"
-ARCH = {"x86_64": "x64", "AMD64": "x64", "aarch64": "arm64",
-        "arm64": "arm64"}.get(platform.machine(), platform.machine())
+
+
+def _arch() -> str:
+    """Same rule as updater._arch_tag(): the interpreter's own build on Windows
+    (platform.machine() reports the hardware there), else the machine name."""
+    if IS_WIN:
+        built = sysconfig.get_platform().lower()
+        if built in ("win-amd64", "win-arm64"):
+            return "x64" if built == "win-amd64" else "arm64"
+    machine = platform.machine()
+    return {"x86_64": "x64", "amd64": "x64", "aarch64": "arm64",
+            "arm64": "arm64"}.get(machine.lower(), machine)
+
+
+ARCH = _arch()
 STEM = f"{app_meta.NAME}-{app_meta.VERSION}-{OS_TAG}-{ARCH}"
 
 

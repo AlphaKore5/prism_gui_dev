@@ -1,0 +1,209 @@
+name: Windows on ARM check
+
+# Prism ships ONE Windows build, x64. A Snapdragon laptop runs it through
+# Windows' x64 emulation. This workflow runs that situation for real on
+# GitHub's `windows-11-arm` runner (free for public repositories) and
+# reports what works, in the job summary:
+#
+#   emulated   downloads the latest published x64 Windows build, starts it with
+#              PRISM_SELFTEST, then runs devtools/arm_smoke.py (BOQ, STEP, Email
+#              against a fake IMAP/SMTP server, screenshots) and the BOQ / STEP /
+#              Email test files with an x64 Python.
+#   native-probe   informational only: which of requirements.txt even has a
+#              Windows ARM64 wheel, i.e. what a native ARM build would need.
+#
+# Not a release gate and it builds nothing. It never signs, tags or publishes.
+# Run it by hand (Actions > Windows on ARM check > Run workflow) or push a
+# branch named arm/<anything>.
+on:
+  workflow_dispatch:
+    inputs:
+      release_repo:
+        description: "Repo whose latest release holds the x64 Windows build"
+        default: "AlphaKore5/prism_gui_dev"
+      release_tag:
+        description: "Release tag (empty = latest)"
+        default: ""
+  push:
+    branches: ["arm/**"]
+
+permissions:
+  contents: read
+
+env:
+  PYTHONUTF8: "1"
+
+jobs:
+  emulated:
+    name: x64 Prism on Windows ARM (emulation)
+    runs-on: windows-11-arm
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          architecture: x64      # the same CPU type the shipped build uses
+
+      - name: Machine facts
+        run: |
+          echo "PROCESSOR_ARCHITECTURE=$PROCESSOR_ARCHITECTURE  PROCESSOR_ARCHITEW6432=${PROCESSOR_ARCHITEW6432:-}"
+          python -c "import platform,sys,sysconfig; print('python', sys.version); print('build', sysconfig.get_platform(), '| platform.machine()', platform.machine())"
+          powershell -NoProfile -Command "(Get-CimInstance Win32_Processor | Select-Object Name,Architecture,NumberOfCores | Format-List | Out-String); (Get-CimInstance Win32_OperatingSystem | Select-Object Caption,Version | Format-List | Out-String)"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-timeout
+
+      - name: Fetch the published x64 Windows build
+        id: fetch
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ inputs.release_repo || 'AlphaKore5/prism_gui_dev' }}
+          TAG: ${{ inputs.release_tag }}
+        run: |
+          set -e
+          if [ -z "$TAG" ]; then TAG=$(gh release view -R "$REPO" --json tagName --jq .tagName); fi
+          echo "release $REPO $TAG"
+          mkdir -p downloaded
+          gh release download "$TAG" -R "$REPO" -p 'Prism-*-windows-x64.zip' -D downloaded
+          ls -la downloaded
+          python - <<'EOF'
+          import glob, os, zipfile
+          z = glob.glob("downloaded/Prism-*-windows-x64.zip")[0]
+          os.makedirs("unzipped", exist_ok=True)
+          zipfile.ZipFile(z).extractall("unzipped")
+          exes = [os.path.join(d, f) for d, _, fs in os.walk("unzipped") for f in fs if f == "Prism.exe"]
+          print("Prism.exe at", exes)
+          assert exes, "no Prism.exe in the zip"
+          open(os.environ["GITHUB_OUTPUT"], "a").write("dir=" + os.path.dirname(exes[0]).replace(os.sep, "/") + "\n")
+          EOF
+
+      - name: Start the shipped x64 build under emulation (PRISM_SELFTEST)
+        if: steps.fetch.outcome == 'success'
+        continue-on-error: true
+        env:
+          BUNDLE: ${{ steps.fetch.outputs.dir }}
+        run: |
+          set -e
+          # packaging/smoke_test.py runs dist/Prism/Prism.exe in a throw-away HOME
+          rm -rf dist && mkdir -p dist
+          cp -r "$BUNDLE" dist/Prism
+          python packaging/smoke_test.py 2>&1 | tee selftest.log
+
+      - name: Functional smoke (BOQ, STEP, Email, screenshots)
+        id: smoke
+        continue-on-error: true
+        env:
+          BUNDLE: ${{ steps.fetch.outputs.dir }}
+        run: |
+          mkdir -p smoke-out
+          # A small public DWG for the bundled dwg2dxf.exe; not committed.
+          curl -fsSL -o sample.dwg https://raw.githubusercontent.com/LibreDWG/libredwg/master/test/test-data/sample_2000.dwg \
+            || rm -f sample.dwg
+          ARGS=""
+          if [ -f sample.dwg ]; then ARGS="$ARGS --dwg sample.dwg"; fi
+          if [ -n "$BUNDLE" ]; then ARGS="$ARGS --bundle $BUNDLE"; fi
+          python devtools/arm_smoke.py --out smoke-out $ARGS 2>&1 | tee smoke.log
+
+      - name: Existing BOQ / STEP / Email / updater tests
+        id: tests
+        continue-on-error: true
+        run: |
+          python devtools/suite_runner.py --timeout 300 \
+            tests/test_boq_*.py tests/test_core_boq_*.py tests/test_ui_port_boq.py \
+            tests/test_step*.py tests/test_skip_step.py tests/test_ui_port_step.py \
+            tests/test_email_*.py tests/test_mailer_errors.py tests/test_mailflow.py tests/test_ui_port_email.py \
+            tests/test_inquiry_*.py tests/test_picture_inquiry.py tests/test_ui_port_inquiry.py \
+            tests/test_updater.py tests/test_ffmpeg.py tests/test_oda_converter.py \
+            2>&1 | tee tests.log
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "## Windows on ARM: x64 Prism under emulation"
+            echo
+            echo "### Shipped build start-up (PRISM_SELFTEST)"
+            if [ -f selftest.log ]; then echo '```'; tail -n 25 selftest.log; echo '```'; else echo "not run (download step: ${{ steps.fetch.outcome }})"; fi
+            echo
+            echo "### Smoke (devtools/arm_smoke.py)"
+            if [ -f smoke-out/results.md ]; then cat smoke-out/results.md; else echo "no results written"; fi
+            echo
+            echo "### Existing tests (one process per file)"
+            if [ -f tests.log ]; then echo '```'; grep -E "^(ok|FAIL|known|CRASH|KNOWN)|tests in" tests.log | tail -n 80; echo '```'; else echo "not run"; fi
+            echo
+            echo "Step outcomes: download=${{ steps.fetch.outcome }} smoke=${{ steps.smoke.outcome }} tests=${{ steps.tests.outcome }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: arm-emulated-logs-and-screenshots
+          path: |
+            smoke-out/
+            smoke.log
+            selftest.log
+            tests.log
+          if-no-files-found: warn
+          retention-days: 14
+
+      # The job fails if the smoke or the tests failed, but only after every
+      # step above has had its say and uploaded.
+      - name: Fail the job on any red result
+        if: always() && (steps.smoke.outcome == 'failure' || steps.tests.outcome == 'failure')
+        run: |
+          echo "smoke=${{ steps.smoke.outcome }} tests=${{ steps.tests.outcome }}"
+          exit 1
+
+  native-probe:
+    name: Native ARM64 wheels (information only)
+    runs-on: windows-11-arm
+    continue-on-error: true
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          architecture: arm64
+      - name: Which requirements install on native ARM64?
+        run: |
+          python -c "import platform,sysconfig; print(sysconfig.get_platform(), platform.machine())"
+          python -m pip install --upgrade pip
+          : > native.md
+          {
+            echo "## Native ARM64 Python: which requirements.txt lines resolve"
+            echo
+            echo "| requirement | wheel-only | with source builds allowed |"
+            echo "|---|---|---|"
+          } >> native.md
+          grep -vE '^\s*(#|$)' requirements.txt | sed 's/\s*#.*$//' | while read -r req; do
+            case "$req" in *darwin*) continue;; esac
+            if pip install --dry-run --ignore-installed --only-binary=:all: "$req" > /tmp/wheel.out 2>&1; then w=yes; else w="NO"; fi
+            if [ "$w" = "NO" ]; then
+              if timeout 300 pip install --dry-run --ignore-installed "$req" > /tmp/src.out 2>&1; then s="resolves (may need a compiler)"; else s="NO"; fi
+            else s="-"; fi
+            echo "| $req | $w | $s |" >> native.md
+          done
+          cat native.md
+          cat native.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: arm-native-probe
+          path: native.md
+          if-no-files-found: warn
+          retention-days: 14

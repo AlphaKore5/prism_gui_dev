@@ -371,6 +371,36 @@ class PlatformChannel(unittest.TestCase):
         self.assertEqual(self._tag("linux", "x86_64"), "linux-x64")
         self.assertEqual(self._tag("win32", "AMD64"), "windows-x64")
 
+    def _win_tag(self, built: str, machine: str) -> str:
+        import updater
+        with mock.patch.object(updater.sys, "platform", "win32"), \
+                mock.patch.object(updater.sysconfig, "get_platform", return_value=built), \
+                mock.patch.object(updater.platform, "machine", return_value=machine):
+            return updater.platform_tag()
+
+    def test_x64_build_on_windows_arm_stays_on_the_x64_channel(self):
+        """Python 3.12 reports the HARDWARE (ARM64) to an emulated x64 build.
+        The old lookup had no "ARM64" and asked for manifest.windows-ARM64."""
+        self.assertEqual(self._win_tag("win-amd64", "ARM64"), "windows-x64")
+
+    def test_native_arm64_build_gets_its_own_channel_in_lower_case(self):
+        self.assertEqual(self._win_tag("win-arm64", "ARM64"), "windows-arm64")
+
+    def test_machine_name_case_does_not_matter_off_windows(self):
+        self.assertEqual(self._tag("linux", "ARM64"), "linux-arm64")
+
+    def test_build_py_names_the_build_the_same_way(self):
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
+            os.path.abspath(__file__))), "packaging"))
+        import build
+        for built, machine, want in (("win-amd64", "ARM64", "x64"),
+                                     ("win-arm64", "ARM64", "arm64"),
+                                     ("win-amd64", "AMD64", "x64")):
+            with mock.patch.object(build, "IS_WIN", True), \
+                    mock.patch.object(build.sysconfig, "get_platform", return_value=built), \
+                    mock.patch.object(build.platform, "machine", return_value=machine):
+                self.assertEqual(build._arch(), want, (built, machine))
+
     def test_release_all_publishes_to_the_same_names(self):
         sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
             os.path.abspath(__file__))), "devtools"))

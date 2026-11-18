@@ -183,6 +183,9 @@ class PlatformTags(unittest.TestCase):
         cases = {
             ("win32", "AMD64"): "win_amd64",
             ("win32", "x86"): "win32",
+            # x64 FFmpeg runs through Windows' emulation on an ARM laptop, and
+            # Python 3.12 reports ARM64 there even for an x64 Prism.
+            ("win32", "ARM64"): "win_amd64",
             ("darwin", "arm64"): "macosx_11_0_arm64",
             ("darwin", "x86_64"): "macosx_10_9_x86_64",
             ("linux", "x86_64"): "manylinux2014_x86_64",
