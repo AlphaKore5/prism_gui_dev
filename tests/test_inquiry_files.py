@@ -32,6 +32,12 @@ from addons.inquiry import autoquote, documents  # noqa: E402
 
 _app = QApplication.instance() or QApplication([])
 
+# Same cause as test_structured_files: no system font under the Windows CI
+# runner's offscreen Qt, so a PDF came back with no text. The app registers its
+# vendored fonts at start-up; do the same here.
+import theme  # noqa: E402
+theme.load_fonts()
+
 
 def a_quote(**terms):
     return quoting.Quotation(

@@ -30,6 +30,13 @@ from PySide6.QtWidgets import QApplication                          # noqa: E402
 # when none exists, and a QApplication cannot be created after it.
 _APP = QApplication.instance() or QApplication([])
 
+# A PDF only holds text if Qt has a font to draw it with. Under the offscreen
+# platform on the Windows CI runner Qt finds no system font, draws nothing, and
+# a PDF read back is empty ('Site visit' not found in ''). The app registers
+# its own vendored fonts at start-up (theme.load_fonts); the test does the same.
+import theme                                                        # noqa: E402
+theme.load_fonts()
+
 import core_bridge as CB                                            # noqa: E402
 from core import ai_client                                          # noqa: E402
 from core import filespec as F                                      # noqa: E402

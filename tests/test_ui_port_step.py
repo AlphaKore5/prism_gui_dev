@@ -127,15 +127,30 @@ class TheLayout(unittest.TestCase):
     def test_a_row_that_cannot_wrap_never_pushes_the_window(self):
         """Independent of this machine's fonts: put a 700 px rigid row in the fold (far
         more than any font could add). The centre column's minimum is its own stated
-        number, so the results pane and buttons stay inside the window."""
+        number, so the results pane and buttons stay inside the window.
+
+        The limit is measured, not typed in: the same screen's minimum width BEFORE the
+        rigid row is the fixed chrome of this machine (side cards, margins, header row
+        in this platform's fonts). The row must add nothing to it, and the whole must
+        still fit the 1066 px the stack gives the screen in a 1366 window. (A typed-in
+        1000 failed on the Windows runner at 1054: its chrome is wider than Linux's,
+        and the row had nothing to do with it.)"""
         host, d = _screen(1066, 716, attached=True)
+        host.layout().activate()
+        d.layout().activate()
+        chrome = d.minimumSizeHint().width()
         rigid = QLabel("x")
         rigid.setMinimumWidth(700)
         d.more.add(rigid)
         d.more.toggle.click()
         host.layout().activate()
         d.layout().activate()
-        self.assertLessEqual(d.minimumSizeHint().width(), 1000)
+        with_row = d.minimumSizeHint().width()
+        self.assertLessEqual(
+            with_row, chrome,
+            "a 700 px row in the fold raised the screen's minimum width from %d to %d"
+            % (chrome, with_row))
+        self.assertLessEqual(with_row, 1066)
         for w in (d.right_card, d.close_btn, d.generate_btn):
             self.assertLessEqual(_right_edge(w, host), 1066)
 

@@ -202,6 +202,11 @@ def test_reel_run_transport_with_a_fake_encoder(ai, no_ai_browser, tmp_path, mon
         return out
 
     monkeypatch.setattr(reel_web, "render", fake_render)
+    # The run asks "is a browser here?" before it renders. The encoder is
+    # faked, so the answer must not depend on the machine: the Windows CI
+    # runner has no Chromium and this test failed there for that reason only.
+    # (The real-render test below still checks the real answer and skips.)
+    monkeypatch.setattr(reel_web, "available", lambda: (True, ""))
     (responses, links), events = _run_reel(ai)
     kinds = [k for k, _ in events]
     assert "stage_error" not in kinds, [p for k, p in events if k == "stage_error"]
