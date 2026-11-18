@@ -149,6 +149,8 @@ class PipelineStrip(QWidget):
             self.line.setText("")
             self.detail_btn.setVisible(False)
             return
-        said = self._line.get(st.key) or i18n.t(st.detail)
-        self.line.setText(f"{i18n.t(route.where_words(st.where))}: {said}")
+        # A step's own description already says who does it; a result line does not.
+        said = (f"{i18n.t(route.where_words(st.where))}: {self._line[st.key]}"
+                if self._line.get(st.key) else i18n.t(st.detail))
+        self.line.setText(said)
         self.detail_btn.setVisible(st.key in ("read", "measure", "tags", "check", "write", "prices"))

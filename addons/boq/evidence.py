@@ -21,6 +21,14 @@ def _n(x) -> int:
         return 0
 
 
+def _plain(w: str) -> str:
+    """The engines' own warnings, with the developer's words made plain."""
+    if "No OCR labels" in w:
+        return ("OCR is not available on this computer, so sizes and tags come only from "
+                "the text inside the PDF. Tags drawn as lines or pictures were not read.")
+    return w
+
+
 def for_quantities(q: dict) -> dict:
     """A drawing measured by Prism's own geometry (DXF/DWG)."""
     lengths = q.get("lengths_by_layer") or {}
@@ -60,7 +68,7 @@ def for_takeoff(result: dict) -> dict:
     by_src = Counter((l.get("source") or "?") for l in labels if isinstance(l, dict))
     ocr = [l for l in labels if isinstance(l, dict) and str(l.get("source", "")).startswith(("ocr", "ai"))]
     low = [l for l in ocr if float(l.get("conf") or 1.0) < 0.6]
-    warns = [str(w) for w in (result.get("warnings") or [])]
+    warns = [_plain(str(w)) for w in (result.get("warnings") or [])]
     rows = [("Duct runs", f"{len(runs)}" + (f", about {ft:,.0f} ft" if ft else "")),
             ("Labels read", f"{len(labels)} (" + ", ".join(f"{k} {v}" for k, v in sorted(by_src.items())) + ")"
              if labels else "0")]

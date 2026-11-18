@@ -120,6 +120,11 @@ class Evidence(unittest.TestCase):
     def test_description_is_all_estimate(self):
         self.assertEqual(evidence.for_description()["source"], "estimated")
 
+    def test_the_ocr_warning_is_in_plain_words(self):
+        ev = evidence.for_takeoff({"warnings": ["No OCR labels: check rapidocr/onnxruntime are installed"]})
+        self.assertNotIn("rapidocr", " ".join(ev["warnings"]))
+        self.assertIn("OCR is not available", ev["warnings"][0])
+
     def test_html_escapes(self):
         ev = evidence.for_quantities(dict(self.Q, notes=["<b>x</b>"]))
         self.assertNotIn("<b>x</b>", evidence.as_html(ev))
