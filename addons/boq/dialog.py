@@ -35,7 +35,10 @@ from widgets.stepper import ChoiceCard, FileCard, StepTabs
 from widgets.usage_chip import UsageChip
 from widgets.ask_panel import AskPanel, MoreOptions
 from addons.boq import agents as boq_agents
+from addons.boq import evidence
 from addons.boq import industries
+from addons.boq import route
+from addons.boq.pipeline_strip import PipelineStrip
 from addons.boq import cad_render
 from addons.boq import openrouter_writer
 from addons.boq import result_view
@@ -294,8 +297,8 @@ class BoqDialog(PrismDialog):
         self._run_prefix = registry.by_key(self.mode).run_prefixes[0]
         super().__init__(
             i18n.t(self._doc),
-            i18n.t("Make a {noun} from your drawing in {n} easy steps. It is "
-                   "measured here, on this machine, never by an AI.").format(
+            i18n.t("Make a {noun} from your drawing in {n} easy steps. It is measured "
+                   "on this computer. AI only writes it up.").format(
                        noun=self._noun, n=3 if self.mode == "bom" else 4),
             icon="file", parent=parent, closable=False, scrollable=True)
         self.setWindowTitle(self._doc)
@@ -389,6 +392,15 @@ class BoqDialog(PrismDialog):
         # Display only: hidden until Prism has a server to ask (widgets/usage_chip.py).
         self.usage_chip = UsageChip()
         self.body.addWidget(self.usage_chip, alignment=Qt.AlignRight)
+        # The road this job takes (addons/boq/route.py), one tile per step. A BOM
+        # has its own shorter road and keeps the old header.
+        self.pipe = PipelineStrip()
+        self.pipe.detail_requested.connect(self._open_stage_detail)
+        self.pipe.setVisible(False)
+        if self.mode == "boq":
+            self.body.addWidget(self.pipe)
+        self._input_kind = ""          # what the user has; set by the cards or the file
+        self._tool_result = None       # (kind, result) of the PDF tool or reader last used
         self.pages = QStackedWidget()
         page_layouts = []
         for _ in self._step_names:
@@ -405,6 +417,8 @@ class BoqDialog(PrismDialog):
         # form into a tall one with bands of canvas through it.
         root.setSpacing(theme.ROW_GAP)
 
+        if self.mode == "boq":
+            self._build_route_cards(root)
         title = QLabel(i18n.t("What is this {noun} for?").format(noun=self._noun))
         title.setObjectName("h4")
         root.addWidget(title)
@@ -456,7 +470,7 @@ class BoqDialog(PrismDialog):
         # attached, then "Drawing added" with its name and a way to swap it.
         self.drawing_card = FileCard(
             i18n.t("Add your drawing (optional)"),
-            i18n.t("Drag a DXF, DWG or PDF here, or choose one. No drawing? "
+            i18n.t("Drag a DXF, DWG, PDF or picture here, or choose one. No drawing? "
                    "Describe the job above and Prism lists the items."),
             i18n.t("Drawing added"), i18n.t("Choose drawing"),
             i18n.t("Change drawing"), on_click=self.ask._pick_file,
@@ -557,6 +571,12 @@ class BoqDialog(PrismDialog):
             on_click=self._open_industry_takeoff)
         self.takeoff_btn.setVisible(False)
         meas_row.addWidget(self.takeoff_btn)
+        # For "A PDF or picture": the one button that reads it for the chosen trade.
+        self.route_btn = self.button(
+            i18n.t("Read this drawing…"), "secondary", icon_name="paperclip",
+            small=True, on_click=self._open_route_tool)
+        self.route_btn.setVisible(False)
+        meas_row.addWidget(self.route_btn)
         meas_row.addStretch(1)
         root.addLayout(meas_row)
 
@@ -588,6 +608,16 @@ class BoqDialog(PrismDialog):
             "you to check. Without one, it lists the items from your words "
             "in the next step."), level="SUPPORT", wrap=True)
         root.addWidget(self.count_hint)
+        # What the numbers rest on, above the table: counts, flags, and what is
+        # measured versus estimated (addons/boq/evidence.py).
+        self.evidence_box = QLabel("")
+        self.evidence_box.setTextFormat(Qt.RichText)
+        self.evidence_box.setWordWrap(True)
+        self.evidence_box.setStyleSheet(
+            f"background: {theme.INFO_BG}; border-radius: {theme.R_CONTROL}px;"
+            f" padding: {theme.SPACE_2}px {theme.SPACE_3}px; font-size: 13px;")
+        self.evidence_box.setVisible(False)
+        root.addWidget(self.evidence_box)
         root.addWidget(self.ext_meas_box)
 
         # Only appears once a drawing has actually been measured.
@@ -725,6 +755,9 @@ class BoqDialog(PrismDialog):
         irow.addWidget(self.industry_combo)
         irow.addStretch(1)
         root.addWidget(ind_row)
+        # For a BOQ the job-kind cards at the top of this page are the choice;
+        # this box stays as the one value they set (the engines read it).
+        ind_row.setVisible(self.mode == "bom")
         # Says out loud which drawing rules will run, the preview's one line.
         self.rules_line = C.label(i18n.t(
             "HVAC drawing rules are on, because your industry is HVAC."),
@@ -889,10 +922,221 @@ class BoqDialog(PrismDialog):
         self.ask.files_added.connect(self._refresh_primary)
         self.ask.file_removed.connect(self._refresh_primary)
         self._show_step(0)
+        if self.mode == "boq":
+            self._init_route()
 
         # Files already attached on the home screen come along automatically.
         if attachments:
             self._absorb([a["path"] for a in attachments])
+
+    # ── what do you have / what kind of job ─────────────────────────────
+
+    def _build_route_cards(self, root):
+        """Two questions in plain words, as cards: what the user has, and what
+        kind of job it is. Both are explicit (a file never decides the trade)."""
+        head = QLabel(i18n.t("What do you have?"))
+        head.setObjectName("h4")
+        root.addWidget(head)
+        row = QWidget()
+        h = QHBoxLayout(row)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(theme.SPACE_3)
+        self.input_cards = {}
+        for kind, title, hint in route.INPUT_CARDS:
+            card = ChoiceCard({route.CAD: "file", route.SCAN: "eye",
+                               route.DESCRIBE: "pencil"}[kind], i18n.t(title), i18n.t(hint),
+                              compact=True)
+            card.clicked.connect(lambda k=kind: self._set_input(k))
+            self.input_cards[kind] = card
+            h.addWidget(card)
+        root.addWidget(row)
+        head2 = QLabel(i18n.t("What kind of job is it?"))
+        head2.setObjectName("h4")
+        root.addWidget(head2)
+        row2 = QWidget()
+        h2 = QHBoxLayout(row2)
+        h2.setContentsMargins(0, 0, 0, 0)
+        h2.setSpacing(theme.SPACE_3)
+        self.job_cards = {}
+        for name, title, hint in route.JOB_CARDS:
+            card = ChoiceCard("grid", i18n.t(title), i18n.t(hint), compact=True)
+            card.clicked.connect(lambda n=name: self._pick_job(n))
+            self.job_cards[name] = card
+            h2.addWidget(card)
+        root.addWidget(row2)
+        self.job_note = C.label("", level="SUPPORT", wrap=True)
+        self.job_note.setVisible(False)
+        root.addWidget(self.job_note)
+
+    def _init_route(self):
+        """Start on the kind of job this person chose last time (General the first time)."""
+        saved = (self.cfg or {}).get("boq_job_kind")
+        if saved in industries.NAMES:
+            self.industry_combo.setCurrentText(saved)
+        self._refresh_cards()
+
+    def _refresh_cards(self):
+        industry = self.industry_combo.currentText()
+        for kind, card in self.input_cards.items():
+            card.set_selected(kind == self._input_kind)
+        why_now = ""
+        for name, title, hint in route.JOB_CARDS:
+            card = self.job_cards[name]
+            ok, why = route.availability(self._input_kind, name, self.cad_path)
+            card.setEnabled(ok)
+            card.hint.setText(i18n.t(hint) if ok else i18n.t(why))
+            card.setToolTip("" if ok else i18n.t(why))
+            if name == industry and not ok:
+                why_now = why
+        if why_now:                    # the chosen trade cannot work on this input
+            self.industry_combo.setCurrentText(industries.GENERAL)
+            industry = industries.GENERAL
+            self.job_note.setText(i18n.t(why_now))
+        self.job_note.setVisible(bool(why_now))
+        for name, card in self.job_cards.items():
+            card.set_selected(name == industry)
+
+    def _set_input(self, kind):
+        if not kind or self.mode != "boq":
+            return
+        self._input_kind = kind
+        self.drawing_card.setVisible(kind != route.DESCRIBE)
+        self.example_row.setVisible(not self.ask.text())
+        self._refresh_cards()
+        self._on_industry_changed(self.industry_combo.currentText())
+        self._replay_pipe()
+
+    def _pick_job(self, industry: str):
+        ok, _why = route.availability(self._input_kind, industry, self.cad_path)
+        if not ok or industry not in industries.NAMES:
+            return
+        self.industry_combo.setCurrentText(industry)
+        self.job_note.setVisible(False)
+        self.cfg["boq_job_kind"] = industry          # remembered for next time
+        try:
+            CB.config.save(self.cfg)
+        except Exception:                               # noqa: BLE001
+            pass
+        self._refresh_cards()
+        # Numbers measured under another trade's rules are stale: measure again.
+        if (self.q is not None and not self.q.get("external") and self.cad_path
+                and industry != self._industry
+                and os.path.splitext(self.cad_path)[1].lower() in (".dwg", ".dxf")):
+            self.q = None
+            self.meas_box.setVisible(False)
+            self._measure()
+        self._replay_pipe()
+
+    # ── the pipeline strip ───────────────────────────────────────────────
+
+    def _pipe(self, key: str, state: str, line: str = ""):
+        if self.mode == "boq":
+            self.pipe.set_stage(key, state, line)
+
+    def _replay_pipe(self):
+        """Draw the road for the chosen input and trade, then mark what is already done."""
+        if self.mode != "boq":
+            return
+        kind = self._input_kind
+        self.pipe.setVisible(bool(kind))
+        if not kind:
+            return
+        industry = self.industry_combo.currentText()
+        self.pipe.set_route(route.stages(kind, industry, self.cad_path))
+        if kind == route.DESCRIBE:
+            self._pipe("describe", route.DONE if self.ask.text() else route.NEEDS_YOU,
+                       i18n.t("Your words are the only input. Nothing is measured."))
+            return
+        if self._tool_result or (self.q and self.q.get("external")):
+            self._pipe_tool_done()
+        elif self.q is not None:
+            self._pipe_measured(self.q)
+        elif not self.cad_path:
+            self._pipe("read", route.NEEDS_YOU, i18n.t("Add your drawing above."))
+        elif kind == route.SCAN:
+            self._pipe_scan_waiting()
+
+    def _pipe_scan_waiting(self):
+        industry = self.industry_combo.currentText()
+        self._pipe("read", route.DONE, i18n.t("{name} added. It has not left this computer.")
+                   .format(name=os.path.basename(self.cad_path)))
+        if industry == industries.GENERAL:
+            self._pipe("tags", route.NEEDS_YOU, i18n.t(
+                "In step 3 pick \"With the drawing\". Prism asks you before the drawing "
+                "leaves this computer."))
+        else:
+            self._pipe("measure" if industry == industries.HVAC else "tags", route.NEEDS_YOU,
+                       i18n.t("Press \"{btn}\" below.").format(btn=self.route_btn.text()))
+
+    def _pipe_measured(self, q: dict):
+        ev = evidence.for_quantities(q)
+        self._pipe("read", route.DONE, i18n.t("Read on this computer: {n:,} drawing objects. "
+                                             "Nothing was sent anywhere.").format(
+                                                 n=int(q.get("entity_count") or 0)))
+        self._pipe("measure", route.DONE, i18n.t("{headline}. Measured on this computer, "
+                                                 "no AI.").format(headline=ev["headline"]))
+        self._pipe("check", route.NEEDS_YOU, i18n.t(
+            "{n} item(s) flagged. Look at them in step 2.").format(n=ev["flagged"])
+            if ev["flagged"] else i18n.t("Nothing was flagged. Have a look at the count in step 2."))
+        self._show_evidence(ev)
+
+    def _pipe_tool_done(self):
+        kind = self._input_kind
+        industry, result = self._tool_result or (self.industry_combo.currentText(), None)
+        if result is None:
+            ev = {"headline": "Numbers you gave", "rows": [], "flagged": 0, "warnings": [],
+                  "basis": "Used exactly as you gave them. Prism did not measure or check them.",
+                  "source": "given"}
+            self._pipe("read", route.DONE, i18n.t("Your own numbers are used."))
+        elif industry == industries.HVAC:
+            ev = evidence.for_takeoff(result)
+            self._pipe("read", route.DONE, i18n.t("PDF opened on this computer."))
+            self._pipe("measure", route.DONE, i18n.t("{h}. On this computer.").format(h=ev["headline"]))
+            self._pipe("tags", route.DONE, i18n.t("Labels read on this computer (OCR)."))
+        else:
+            ev = evidence.for_reading(result)
+            self._pipe("read", route.DONE, i18n.t("Drawing opened."))
+            ai = ev["source"] == "read"
+            self._pipe("tags", route.DONE, i18n.t("{h}.{ai}").format(
+                h=ev["headline"], ai=i18n.t(" Prism AI was used.") if ai else i18n.t(" No AI.")))
+        self._pipe("check", route.NEEDS_YOU, i18n.t("Check the count in step 2."))
+        self._show_evidence(ev)
+
+    def _show_evidence(self, ev: dict):
+        self.evidence_box.setText(evidence.as_html(ev))
+        self.evidence_box.setVisible(True)
+
+    def _open_stage_detail(self, key: str):
+        if key in ("tags",) or (key == "measure" and self._input_kind == route.SCAN):
+            if self._input_kind == route.SCAN and self.cad_path \
+                    and self.industry_combo.currentText() != industries.GENERAL:
+                self._open_route_tool()
+                return
+        if key in ("read", "measure", "tags", "check"):
+            self._show_step(self.S_COUNT)
+        elif key in ("write", "files"):
+            self._show_step(self.S_MAKE)
+        elif key == "prices" and self.mode == "boq":
+            self._show_step(self.S_PRICE)
+
+    def _route_button_text(self) -> str:
+        industry = self.industry_combo.currentText()
+        if industry == industries.HVAC:
+            return i18n.t("Measure the ducts in this PDF…")
+        return i18n.t("Read this drawing…")
+
+    def _open_route_tool(self):
+        """The PDF/picture tool for the chosen trade, with the file already picked."""
+        industry = self.industry_combo.currentText()
+        if not self.cad_path or industry == industries.GENERAL:
+            return
+        if industry == industries.HVAC:
+            dlg = IndustryTakeoffDialog(industry, self, cfg=self.cfg, path=self.cad_path)
+        else:
+            dlg = ElvReadDialog(industry, self, cfg=self.cfg, path=self.cad_path)
+        if dlg.exec() == QDialog.Accepted:
+            self._tool_result = (industry, getattr(dlg, "result", None))
+            self._use_external_measurements(dlg.measurements_text())
 
     # ── the steps ────────────────────────────────────────────────────────
 
@@ -917,6 +1161,12 @@ class BoqDialog(PrismDialog):
         index = max(0, min(index, self._last_step()))
         self._step = index
         self.pages.setCurrentIndex(index)
+        # The stack is as tall as its tallest page unless the others say they do not
+        # count; step 1 now holds the two question rows and would stretch every step.
+        for i in range(self.pages.count()):
+            self.pages.widget(i).setSizePolicy(
+                QSizePolicy.Preferred,
+                QSizePolicy.Preferred if i == index else QSizePolicy.Ignored)
         self.tabs.set_current(index)
         self.back_btn.setVisible(index > 0)
         self._refresh_primary()
@@ -1015,6 +1265,12 @@ class BoqDialog(PrismDialog):
         if not atts:
             return
         cad, templates, images, notes = self.boq.classify_inputs(atts)
+        if self.mode == "boq" and self._input_kind == route.SCAN:
+            # The user said this IS a picture of a drawing, so it is the drawing,
+            # not a legend screenshot.
+            pics = [a for a in images if route.is_picture(a["path"])]
+            images = [a for a in images if a not in pics]
+            cad = pics + cad
         self.templates += templates
         self.images += images
         self.notes += notes
@@ -1027,6 +1283,8 @@ class BoqDialog(PrismDialog):
         if cad:
             self.cad_path = cad[0]["path"]
             self.drawing_card.set_file(os.path.basename(self.cad_path))
+            if self.mode == "boq":
+                self._set_input(route.kind_of_file(self.cad_path))
             if os.path.splitext(self.cad_path)[1].lower() in (".dwg", ".dxf"):
                 self.pdf_drawing_hint.setVisible(False)
                 self._measure()
@@ -1041,6 +1299,8 @@ class BoqDialog(PrismDialog):
                 # does for a real measurement, since there is no measurement
                 # to wait for.
                 self.recheck_btn.setEnabled(True)
+                if self.mode == "boq" and self.industry_combo.currentText() == industries.GENERAL:
+                    self._with_drawing = True    # nothing to measure: the AI reads it, after you say yes
                 self.pdf_drawing_hint.setText(i18n.t(
                     "{name} has no vector geometry to measure automatically "
                     "— it's a PDF/scan, not a .dwg/.dxf. Press \"Make with "
@@ -1048,6 +1308,8 @@ class BoqDialog(PrismDialog):
                     "\"Input measurements\" to type the numbers yourself.")
                     .replace("{name}", os.path.basename(self.cad_path)))
                 self.pdf_drawing_hint.setVisible(True)
+                if self.mode == "boq":
+                    self._pipe_scan_waiting()
 
     def _update_template_hint(self):
         """Turns the standing invitation above into a confirmation once a
@@ -1068,6 +1330,7 @@ class BoqDialog(PrismDialog):
     def _open_input_measurements(self):
         dlg = InputMeasurementsDialog(self)
         if dlg.exec() == QDialog.Accepted:
+            self._tool_result = None
             self._use_external_measurements(dlg.measurements_text())
 
     def _on_industry_changed(self, industry: str):
@@ -1079,8 +1342,13 @@ class BoqDialog(PrismDialog):
         found live, 7 Nov 2026: it was hardcoded to say "HVAC PDF
         takeoff…" even while ELV was selected, left over from when HVAC
         was the only industry with one."""
-        self.takeoff_btn.setVisible(industries.has_takeoff(industry))
+        scan = getattr(self, "_input_kind", "") == route.SCAN
+        self.takeoff_btn.setVisible(industries.has_takeoff(industry) and not scan)
         self.takeoff_btn.setText(i18n.t("{industry} PDF takeoff…").format(industry=industry))
+        if hasattr(self, "route_btn"):
+            self.route_btn.setText(self._route_button_text())
+            self.route_btn.setVisible(scan and industry != industries.GENERAL
+                                      and bool(self.cad_path))
 
     def _open_industry_takeoff(self):
         # item 63: an industry read purely by an AI vision model (no
@@ -1094,6 +1362,7 @@ class BoqDialog(PrismDialog):
               if industries.has_ai_read_modes(industry)
               else IndustryTakeoffDialog(industry, self, cfg=self.cfg))
         if dlg.exec() == QDialog.Accepted:
+            self._tool_result = (industry, getattr(dlg, "result", None))
             self._use_external_measurements(dlg.measurements_text())
 
     def _use_external_measurements(self, text: str):
@@ -1121,6 +1390,8 @@ class BoqDialog(PrismDialog):
         self._industry = self.industry_combo.currentText()
         self._hvac = self._industry == industries.HVAC
         self.q = {"external": True, "text": text}
+        if self.mode == "boq" and self._input_kind:
+            self._pipe_tool_done()
         self.summary = text
         self.cad_path = ""
         self.recheck_btn.setEnabled(False)
@@ -1151,6 +1422,8 @@ class BoqDialog(PrismDialog):
             return
         converter_setup.apply_saved(self.cfg)
         self.progress.set_stage(0)
+        self._pipe("read", route.RUNNING, i18n.t("Reading {name} on this computer…").format(
+            name=os.path.basename(self.cad_path)))
         self._set_busy(True, f"Reading {os.path.basename(self.cad_path)} — "
                              "a large drawing can take a minute…")
         # HVAC_DRAWING_RULES.md's rules only ever apply when the person has
@@ -1181,6 +1454,7 @@ class BoqDialog(PrismDialog):
     def _on_measured(self, q, notes: list):
         self.q = q
         self.summary = self.boq.summary_text(q)
+        self._pipe_measured(q)
         self.meas_table.set_quantities(q)
         self.meas_box.setVisible(True)
         self.ext_meas_box.setVisible(False)   # only one measurement source is ever active
@@ -1234,6 +1508,8 @@ class BoqDialog(PrismDialog):
 
     def _on_measure_failed(self, error: str):
         self._set_busy(False, "")
+        self._pipe("read", route.FAILED, i18n.t(
+            "Could not read the drawing: {why}").format(why=str(error).strip()[:200]))
         # Don't auto-start a deferred run on a failed measure — the user should
         # see the error and decide (they can still run a derived/spec BOQ).
         self._run_pending = False
@@ -1333,6 +1609,14 @@ class BoqDialog(PrismDialog):
                     "{name}", os.path.basename(self.cad_path)).replace(
                     "{noun}", self._noun))
             return
+
+        if self.mode == "boq" and not self._input_kind and not self.cad_path and self.q is None:
+            self._set_input(route.DESCRIBE)       # typed words and nothing else
+        if self.q is None:
+            # Nothing measured (a description alone): the trade still comes from the
+            # explicit choice, so its write-up rules apply.
+            self._industry = self.industry_combo.currentText()
+            self._hvac = self._industry == industries.HVAC
 
         # The agent pickers are the source of truth now. This also removes
         # the old "no writing agent set up yet" dead end — the picker
@@ -1584,6 +1868,8 @@ class BoqDialog(PrismDialog):
         # the writer is only certain once we're actually about to write.
         reference = self._reference_csv()
         self.progress.set_stage(2)
+        self._pipe("write", route.RUNNING, i18n.t(
+            "Prism AI is writing your BOQ from the figures. Only the numbers are sent."))
         self._set_busy(True, f"{self.writer_agent} is writing your BOQ…")
         prompt = self._pm.formatting_prompt(
             self.summary, project_context=self.request,
@@ -1757,6 +2043,7 @@ class BoqDialog(PrismDialog):
                 (f"Done in {timing}. " if timing else "Done. ")
                 + "Check the numbers against the saved file above.")
         self._save_deliverable(self._write_made_files, "format")
+        self._pipe_written(bool(texts))
         self.open_btn.setEnabled(bool(self._links.get("format")))
         self._refresh_primary()
         self.recheck_btn.setEnabled(bool(self.cad_path))
@@ -1786,7 +2073,27 @@ class BoqDialog(PrismDialog):
         if texts:
             self._offer_followup()
 
+    def _pipe_written(self, ok: bool):
+        if not ok:
+            self._pipe("write", route.FAILED, i18n.t("Nothing came back. Your measured numbers are still saved."))
+            return
+        from widgets import usage_chip
+        use = usage_chip.current_usage()
+        cost = (i18n.t(" It used {n} credit(s).").format(n=use.run_cost)
+                if use is not None and use.run_cost else "")
+        self._pipe("write", route.DONE, i18n.t("Written by Prism AI.{cost}").format(cost=cost))
+        if self._input_kind == route.DESCRIBE:
+            self._pipe("check", route.NEEDS_YOU, i18n.t(
+                "Nothing was measured. Read every line: the quantities are estimates."))
+        files = [f for f in (self._deliverable_path,) if f]
+        self._pipe("files", route.DONE if files else route.WAITING,
+                   i18n.t("Saved: {name}").format(name=os.path.basename(files[0])) if files
+                   else i18n.t("The text is above. Pick a file format in More options to get a file."))
+        self._pipe("prices", route.NEEDS_YOU, i18n.t("Optional. Add your rates in step 4."))
+
     def _on_failed(self, error: str):
+        self._pipe("write", route.FAILED, i18n.t("Writing did not work: {why}").format(
+            why=str(error).strip()[:200]))
         self._set_busy(False, "")
         QMessageBox.warning(self, "BOQ", error)
 
@@ -2297,8 +2604,9 @@ class BoqDialog(PrismDialog):
         api_key = (self.cfg.get("openrouter_api_key") or "").strip()
         if not api_key:
             QMessageBox.warning(self, "BOQ", i18n.t(
-                "No OpenRouter key set for {agent}. Add one in Settings → "
-                "Agents, or pick a different agent.").replace("{agent}", agent))
+                "Prism AI is not set up on this computer yet, so {agent} "
+                "cannot write the BOQ. Check that Prism is activated and "
+                "try again.").replace("{agent}", agent))
             self._set_busy(False, "")
             return
         files, attachment = self._prepare_drawing_attachment(stage, agent, files)

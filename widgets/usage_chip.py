@@ -66,6 +66,15 @@ def set_provider(provider: Optional[Provider]) -> None:
 _opener: Optional[Callable[[], None]] = None
 
 
+def current_usage() -> Optional[Usage]:
+    """What the server last said, or None. For a screen that wants to quote the
+    run's cost in a line of its own; never raises."""
+    try:
+        return _default_provider()
+    except Exception:                                       # noqa: BLE001
+        return None
+
+
 def set_opener(fn: Optional[Callable[[], None]]) -> None:
     """What a click on any chip does: the app opens Settings > Usage."""
     global _opener

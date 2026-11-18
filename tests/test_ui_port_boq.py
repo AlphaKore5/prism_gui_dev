@@ -153,8 +153,12 @@ class EveryOldControlIsStillThere(unittest.TestCase):
         self.assertGreaterEqual(d.format_combo.count(), 4)
 
     def test_industry_stays_visible_on_step_one(self):
+        # The trade is now chosen with the "What kind of job is it?" cards on step 1
+        # (addons/boq/route.py); the combo stays as the one value they set.
         d = _dialog()
-        self.assertTrue(d.industry_combo.isVisibleTo(d.pages.widget(0)))
+        page = d.pages.widget(0)
+        self.assertTrue(all(c.isVisibleTo(page) for c in d.job_cards.values()))
+        self.assertTrue(d.job_cards[d.industry_combo.currentText()].selected())
 
 
 class TheDropZone(unittest.TestCase):
