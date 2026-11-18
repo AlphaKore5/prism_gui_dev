@@ -3227,6 +3227,9 @@ class MainWindow(QMainWindow):
                 "stage": stage, "agent": self._stage_agents.get(stage, "?"),
                 "text": "\n\n---\n\n".join(texts), "url": url,
                 "snippet": snippet, "ok": bool(texts), "timed_out": timed_out,
+                "files": [f.get("saved") or f.get("path") or ""
+                          for f in (payload.get("files") or [])
+                          if f.get("saved") or f.get("path")],
             })
             # Metering: which tool ran which stage. No prompt text, no output —
             # see licensing/meter.py for why that line is drawn hard.
@@ -3709,16 +3712,21 @@ class MainWindow(QMainWindow):
         if not ai_server.active() or not docexport.is_pure_format_request(text):
             return False
         answer = docexport.latest_answer(responses)
-        if not answer:
-            return False
         ext = docexport.requested_ext(text)
         sess = getattr(self, "_followup_session", None) or {}
         folder = sess.get("artifacts_dir") or CB.config.current_run_dir()
+        # A file Prism built from a structured spec converts from that spec.
+        path = ""
+        if folder:
+            path, _note = docexport.convert_stored(folder, ext, folder)
+        if not path and not answer:
+            return False
         if not folder:
             import tempfile
             folder = tempfile.mkdtemp(prefix="prism-doc-")
-        path, _note = docexport.export_answer(answer, ext, folder,
-                                              stem="prism-answer")
+        if not path:
+            path, _note = docexport.export_answer(answer, ext, folder,
+                                                  stem="prism-answer")
         if not path:
             return False
         self.statusBar().showMessage(
