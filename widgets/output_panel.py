@@ -43,9 +43,11 @@ from PySide6.QtWidgets import (
 import i18n
 from widgets.loader import Loader
 import ai_server
+import chatlog
 import paths
 import theme
 from widgets import icons
+from widgets import chat_thread as T
 from widgets import controls as C
 from widgets.agents_panel import STAGE_COPY
 from widgets.controls import Card, StatusBadge
@@ -1024,7 +1026,8 @@ class RunHeader(Card):
         top.setSpacing(theme.SPACE_3)
         left = QVBoxLayout()
         left.setSpacing(2)
-        left.addWidget(C.kicker(i18n.t("RUNNING NOW")))
+        self.kicker = C.kicker(i18n.t("RUNNING NOW"))
+        left.addWidget(self.kicker)
         self.task = _Elided(i18n.t("Untitled task"))
         self.task.setObjectName("h4")
         left.addWidget(self.task)
@@ -1067,9 +1070,15 @@ class OutputPanel(QWidget):
     skip_requested = Signal()
     fallback_requested = Signal()
     edit_reel = Signal(str)         # a card's Studio reel wants the editor
+    chat_submitted = Signal(str, list)   # the composer: text, attached paths
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._items: list[dict] = []        # the conversation, as it is stored
+        self._turn_item: dict | None = None  # this turn's "steps" item
+        self._turn_keys: list[str] = []      # cards that belong to this turn
+        self._extras: list[QWidget] = []     # bubbles / notes / file cards
+        self._chat_reason = ""               # extra reason the composer is shut
         self._cards: dict[str, StageCard] = {}
         self._order: list[str] = []
         self._live: str = ""
@@ -1170,6 +1179,12 @@ class OutputPanel(QWidget):
         self.scroll = scroll
         root.addWidget(scroll, stretch=1)
 
+        # The conversation's box: type, attach, send. It is what used to be
+        # the Follow-up window that popped up after a run.
+        self.composer = T.ChatComposer()
+        self.composer.submitted.connect(self.chat_submitted.emit)
+        root.addWidget(self.composer)
+
         # One clock for the whole run, so the header's elapsed figure moves
         # even while no single stage is on the clock.
         self._run_ticker = QTimer(self)
@@ -1178,6 +1193,7 @@ class OutputPanel(QWidget):
 
         self.set_finished(False)
         self._refresh_header()
+        self._sync_composer()
 
     # ── panel chrome ────────────────────────────────────────────────────────
     def _on_skip(self):
@@ -1206,6 +1222,7 @@ class OutputPanel(QWidget):
         self.skip_btn.setVisible(running)
         # No websites to fall back to when AI runs through Prism's server.
         self.fallback_btn.setVisible(running and not ai_server.active())
+        self._sync_composer()
         if running:
             self._finished = False
             self.stop_btn.setEnabled(True)
@@ -1268,10 +1285,20 @@ class OutputPanel(QWidget):
         """The sentence the user typed, on the screen doing the work."""
         self.header.set_task((text or "").strip())
 
+    def set_followups_from_thread(self):
+        """After a stored conversation is shown: its later messages sit under
+        the task title, as they do while it runs."""
+        users = [i.get("text", "") for i in self._items if i.get("kind") == "user"]
+        self._followup_lines = [u for u in users[1:] if u]
+        self.header.set_followups(self._followup_lines)
+
     def add_followup(self, text: str):
         """A follow-up was asked: show it beneath the task, which keeps its
         own title."""
-        self._followup_lines.append((text or "").strip())
+        text = (text or "").strip()
+        if self._followup_lines and self._followup_lines[-1] == text:
+            return                       # the composer already said it
+        self._followup_lines.append(text)
         self.header.set_followups(self._followup_lines)
 
     def clear(self):
@@ -1279,6 +1306,14 @@ class OutputPanel(QWidget):
             self._cards[stage].hide()   # before setParent(None): avoids ghost-window flash
             self._cards[stage].setParent(None)
             self._cards[stage].deleteLater()
+        for w in self._extras:
+            w.hide()
+            w.setParent(None)
+            w.deleteLater()
+        self._extras = []
+        self._items = []
+        self._turn_item = None
+        self._turn_keys = []
         self._cards = {}
         self._order = []
         self._live = ""
@@ -1298,7 +1333,8 @@ class OutputPanel(QWidget):
 
     def set_plan(self, steps, followup: bool = False,
                  prior_responses: dict = None, prior_links: dict = None,
-                 prior_agents: dict = None, titles: dict = None):
+                 prior_agents: dict = None, titles: dict = None,
+                 keep_thread: bool = False):
         """Seed the timeline with every step the run is about to take.
 
         `steps` is what AgentsPanel.selected_agents() returns — {stage: tool} —
@@ -1308,7 +1344,8 @@ class OutputPanel(QWidget):
         the person can continue seeing the already work done section.
         """
         if not followup:
-            self.clear()
+            if not keep_thread:
+                self.clear()
         else:
             # If workbench was clean (e.g. follow-up from History), populate
             # the completed cards from prior_responses so already work done is shown.
@@ -1349,7 +1386,8 @@ class OutputPanel(QWidget):
             # Say which run each card belongs to: the cards already there are
             # the first run (or the one before), the new ones are this
             # follow-up, and a repeated step gets its own name.
-            n = len(self._followup_lines) + 1
+            users = sum(1 for i in self._items if i.get("kind") == "user")
+            n = users - 1 if users >= 2 else len(self._followup_lines) + 1
             for key in self._order:
                 card = self._cards[key]
                 if key in before:
@@ -1363,9 +1401,180 @@ class OutputPanel(QWidget):
         for i, key in enumerate(self._order):
             if key in self._cards:
                 self._cards[key].number.setText(str(i + 1))
-                self._cards[key].set_last(i == len(self._order) - 1)
+        self._relink()
 
         self._refresh_header()
+
+    # ── the conversation ────────────────────────────────────────────────────
+    def _insert(self, widget: QWidget):
+        """Add to the thread, above the empty state and the trailing stretch,
+        so the column always reads top-down."""
+        self.empty.setVisible(False)
+        self.cards_box.insertWidget(max(0, self.cards_box.count() - 2), widget)
+        self._sync_tail()
+        QTimer.singleShot(0, self._to_bottom)
+
+    def _to_bottom(self):
+        bar = self.scroll.verticalScrollBar()
+        bar.setValue(bar.maximum())
+
+    def _relink(self):
+        """A step's timeline line continues only into the step directly after
+        it; a message between two runs breaks the line."""
+        widgets = [self.cards_box.itemAt(i).widget()
+                   for i in range(self.cards_box.count())]
+        for i, w in enumerate(widgets):
+            if isinstance(w, StageCard):
+                nxt = widgets[i + 1] if i + 1 < len(widgets) else None
+                w.set_last(not isinstance(nxt, StageCard))
+
+    def _open_turn(self, label: str):
+        self._freeze_turn()
+        self._turn_keys = []
+        self._turn_item = {"kind": "steps", "label": label, "steps": []}
+        self._items.append(self._turn_item)
+
+    def _snapshot(self, key: str) -> dict:
+        card = self._cards[key]
+        return {"stage": card.stage, "agent": card.agent, "title": card._title,
+                "state": card.state(), "seconds": card.duration,
+                "note": card.note.text(), "text": card._raw[:chatlog.MAX_TEXT]}
+
+    def _freeze_turn(self):
+        if self._turn_item is not None:
+            self._turn_item["steps"] = [self._snapshot(k) for k in self._turn_keys
+                                        if k in self._cards]
+
+    def begin_turn(self, text: str, files=None, label: str = None):
+        """Someone wrote a message: it goes on the thread, and the steps that
+        answer it are grouped under it."""
+        text = (text or "").strip()
+        if label is None:
+            users = sum(1 for i in self._items if i.get("kind") == "user")
+            label = i18n.t("Follow-up {n}").format(n=users) if users and text else ""
+        if text:
+            row, _bubble = T.user_row(text, files)
+            self._items.append({"kind": "user", "text": text,
+                                "files": [os.path.basename(str(f)) for f in (files or [])]})
+            self._extras.append(row)
+            self._insert(row)
+        self._open_turn(label)
+
+    def add_answer(self, text: str, by: str = "", stage: str = ""):
+        if not (text or "").strip():
+            return None
+        self._freeze_turn()
+        row, bubble = T.answer_row(text, by)
+        self._items.append({"kind": "answer", "text": text, "by": by, "stage": stage})
+        self._extras.append(row)
+        self._insert(row)
+        return bubble
+
+    def add_files(self, file_paths: list):
+        file_paths = [p for p in (file_paths or []) if p]
+        if not file_paths:
+            return None
+        from widgets.file_card import FileCards
+        cards = FileCards(file_paths)
+        self._items.append({"kind": "files", "paths": list(file_paths)})
+        self._extras.append(cards)
+        self._insert(cards)
+        return cards
+
+    def add_note(self, text: str, bad: bool = False):
+        if not text:
+            return
+        note = T.NoteLine(text, bad)
+        self._items.append({"kind": "note", "text": text, "bad": bad})
+        self._extras.append(note)
+        self._insert(note)
+
+    def thread_items(self) -> list[dict]:
+        """The conversation so far, in the shape the run record stores."""
+        self._freeze_turn()
+        return [dict(i) for i in self._items if i is not None
+                and not (i.get("kind") == "steps" and not i.get("steps"))]
+
+    def has_thread(self) -> bool:
+        return any(i.get("kind") in ("user", "answer") for i in self._items)
+
+    def load_thread(self, items: list):
+        """Show a stored conversation: messages as they were, steps as folded
+        cards (so an old run opens as a transcript that can be continued)."""
+        self.clear()
+        for item in items or []:
+            kind = item.get("kind")
+            if kind == "user":
+                row, _b = T.user_row(item.get("text", ""), item.get("files"))
+                self._items.append(dict(item))
+                self._extras.append(row)
+                self._insert(row)
+            elif kind == "steps":
+                self._open_turn(item.get("label", ""))
+                for step in item.get("steps") or []:
+                    self._restore_card(step, item.get("label", ""))
+                self._relink()
+            elif kind == "answer":
+                self.add_answer(item.get("text", ""), item.get("by", ""),
+                                item.get("stage", ""))
+            elif kind == "files":
+                self.add_files([p for p in item.get("paths") or []])
+            elif kind == "note":
+                self.add_note(item.get("text", ""), bool(item.get("bad")))
+        self._freeze_turn()
+        self._turn_item = None
+        self._finished = True
+        self._refresh_header()
+        self._sync_composer()
+
+    def _restore_card(self, step: dict, label: str):
+        stage = step.get("stage") or "content"
+        key, n = stage, 1
+        while key in self._cards:
+            n += 1
+            key = f"{stage}_prior_{n}"
+        card = StageCard(stage, step.get("agent", ""), index=len(self._order) + 1)
+        card.edit_reel.connect(self.edit_reel.emit)
+        card.state_changed.connect(self._on_card_state)
+        self._cards[key] = card
+        self._order.append(key)
+        self._turn_keys.append(key)
+        self._insert(card)
+        if step.get("title"):
+            card.set_title(step["title"])
+        if label:
+            card.set_turn(label)
+        text, state = step.get("text", ""), step.get("state", "completed")
+        if state == "failed":
+            card.set_error(step.get("note") or text)
+        elif state in ("skipped", "cancelled"):
+            card.set_skipped(step.get("note", ""))
+        else:
+            card.set_done([text] if text else [], "")
+            if step.get("note") and not text:
+                card.set_note(step["note"])
+        if step.get("seconds"):
+            card._final = float(step["seconds"])
+            card._paint_status()
+            card._paint_facts()
+        card.set_collapsed(True)
+
+    def set_chat_reason(self, reason: str):
+        """Something outside this panel means a message cannot be sent now."""
+        self._chat_reason = reason or ""
+        self._sync_composer()
+
+    def _sync_composer(self):
+        if self._running:
+            why = i18n.t("Prism AI is working on this. You can write again "
+                         "when it finishes, or press Stop.")
+        elif self._chat_reason:
+            why = self._chat_reason
+        elif not self.has_thread():
+            why = i18n.t("Start a task first: there is nothing to continue yet.")
+        else:
+            why = ""
+        self.composer.set_blocked(why)
 
     def _sync_tail(self):
         """Hand the leftover height to the empty state, or to the tail spacer.
@@ -1398,13 +1607,11 @@ class OutputPanel(QWidget):
             lambda step, key=stage: self._focus_neighbour(key, step))
         self._cards[stage] = card
         self._order.append(stage)
-        # Before the trailing stretch, and before the empty state, so the
-        # timeline always reads top-down.
-        self.cards_box.insertWidget(len(self._order) - 1, card)
-        # Un-tail the one before it, or the connector stops at the
-        # second-to-last dot and the chain looks broken.
-        for i, key in enumerate(self._order):
-            self._cards[key].set_last(i == len(self._order) - 1)
+        if self._turn_item is None:
+            self._open_turn("")          # a run that never said who asked
+        self._turn_keys.append(stage)
+        self._insert(card)
+        self._relink()
         self._sync_tail()
         return card
 
@@ -1607,6 +1814,8 @@ class OutputPanel(QWidget):
             detail = f"{detail} · {short_duration(span)}" if detail \
                 else short_duration(span)
         self.header.status.set_state(state, detail)
+        self.header.kicker.setText(
+            i18n.t("RUNNING NOW") if self._running else i18n.t("CONVERSATION"))
 
         position = tally["finished"]
         if self._live in self._cards:

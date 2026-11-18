@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 
 import app_meta
 import awake
+import chatlog
 import core_bridge as CB
 import docexport
 import email_config
@@ -400,6 +401,7 @@ class MainWindow(QMainWindow):
         self._queue_stopped = False               # a licence refusal kills the rest
         self._auto_run = False                    # set once Start the work is pressed
         self._current_run_file = None
+        self._turn_begun = False          # the composer already put this message on the thread
         self._is_followup_run = False
         self._followup_session = None
         self._followup_text = ""
@@ -1391,6 +1393,7 @@ class MainWindow(QMainWindow):
         self.output_panel.skip_requested.connect(self._skip_step)
         self.output_panel.fallback_requested.connect(self._use_fallback)
         self.output_panel.edit_reel.connect(self._edit_reel_layout)
+        self.output_panel.chat_submitted.connect(self._on_chat_submitted)
         self.artifacts_panel.edit_reel.connect(self._edit_reel_layout)
         self.reel_edits_saved.connect(self._on_reel_edits_saved)
         self.reel_edits_rendered.connect(self._on_reel_edits_rendered)
@@ -2049,6 +2052,15 @@ class MainWindow(QMainWindow):
         """
         if self._is_step_run(path):
             self._open_step_dialog(run=path)
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                record = json.load(f) or {}
+        except (OSError, ValueError):
+            record = {}
+        if (isinstance(record, dict) and not self._run_in_flight()
+                and (record.get("thread") or record.get("responses"))):
+            self._open_thread(path, record)
             return
         dialog = self._history_dialog()
         runs = getattr(dialog, "runs", None)
@@ -2882,6 +2894,10 @@ class MainWindow(QMainWindow):
         cfg_for_run = dict(self.cfg)
         cfg_for_run["agents"] = run_agents
         self.output_panel.clear()
+        self._turn_begun = False
+        self.output_panel.begin_turn(
+            getattr(self, "_last_query", ""),
+            [a.get("name", "") for a in (self.attachments or [])])
         # Seed the timeline with the whole plan before anything runs, rather
         # than growing it a card at a time. Three things depend on it: the
         # steps still to come stay on screen instead of the run looking like
@@ -2889,7 +2905,7 @@ class MainWindow(QMainWindow):
         # and "Queued" becomes reachable at all — the state was written long
         # ago and could never be seen, because a card was only ever built at
         # the moment its stage started.
-        self.output_panel.set_plan(run_agents)
+        self.output_panel.set_plan(run_agents, keep_thread=True)
         self.output_panel.set_task(getattr(self, "_last_query", ""))
         self._stage_agents = {}
         self._stage_results = []
@@ -3433,6 +3449,8 @@ class MainWindow(QMainWindow):
                     "error": error,
                 })
                 record["followups"] = followups
+                if self.output_panel.has_thread():
+                    record["thread"] = chatlog.for_record(self.output_panel.thread_items())
                 rec_resp = record.setdefault("responses", {})
                 rec_resp.update(responses or {})
                 rec_links = record.setdefault("links", {})
@@ -3479,6 +3497,8 @@ class MainWindow(QMainWindow):
                            or CB.config.current_run_title() or "")
         if error:
             record["error"] = error
+        if self.output_panel.has_thread():
+            record["thread"] = chatlog.for_record(self.output_panel.thread_items())
         # Stamped with who ran it, so a run file is self-describing even if it
         # is later copied out of its folder — the manager's History shows a
         # name against the work rather than inferring one from the path.
@@ -3532,6 +3552,11 @@ class MainWindow(QMainWindow):
         covering all of them."""
         self._auto_run = False
         self.input_panel.clear_queue()
+        if getattr(self, "_chat_run", False):
+            # A message in the conversation, not a task: its answer is on the
+            # thread, so there is no recap window on top of it.
+            self._chat_run = False
+            return
         groups = [g for g in self._task_runs if g["stages"] or g["error"]]
         if not groups:
             if not self._queue_stopped:
@@ -3539,9 +3564,11 @@ class MainWindow(QMainWindow):
                     self, "Finished",
                     "No step produced output — check the results above.")
             return
-        # One task behaves exactly as before: a flat list, no task headings.
+        # One task: its answer and files are already on the conversation, so
+        # no recap window is put on top of them. Several queued tasks share
+        # the one page, so those still get the recap.
         if len(groups) == 1:
-            CompletionDialog(groups[0]["stages"], self).exec()
+            return
         else:
             CompletionDialog(groups[0]["stages"], self, task_groups=groups).exec()
 
@@ -3558,8 +3585,10 @@ class MainWindow(QMainWindow):
         self.output_panel.set_finished(True)
         self.output_panel.set_running(False)
         licensing.report_usage(getattr(self, "_run_id", ""))
+        self._add_turn_result(responses, links, stopped)
         self._save_run(responses, links)
         self._record_task_run()
+        self._prime_followup_session(responses, links)
         # Clear the input bar's attachment chips so they don't carry forward to
         # a new task or appear while the user browses other modules.  The actual
         # list (self.attachments) is kept: _offer_followup picks it up, and
@@ -3593,7 +3622,38 @@ class MainWindow(QMainWindow):
         else:
             self.statusBar().showMessage("All done — saved to History.", 6000)
         self._finish_queue()
-        self._offer_followup(responses, links)
+        # The follow-up used to be a window that popped up here. It is the
+        # composer under the conversation now (session primed above).
+        self.output_panel.set_chat_reason("")
+
+    def _ensure_turn(self):
+        """A follow-up run puts its message on the thread once: the composer
+        already did, anything else (a dialog bridge) does it here."""
+        if not self._turn_begun:
+            self.output_panel.begin_turn(getattr(self, "_followup_text", ""))
+        self._turn_begun = False
+
+    def _add_turn_result(self, responses: dict, links: dict, stopped: bool = False):
+        """The run's answer and its files, as messages on the thread."""
+        stage, text = chatlog.latest_answer(responses)
+        if text:
+            by = ai_server.display_agent(self._stage_agents.get(stage, ""), stage)
+            self.output_panel.add_answer(text, by, stage)
+        made, seen = [], set()
+        for r in list(self._stage_results):
+            for p in list(r.get("files") or []) + [r.get("url") or ""]:
+                if p and p not in seen and paths.is_local_result(p) and os.path.isfile(p):
+                    seen.add(p)
+                    made.append(p)
+        self.output_panel.add_files(made)
+        if stopped:
+            self.output_panel.add_note(i18n.t(
+                "Stopped. Everything finished so far is kept; write again to carry on."))
+
+    def _add_chat_reply(self, text: str, files: list, by: str = "", stage: str = ""):
+        """A turn that did not run a pipeline (a format change, a reply)."""
+        self.output_panel.add_answer(text, by, stage)
+        self.output_panel.add_files(files)
 
     # ── post-completion follow-up ─────────────────────────────────────────
     def _offer_followup_for_dialog(self, query: str, responses: dict,
@@ -3641,8 +3701,27 @@ class MainWindow(QMainWindow):
         Skipped silently when there is nothing to refine or no Groq key to
         route with — the follow-up is a bonus, never a blocker.
         """
-        if not responses or not self.cfg.get("api_key"):
+        primed = self._prime_followup_session(responses, links, artifacts_dir)
+        if primed is None:
             return
+        responses, links, artifact_paths = primed
+        from dialogs.followup_dialog import FollowupDialog
+        dlg = FollowupDialog(self._result_summary(responses), self,
+                             artifacts=artifact_paths)
+        dlg.exec()
+        if not dlg.submitted():
+            return
+        self._submit_followup(dlg.followup_text(), list(dlg.file_paths()),
+                              artifact_paths, responses, links)
+
+    def _prime_followup_session(self, responses: dict, links: dict = None,
+                                artifacts_dir: str = ""):
+        """What a follow-up continues from: the task's session (every step's
+        latest output, tab and tool), and the files this run made. Returns
+        (responses, links, artifact_paths), or None when there is nothing to
+        refine or no key to route with."""
+        if not responses or not self.cfg.get("api_key"):
+            return None
         # One session per task, merged across follow-ups. A follow-up runs a
         # single stage, and its completion used to hand THAT stage's
         # responses and links here alone — so the second follow-up knew
@@ -3691,18 +3770,18 @@ class MainWindow(QMainWindow):
                 artifact_paths = filter_active_artifacts(all_art)
         except Exception:                               # noqa: BLE001
             pass
-        from dialogs.followup_dialog import FollowupDialog
-        dlg = FollowupDialog(self._result_summary(responses), self,
-                             artifacts=artifact_paths)
-        dlg.exec()
-        if not dlg.submitted():
-            return
-        self._followup_text = dlg.followup_text()
+        return responses, links, artifact_paths
+
+    def _submit_followup(self, text: str, file_paths: list, artifact_paths: list,
+                         responses: dict, links: dict):
+        """Carry out one follow-up: the words, the files that came with them,
+        and the files this task already made."""
+        self._followup_text = text
         self._followup_responses = responses
         # Attachments = files the person just added + the active artifacts this task
         # produced, so a follow-up step builds on the latest real deliverable.
         atts = []
-        for p in list(dlg.file_paths()) + artifact_paths:
+        for p in list(file_paths) + artifact_paths:
             if p and p not in {a.get("path") for a in atts}:
                 try:
                     atts.append(CB.files.attach(p))
@@ -3742,7 +3821,7 @@ class MainWindow(QMainWindow):
         self._workers.append(worker)
         worker.start()
 
-    def _followup_as_local_file(self, responses: dict) -> bool:
+    def _followup_as_local_file(self, responses: dict, inline: bool = False) -> bool:
         """Server mode: "give me this as a PDF/Word/Excel" changes only the
         FORMAT. Write the answer Prism already has to a real file here, with no
         AI call and no repeated step. True when it did."""
@@ -3773,6 +3852,14 @@ class MainWindow(QMainWindow):
                    "answer, nothing was asked again.").format(
                 name=os.path.basename(path)), 12000)
         self._last_local_file = path
+        if inline:
+            # In the conversation: the file is a message, not a pop-up.
+            self._add_chat_reply(
+                i18n.t("Here is {name}. I made it on this computer from my "
+                       "earlier answer, so nothing was asked again.").format(
+                    name=os.path.basename(path)),
+                [path], ai_server.PRISM_AI)
+            return True
         box = QMessageBox(self)
         box.setWindowTitle(i18n.t("Your file is ready"))
         box.setText(i18n.t("{name} is saved in this task's folder.").format(
@@ -3925,6 +4012,145 @@ class MainWindow(QMainWindow):
         return (sess.get("query") or getattr(self, "_last_query", "")
                 or self._followup_text)
 
+    # ── the conversation: a message from the composer ─────────────────────
+    def _followup_responses_ready(self) -> bool:
+        sess = getattr(self, "_followup_session", None) or {}
+        return bool(sess.get("responses"))
+
+    def _on_chat_submitted(self, text: str, file_paths: list):
+        """The person wrote to Prism AI in the thread.
+
+        A change of format ("as a PDF") is done here, from the answer Prism
+        already has, with no AI call. A request for a new file, or any message
+        when AI runs the old direct way, goes through the existing follow-up
+        pipeline (one extra step). Everything else continues the conversation:
+        the thread so far is replayed to the model, capped, with whatever was
+        attached."""
+        text = (text or "").strip()
+        if not text or self._run_in_flight():
+            return
+        if not self._followup_responses_ready():
+            self.output_panel.set_chat_reason(i18n.t(
+                "There is no answer to continue yet."))
+            return
+        sess = self._followup_session
+        responses, links = dict(sess["responses"]), dict(sess.get("links") or {})
+        turns = chatlog.turns_for_model(self.output_panel.thread_items())
+        self._turn_begun = True
+        self._chat_run = True
+        self.output_panel.begin_turn(text, file_paths)
+        self.output_panel.add_followup(text)
+        self._followup_text = text
+        self._followup_responses = responses
+        self._followup_links = links
+        if ai_server.active() and docexport.is_pure_format_request(text):
+            if self._followup_as_local_file(responses, inline=True):
+                self._chat_run = False
+                self._turn_begun = False
+                self._save_thread(text)
+                return
+        if not ai_server.active() or CB.contract.wants_file(text):
+            primed = self._prime_followup_session(responses, links)
+            if primed is None:
+                self._chat_run = False
+                return
+            responses, links, artifacts = primed
+            self._submit_followup(text, list(file_paths), artifacts, responses, links)
+            return
+        self._read_files_then(file_paths, lambda atts: self._start_chat_reply(
+            text, turns, atts))
+
+    def _read_files_then(self, file_paths: list, then):
+        """Read what was attached (a big PDF or sheet takes seconds) off the
+        window's thread, then call `then(attachments)`."""
+        paths_left = [p for p in file_paths if p]
+        got: list = []
+        if not paths_left:
+            then([])
+            return
+
+        def settle(records):
+            got.extend(records or [])
+            pending[0] -= 1
+            if pending[0] == 0:
+                then(got)
+
+        pending = [len(paths_left)]
+        for p in paths_left:
+            worker = AttachWorker(p)
+            worker.done.connect(lambda _p, recs: settle(recs))
+            worker.failed.connect(lambda _e: settle([]))
+            self._workers.append(worker)
+            worker.start()
+
+    def _start_chat_reply(self, text: str, turns: list, atts: list):
+        """One reply on the same conversation: history replayed (capped by the
+        engine), attached pictures and PDFs sent as files."""
+        prompt = CB.server_session.replay_prompt(turns, text)
+        agent = self._resolve_stage_agent("content")
+        self._followup_attachments = atts
+        self._start_followup_run(
+            ["followup"], atts, plan_agents={"followup": agent},
+            prompts={"followup": prompt},
+            titles={"followup": i18n.t("Reply")})
+
+    def _save_thread(self, query: str = ""):
+        """A turn that ran no pipeline still belongs to the conversation: write
+        the thread (and a follow-up entry, so History counts it) into the same
+        run record."""
+        import time
+        path = getattr(self, "_current_run_file", None)
+        if not path or not os.path.isfile(path):
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                record = json.load(f) or {}
+            record["thread"] = chatlog.for_record(self.output_panel.thread_items())
+            if query:
+                fus = list(record.get("followups") or [])
+                fus.append({"index": len(fus) + 1, "query": query,
+                            "timestamp": time.time(), "responses": {},
+                            "links": {}, "agents": {}, "durations": {}, "error": ""})
+                record["followups"] = fus
+            record["updated_at"] = time.time()
+            CB.config.save_run(record, path=path)
+        except Exception as e:                              # noqa: BLE001
+            self.statusBar().showMessage(f"Couldn't save the conversation: {e}", 8000)
+
+    def _open_thread(self, path: str, record: dict):
+        """History opened a task: show its conversation (stored, or built from
+        an older record), ready to carry on."""
+        responses = {k: v for k, v in (record.get("responses") or {}).items() if v}
+        agents = {k: v for k, v in (record.get("agents") or {}).items() if v}
+        self._current_run_file = path
+        self._last_query = record.get("query", "")
+        self._stage_agents = dict(agents)
+        self.routing = {}
+        self._stage_results = []
+        self._run_shortfall = []
+        self._task_runs = []
+        self._is_followup_run = True
+        self._followup_session = {
+            "query": record.get("query", ""), "title": record.get("title", ""),
+            "run_file": path, "responses": responses,
+            "links": record.get("links") or {}, "agents": agents,
+            "artifacts_dir": record.get("artifacts") or ""}
+        self._followup_responses = responses
+        self._followup_links = dict(record.get("links") or {})
+        items = chatlog.thread_of(record)
+        self.output_panel.load_thread(items)
+        self.output_panel.set_task(record.get("query") or record.get("title") or "")
+        self.output_panel.set_followups_from_thread()
+        self.output_panel.set_chat_reason(
+            "" if responses else i18n.t(
+                "This task did not produce an answer, so there is nothing to "
+                "continue. Start it again from the steps."))
+        self._show_screen("workbench")
+        self._set_stage("run")
+        self._run_finished = True
+        self.input_panel.set_state("done")
+        self.work_stack.setCurrentIndex(RUNNING)
+
     def _followup_prompt(self, stage: str, responses: dict, first: bool) -> str:
         if stage == "audio":
             # Voice-over / audio agents must receive ONLY the spoken words/script,
@@ -3988,7 +4214,8 @@ class MainWindow(QMainWindow):
             f"{att_note}{chain}")
 
     def _start_followup_run(self, stages: list, attachments: list,
-                            plan_agents: dict = None, then=None):
+                            plan_agents: dict = None, then=None,
+                            prompts: dict = None, titles: dict = None):
         """Run the follow-up's steps — one, or a relay of several — reusing
         the run surface, so a follow-up shows and finishes like any other
         run (and can itself offer another follow-up when it completes).
@@ -4009,7 +4236,9 @@ class MainWindow(QMainWindow):
                       for s in stages}
         for s, a in run_agents.items():
             self._stage_agents[s] = a
-        custom = [(s, run_agents[s], [self._followup_prompt(s, responses, i == 0)])
+        custom = [(s, run_agents[s],
+                   [(prompts or {}).get(s)
+                    or self._followup_prompt(s, responses, i == 0)])
                   for i, s in enumerate(stages)]
         resume = {s: links[s] for s in stages if links.get(s)}
         cfg_for_run = dict(self.cfg)
@@ -4022,12 +4251,13 @@ class MainWindow(QMainWindow):
         # inner stack shows RUNNING below.
         self._show_screen("workbench")
         self._set_stage("run")
+        self._ensure_turn()
         self.output_panel.set_plan(
             plan_agents or run_agents, followup=True,
             prior_responses=responses, prior_links=links,
             prior_agents=self._stage_agents,
-            titles={s: docexport.followup_title(s, self._followup_text)
-                    for s in (plan_agents or run_agents)})
+            titles=titles or {s: docexport.followup_title(s, self._followup_text)
+                              for s in (plan_agents or run_agents)})
         # The task keeps its own title; what was asked since sits beneath it.
         self.output_panel.set_task(self._followup_task_title())
         self.output_panel.add_followup(self._followup_text)
@@ -4172,6 +4402,7 @@ class MainWindow(QMainWindow):
         self._show_screen("workbench")
         self._set_stage("run")
         if fresh_panel:
+            self._ensure_turn()
             responses = getattr(self, "_followup_responses", {}) or {}
             links = getattr(self, "_followup_links", {}) or {}
             self.output_panel.set_plan(
@@ -4270,6 +4501,11 @@ class MainWindow(QMainWindow):
         licensing.report_usage(getattr(self, "_run_id", ""))
         # Kept too — a run that broke halfway is exactly the one you want to
         # go back and read later.
+        self.output_panel.add_note(error, bad=True)
+        if not self._followup_responses_ready():
+            self.output_panel.set_chat_reason(i18n.t(
+                "This task did not produce an answer yet, so there is "
+                "nothing to continue. Go back to the steps to try again."))
         self._save_run(error=error)
         self._record_task_run(failed=error)
 
