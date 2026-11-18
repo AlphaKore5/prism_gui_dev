@@ -33,6 +33,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import sample_jobs  # noqa: E402
 from test_gates import GateTest  # noqa: E402
 from widgets import send_to_ai
+from dialogs.send_consent import SendConsentDialog
 from addons.step import dialog as SD  # noqa: E402
 from addons.step import sessions as SES  # noqa: E402
 from addons.step.dialog import StepDialog  # noqa: E402
@@ -568,8 +569,8 @@ class ThePictureLeavesOnlyWithConsentAskedOnce(unittest.TestCase):
         shown = []
         def spy(self_):
             shown.append(" ".join(l.text() for l in self_.findChildren(SD.QLabel)))
-            return send_to_ai.SendConsentDialog.Rejected
-        with mock.patch.object(send_to_ai.SendConsentDialog, "exec", spy):
+            return SendConsentDialog.Rejected
+        with mock.patch.object(SendConsentDialog, "exec", spy):
             dlg._attachments_for(m)
         text = shown[0]
         self.assertIn("Prism AI", text)
@@ -581,8 +582,8 @@ class ThePictureLeavesOnlyWithConsentAskedOnce(unittest.TestCase):
         dlg = _dialog()
         dlg._vision_consent = None
         m = _fake_measured(dlg)
-        with mock.patch.object(send_to_ai.SendConsentDialog, "exec",
-                               return_value=send_to_ai.SendConsentDialog.Accepted):
+        with mock.patch.object(SendConsentDialog, "exec",
+                               return_value=SendConsentDialog.Accepted):
             attachments = dlg._attachments_for(m)
         self.assertEqual(len(attachments), 1)
         self.assertEqual(attachments[0]["kind"], "image")
@@ -592,8 +593,8 @@ class ThePictureLeavesOnlyWithConsentAskedOnce(unittest.TestCase):
         dlg = _dialog()
         dlg._vision_consent = None
         m = _fake_measured(dlg)
-        with mock.patch.object(send_to_ai.SendConsentDialog, "exec",
-                               return_value=send_to_ai.SendConsentDialog.Rejected) as q:
+        with mock.patch.object(SendConsentDialog, "exec",
+                               return_value=SendConsentDialog.Rejected) as q:
             first = dlg._attachments_for(m)
             second = dlg._attachments_for(m)
         self.assertEqual(first, [])
@@ -607,7 +608,7 @@ class ThePictureLeavesOnlyWithConsentAskedOnce(unittest.TestCase):
         dlg._vision_consent = None
         m = _fake_measured(dlg)
         m["drawn"] = {}
-        with mock.patch.object(send_to_ai.SendConsentDialog, "exec") as q:
+        with mock.patch.object(SendConsentDialog, "exec") as q:
             attachments = dlg._attachments_for(m)
         self.assertEqual(attachments, [])
         q.assert_not_called()

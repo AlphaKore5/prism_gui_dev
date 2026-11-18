@@ -18,7 +18,7 @@ _app = QApplication.instance() or QApplication([])
 from widgets import send_to_ai as S                               # noqa: E402
 import core_bridge as CB                                          # noqa: E402
 
-D = S.SendConsentDialog
+from dialogs.send_consent import SendConsentDialog as D
 
 
 def _png():

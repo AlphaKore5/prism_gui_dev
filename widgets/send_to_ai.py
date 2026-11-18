@@ -9,13 +9,12 @@ import os
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap
-from PySide6.QtWidgets import (QCheckBox, QFrame, QHBoxLayout, QLabel,
+from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel,
                                QProgressBar, QVBoxLayout, QWidget)
 
 import core_bridge as CB
 import i18n
 import theme
-from dialogs.base import PrismDialog
 
 CONSENT_KEY = "ai_send_consent"          # config: True = "Don't ask again"
 _session = {"ok": False}                 # said yes once in this run of the app
@@ -64,30 +63,12 @@ class _Preview(QWidget):
         row.addLayout(col, 1)
 
 
-class SendConsentDialog(PrismDialog):
-    """Asked once: this file leaves your computer for Prism AI."""
-
-    def __init__(self, path: str, what: str, parent=None):
-        super().__init__(i18n.t("Send to Prism AI?"),
-                         i18n.t("This {what} will be sent to Prism AI so it can read it. "
-                                "Nothing else leaves your computer.").format(what=what),
-                         icon="send", parent=parent, closable=False)
-        self.preview = _Preview(path)
-        self.body.addWidget(self.preview)
-        self.remember = QCheckBox(i18n.t("Don't ask again"))
-        self.body.addWidget(self.remember)
-        self.cancel_btn = self.button(i18n.t("Cancel"), "secondary", on_click=self.reject)
-        self.send_btn = self.button(i18n.t("Send to Prism AI"), "primary",
-                                    on_click=self.accept)
-        self.footer.add_utility(self.cancel_btn)
-        self.footer.set_primary(self.send_btn)
-
-
 def ask_consent(parent, cfg: dict, path: str, what: str = "drawing") -> bool:
     """True when this file may be sent. Asks once; 'Don't ask again' is saved to
     the user's config. Cancel sends nothing and is not remembered."""
     if not needs_question(cfg):
         return True
+    from dialogs.send_consent import SendConsentDialog  # a window to open: imported where it opens
     dlg = SendConsentDialog(path, what, parent)
     if dlg.exec() != SendConsentDialog.Accepted:
         return False
