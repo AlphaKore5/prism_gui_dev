@@ -440,8 +440,7 @@ def chromium_install_command() -> tuple[list, dict]:
 def launch_check() -> tuple[bool, str]:
     """Start the browser once and paint a frame (a worker runs this)."""
     import core_bridge as CB
-    from core import browser
-    return browser.selftest()
+    return CB.browser.selftest()
 
 
 def run_command(argv, env, on_progress, cancelled, on_line=None) -> int:

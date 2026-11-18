@@ -20,9 +20,10 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from PySide6.QtCore import QThread, Signal
+from PySide6.QtCore import Signal
 
 import core_bridge as CB
+from workers import _Worker
 
 CONFIG_KEY = "dwg_converter_path"                      # the .exe the person chose
 PAGE_URL = "https://www.opendesign.com/guestfiles/oda_file_converter"
@@ -104,7 +105,7 @@ class _OnlyOda(urllib.request.HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
-class DownloadWorker(QThread):
+class DownloadWorker(_Worker):
     """Download ODA's installer to a fresh temp folder, off the UI thread."""
     progress = Signal(int, int)                         # bytes so far, total (0 = unknown)
     done = Signal(str)                                  # path of the saved installer
