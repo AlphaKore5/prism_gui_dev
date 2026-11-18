@@ -33,7 +33,7 @@ GET_URL = "https://www.opendesign.com/guestfiles/get?filename={name}"
 ALLOWED_HOSTS = ("www.opendesign.com", "oda-qt.s3.eu-central-1.amazonaws.com")
 # Owner switch: False hides "Install it from Prism" everywhere (ODA's terms have not been
 # cleared with ODA in writing; see the stage report).
-INSTALL_FROM_PRISM = True
+INSTALL_FROM_PRISM = False   # OFF until ODA confirms in writing that Prism may fetch their installer (ui-port/stages/25)
 # The words the engine's "no converter" message starts with (core.boq.NO_CONVERTER_TEXT).
 MARKER = "needs a free helper program to open a DWG"
 
