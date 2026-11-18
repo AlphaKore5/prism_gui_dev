@@ -39,6 +39,19 @@ class PlatformTagOnlyCoversMachinesWeActuallyShipFor(unittest.TestCase):
              mock.patch.object(boq.platform, "machine", return_value="AMD64"):
             self.assertEqual(boq._dwg2dxf_platform_tag(), "win64")
 
+    def test_windows_on_arm_uses_the_x64_build(self):
+        # Windows 11 on ARM runs x64 programs, and LibreDWG ships no ARM build; before this the
+        # machine fell through to "no converter found" although a working copy was bundled.
+        with mock.patch.object(boq.platform, "system", return_value="Windows"), \
+             mock.patch.object(boq.platform, "machine", return_value="ARM64"):
+            self.assertEqual(boq._dwg2dxf_platform_tag(), "win64")
+
+    def test_a_failed_setup_is_reported_not_swallowed(self):
+        with mock.patch.object(boq.platform, "system", return_value="Linux"), \
+             mock.patch.object(boq.platform, "machine", return_value="x86_64"):
+            boq._ensure_bundled_dwg2dxf()
+            self.assertIn("no built-in converter", boq.BUNDLED_PROBLEM)
+
     def test_intel_mac_has_no_bundled_copy(self):
         # No official LibreDWG macOS binary exists for Intel at all -- see
         # the vendor README. Must fall through to PATH / a manual install,

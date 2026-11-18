@@ -41,6 +41,10 @@ class _Env(unittest.TestCase):
                        (boq.ENV_CONVERTER, "PROGRAMFILES", "PROGRAMFILES(X86)",
                         "PROGRAMW6432", "LOCALAPPDATA", "HOME")}
         os.environ.pop(boq.ENV_CONVERTER, None)
+        # The shipped default is OFF (ODA's terms are unconfirmed); the install flow is tested as if on.
+        p = mock.patch.object(CS, "INSTALL_FROM_PRISM", True)
+        p.start()
+        self.addCleanup(p.stop)
 
     def tearDown(self):
         for k, v in self._saved.items():
@@ -48,6 +52,12 @@ class _Env(unittest.TestCase):
                 os.environ.pop(k, None)
             else:
                 os.environ[k] = v
+
+
+class ShippedDefault(unittest.TestCase):
+    def test_install_from_prism_is_off_until_oda_allows_it(self):
+        self.assertFalse(CS.INSTALL_FROM_PRISM)
+        self.assertIsNone(CS.installer_url())
 
 
 class Detection(_Env):
