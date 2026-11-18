@@ -10,6 +10,26 @@ Tests: **1966 passing** (6 skipped, 8 Sep 2026 after Round 16 landed on main —
 
 ---
 
+# 1.8.4 — Chat, plain plan screen, BOQ by industry, licence and component fixes (DEV build, 19 Nov 2026)
+
+**Dev channel only. Windows and Linux (macOS deferred). Windows on ARM runs this x64 build under emulation; an ARM CI job tests it.**
+
+- **Task page:** each task is a stored conversation with a composer (attach files, keep chatting, file requests convert locally);
+  in server mode the plan screen shows no tool pickers, tier badges or waiting times; no website names anywhere.
+- **BOQ:** "What do you have?" and "What kind of job is it?" cards (General, Electrical/ELV, HVAC), a visible pipeline with what was
+  measured, read or estimated, pictures of drawings for ELV; a plain converter dialog (choose / download page / DXF instead;
+  "Install it from Prism" is OFF until ODA's terms allow it); the "Sending to Prism AI" consent on every path a drawing leaves the
+  computer; ODA no longer inherits Prism's Qt environment (it crashed).
+- **Licence:** an unreadable licence file is waited for; Prism re-activates with the saved key before asking; a dev build can adopt
+  the licence already on the computer; the key screen says why it appeared. A task is never blocked by "Finish Setup (API key)".
+- **Components:** Settings > Components lists what Prism needs (browser, FFmpeg, microphone...) with install/repair; plain Speak
+  messages (no apt/pip text); matplotlib bundled so BOQ drawing pictures work.
+- **Windows on ARM:** the update channel names the build, not the hardware (it was `windows-ARM64`, a 404, so an ARM laptop could
+  not self-update); DWG and FFmpeg pick the x64 files on ARM.
+- **Not proven:** nothing here has run on real Windows or ARM hardware yet; the Windows and ARM CI jobs of this build are the first.
+
+---
+
 # 1.8.3 — Test fixes for 1.8.2 (DEV build, 18 Nov 2026)
 
 **Dev channel only. Windows and Linux only (macOS deferred, as in 1.8.1/1.8.2).** No feature changes. 1.8.2 went red on the Windows
