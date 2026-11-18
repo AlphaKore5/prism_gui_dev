@@ -7,6 +7,7 @@ import os
 import re
 
 import core_bridge as CB
+import i18n
 
 # Words that only ask for a different format; if nothing else is left, the
 # follow-up is a pure format request.
@@ -25,6 +26,22 @@ def requested_ext(text: str) -> str:
     else ""."""
     ext = CB.contract.wanted_ext(text or "")
     return ext if ext in (".pdf", ".docx", ".xlsx", ".csv") else ""
+
+
+_EXT_WORD = {".pdf": "PDF", ".docx": "Word file", ".xlsx": "Excel sheet",
+             ".csv": "CSV file"}
+_WRITING_STAGES = ("content", "brains", "summary", "format", "followup")
+
+
+def followup_title(stage: str, text: str) -> str:
+    """What a step of a follow-up is called on the run screen, so it is not a
+    second card named "Write it up". "" leaves the step's own name."""
+    ext = requested_ext(text)
+    if ext and stage in _WRITING_STAGES:
+        return i18n.t("Make a {fmt}").format(fmt=i18n.t(_EXT_WORD[ext]))
+    if stage in _WRITING_STAGES:
+        return i18n.t("Revise the answer")
+    return ""
 
 
 def is_pure_format_request(text: str) -> bool:

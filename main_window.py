@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 import app_meta
 import awake
 import core_bridge as CB
+import docexport
 import email_config
 import diagnostics
 import i18n
@@ -3918,6 +3919,12 @@ class MainWindow(QMainWindow):
         self._set_stage("run")
         self._start_followup_run(ordinary, atts, plan_agents=plan_agents)
 
+    def _followup_task_title(self) -> str:
+        """The task as it was first asked, for the run header of a follow-up."""
+        sess = getattr(self, "_followup_session", None) or {}
+        return (sess.get("query") or getattr(self, "_last_query", "")
+                or self._followup_text)
+
     def _followup_prompt(self, stage: str, responses: dict, first: bool) -> str:
         if stage == "audio":
             # Voice-over / audio agents must receive ONLY the spoken words/script,
@@ -4018,8 +4025,12 @@ class MainWindow(QMainWindow):
         self.output_panel.set_plan(
             plan_agents or run_agents, followup=True,
             prior_responses=responses, prior_links=links,
-            prior_agents=self._stage_agents)
-        self.output_panel.set_task(self._followup_text)
+            prior_agents=self._stage_agents,
+            titles={s: docexport.followup_title(s, self._followup_text)
+                    for s in (plan_agents or run_agents)})
+        # The task keeps its own title; what was asked since sits beneath it.
+        self.output_panel.set_task(self._followup_task_title())
+        self.output_panel.add_followup(self._followup_text)
         self.input_panel.set_state("running")
         self._run_finished = False
         self.output_panel.set_finished(False)
@@ -4166,8 +4177,11 @@ class MainWindow(QMainWindow):
             self.output_panel.set_plan(
                 run_agents, followup=True,
                 prior_responses=responses, prior_links=links,
-                prior_agents=self._stage_agents)
-            self.output_panel.set_task(self._followup_text)
+                prior_agents=self._stage_agents,
+                titles={s: docexport.followup_title(s, self._followup_text)
+                        for s in run_agents})
+            self.output_panel.set_task(self._followup_task_title())
+            self.output_panel.add_followup(self._followup_text)
             self._stage_results = []
             self._run_shortfall = []
             self._task_runs = []

@@ -353,6 +353,14 @@ class StageCard(QWidget):
         self.name.setObjectName("h6")
         head.addWidget(self.name, stretch=1)
 
+        # Which run of the conversation this step belongs to ("First run",
+        # "Follow-up 2"); empty, and hidden, while there has been only one.
+        self.turn_tag = QLabel("")
+        self.turn_tag.setStyleSheet(
+            theme.type_css("META", theme.NEUTRAL[600]) + " background: transparent;")
+        self.turn_tag.setVisible(False)
+        head.addWidget(self.turn_tag)
+
         # Provider. A tool's brand colour is allowed on 16-20px of badge and
         # nowhere larger — the app belongs to Prism.
         self._head = head
@@ -484,6 +492,23 @@ class StageCard(QWidget):
     # ── identity ────────────────────────────────────────────────────────────
     def set_index(self, index: int):
         self.number.setText(str(index) if index else "")
+
+    def set_title(self, text: str):
+        """Name this step something other than its stage's usual title (a
+        follow-up's "Make a PDF" next to the first run's "Write it up")."""
+        if not text:
+            return
+        self._title = text
+        self.name.setText(text)
+        self.setAccessibleName(text)
+        self._paint_status()
+
+    def set_turn(self, label: str):
+        self.turn_tag.setText(label or "")
+        self.turn_tag.setVisible(bool(label))
+
+    def turn(self) -> str:
+        return self.turn_tag.text()
 
     def _shown(self, agent: str) -> str:
         """The tool as a person reads it: the site's name, or in server mode
@@ -1003,6 +1028,13 @@ class RunHeader(Card):
         self.task = _Elided(i18n.t("Untitled task"))
         self.task.setObjectName("h4")
         left.addWidget(self.task)
+        # What was asked since: one line per follow-up, under the task.
+        self.followups = QLabel("")
+        self.followups.setWordWrap(True)
+        self.followups.setStyleSheet(
+            theme.type_css("SUPPORT", theme.NEUTRAL[700]) + " background: transparent;")
+        self.followups.setVisible(False)
+        left.addWidget(self.followups)
         top.addLayout(left, stretch=1)
         self.status = StatusBadge("idle", "", focusable=True)
         top.addWidget(self.status, alignment=Qt.AlignTop)
@@ -1020,6 +1052,13 @@ class RunHeader(Card):
 
     def set_task(self, text: str):
         self.task.setText(text or i18n.t("Untitled task"))
+
+    def set_followups(self, lines: list):
+        lines = [str(l).strip() for l in (lines or []) if str(l).strip()]
+        self.followups.setText("\n".join(
+            "\u21b3 " + (l if len(l) <= 110 else l[:109] + "\u2026")
+            for l in lines))
+        self.followups.setVisible(bool(lines))
 
 
 class OutputPanel(QWidget):
@@ -1040,6 +1079,7 @@ class OutputPanel(QWidget):
         self._finished = False
         self._cancelled = False
         self._problem_at = -1
+        self._followup_lines: list[str] = []
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -1228,6 +1268,12 @@ class OutputPanel(QWidget):
         """The sentence the user typed, on the screen doing the work."""
         self.header.set_task((text or "").strip())
 
+    def add_followup(self, text: str):
+        """A follow-up was asked: show it beneath the task, which keeps its
+        own title."""
+        self._followup_lines.append((text or "").strip())
+        self.header.set_followups(self._followup_lines)
+
     def clear(self):
         for stage in list(self._cards):
             self._cards[stage].hide()   # before setParent(None): avoids ghost-window flash
@@ -1240,6 +1286,8 @@ class OutputPanel(QWidget):
         self._run_final = None
         self._cancelled = False
         self._finished = False
+        self._followup_lines = []
+        self.header.set_followups([])
         self.empty.setVisible(True)
         self._sync_tail()
         # A new run starts with no problems and no place in the cycle. Leaving
@@ -1250,7 +1298,7 @@ class OutputPanel(QWidget):
 
     def set_plan(self, steps, followup: bool = False,
                  prior_responses: dict = None, prior_links: dict = None,
-                 prior_agents: dict = None):
+                 prior_agents: dict = None, titles: dict = None):
         """Seed the timeline with every step the run is about to take.
 
         `steps` is what AgentsPanel.selected_agents() returns — {stage: tool} —
@@ -1293,8 +1341,23 @@ class OutputPanel(QWidget):
                     self._order[idx] = old_key
                     old_card.set_note(i18n.t("Completed in earlier run"))
 
+        before = set(self._order)
         for stage, agent in items:
             self._ensure_card(stage, agent)
+
+        if followup:
+            # Say which run each card belongs to: the cards already there are
+            # the first run (or the one before), the new ones are this
+            # follow-up, and a repeated step gets its own name.
+            n = len(self._followup_lines) + 1
+            for key in self._order:
+                card = self._cards[key]
+                if key in before:
+                    if not card.turn():
+                        card.set_turn(i18n.t("First run"))
+                else:
+                    card.set_turn(i18n.t("Follow-up {n}").format(n=n))
+                    card.set_title((titles or {}).get(card.stage, ""))
 
         # Re-number all cards sequentially (1, 2, 3...)
         for i, key in enumerate(self._order):
