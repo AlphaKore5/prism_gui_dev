@@ -65,12 +65,19 @@ def for_takeoff(result: dict) -> dict:
             ("Labels read", f"{len(labels)} (" + ", ".join(f"{k} {v}" for k, v in sorted(by_src.items())) + ")"
              if labels else "0")]
     rows.append(("Unreadable tags", f"{len(unread)}" if unread else "none"))
+    st = result.get("settings") or {}
+    rows.append(("OCR reads", str(sum(1 for l in labels if isinstance(l, dict)
+                                      and str(l.get("source", "")).startswith("ocr")))))
+    rows.append(("Prism AI tag check", "used" if st.get("ai_tag_recheck") else "not used"))
     if result.get("vav_tags") is not None:
         rows.append(("Air boxes (VAV) tags", f"{len(result.get('vav_tags') or [])} read; "
                      "a lower bound, count the rest on the drawing"))
     headline = f"{len(runs)} duct run(s), {len(labels)} label(s) read; {len(unread)} tag(s) unreadable"
     return {"headline": headline, "rows": rows, "flagged": len(unread) + len(low),
             "warnings": warns, "source": "measured+read",
+            "ai_used": bool(st.get("ai_tag_recheck")),
+            "ocr_reads": sum(1 for l in labels if isinstance(l, dict)
+                             and str(l.get("source", "")).startswith("ocr")),
             "basis": "Duct lengths are measured from the PDF's lines. Sizes and tags are READ "
                      "from text (exact) or by OCR/AI (each carries a confidence). Nothing is an "
                      "estimate unless you let the writer add items."}

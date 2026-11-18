@@ -43,14 +43,11 @@ class _Tile(QFrame):
         self.name = QLabel(f"{number}. {i18n.t(stage.label)}")
         self.name.setWordWrap(True)
         self.name.setStyleSheet("font-weight: 600; font-size: 12px;")
-        self.who = QLabel(i18n.t(route.where_words(stage.where)))
-        self.who.setWordWrap(True)
-        self.who.setStyleSheet(f"font-size: 11px; color: {theme.NEUTRAL[600]};")
+        self.setToolTip(i18n.t(route.where_words(stage.where)))
         col.addWidget(self.mark)
         col.addWidget(self.name)
-        col.addWidget(self.who)
         col.addStretch(1)
-        self.setMinimumHeight(92)
+        self.setMinimumHeight(64)
         self.set_state(route.WAITING, False)
 
     def set_state(self, state: str, selected: bool):
@@ -87,7 +84,7 @@ class PipelineStrip(QWidget):
         line_row = QHBoxLayout()
         line_row.setSpacing(theme.SPACE_2)
         self.line = C.label("", level="SUPPORT", wrap=True)
-        self.line.setMinimumHeight(40)
+        self.line.setMinimumHeight(34)
         line_row.addWidget(self.line, stretch=1)
         self.detail_btn = QPushButton(i18n.t("Details"))
         self.detail_btn.setCursor(Qt.PointingHandCursor)
@@ -153,5 +150,5 @@ class PipelineStrip(QWidget):
             self.detail_btn.setVisible(False)
             return
         said = self._line.get(st.key) or i18n.t(st.detail)
-        self.line.setText(said)
+        self.line.setText(f"{i18n.t(route.where_words(st.where))}: {said}")
         self.detail_btn.setVisible(st.key in ("read", "measure", "tags", "check", "write", "prices"))

@@ -310,6 +310,7 @@ class ThePdfAndPictureRoads(unittest.TestCase):
         self.assertIn("On this computer", d.pipe.line_of("measure"))
         self.assertEqual(d.pipe.state("check"), route.NEEDS_YOU)
         self.assertIn("DUCT SUMMARY", d.summary)
+        self.assertIn("Prism AI was not used", d.pipe.line_of("tags"))      # said, not implied
 
     def test_elv_picture_opens_the_reader_and_is_called_a_reading(self):
         d = _dialog()

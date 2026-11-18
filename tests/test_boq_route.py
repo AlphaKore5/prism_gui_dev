@@ -139,7 +139,7 @@ class Strip(unittest.TestCase):
         s.set_stage("write", route.FAILED, "no connection")
         self.assertEqual(s.selected(), "write")
         s.select("read")
-        self.assertEqual(s.line.text(), "read 249 objects")
+        self.assertEqual(s.line.text(), "On this computer: read 249 objects")
 
     def test_a_step_with_no_line_says_what_it_does(self):
         s = PipelineStrip()

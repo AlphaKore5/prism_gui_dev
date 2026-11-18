@@ -267,3 +267,36 @@ class VendoredFilesShipTheShapeTheInstallerExpects(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OdaDoesNotInheritPrismsQtEnvironment(unittest.TestCase):
+    """Found 2026-11-18 running a real DWG through the BOQ screen with QT_QPA_PLATFORM=offscreen
+    set: ODA (a Qt program with its own Qt) exited 134 "Could not find the Qt platform plugin".
+    Prism's own Qt variables must not reach the converter."""
+
+    def test_no_qt_variable_reaches_the_oda_process(self):
+        import tempfile
+        from unittest import mock
+        import core_bridge as CB
+        boq = CB.get_boq()
+        d = tempfile.mkdtemp()
+        dwg = os.path.join(d, "a.dwg")
+        open(dwg, "wb").write(b"AC1032")
+        seen = {}
+
+        def fake_run(cmd, **kw):
+            seen["env"] = kw.get("env")
+            os.makedirs(cmd[2], exist_ok=True)
+            with open(os.path.join(cmd[2], "a.dxf"), "w") as f:
+                f.write("0\nEOF\n")
+            return mock.Mock(returncode=0, stdout="", stderr="")
+
+        env = {"QT_QPA_PLATFORM": "offscreen", "QT_PLUGIN_PATH": "/prism/plugins",
+               "QML2_IMPORT_PATH": "/prism/qml", "PATH": "/usr/bin", "HOME": "/h"}
+        with mock.patch.dict(os.environ, env, clear=True), \
+             mock.patch.object(boq, "find_dwg_converter", return_value="/opt/ODAFileConverter"), \
+             mock.patch.object(boq.subprocess, "run", side_effect=fake_run), \
+             mock.patch.object(boq, "_read_dxf", return_value=None):
+            boq.dwg_to_dxf(dwg, out_dir=os.path.join(d, "out"))
+        self.assertIsNotNone(seen["env"])
+        self.assertEqual(sorted(seen["env"]), ["HOME", "PATH"])

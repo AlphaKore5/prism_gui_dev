@@ -1092,7 +1092,15 @@ class BoqDialog(PrismDialog):
             ev = evidence.for_takeoff(result)
             self._pipe("read", route.DONE, i18n.t("PDF opened on this computer."))
             self._pipe("measure", route.DONE, i18n.t("{h}. On this computer.").format(h=ev["headline"]))
-            self._pipe("tags", route.DONE, i18n.t("Labels read on this computer (OCR)."))
+            if ev["ai_used"]:
+                tags = i18n.t("Tags read on this computer (text and OCR). Prism AI also checked "
+                              "small cropped pieces, with your OK.")
+            elif ev["ocr_reads"]:
+                tags = i18n.t("Tags read on this computer (text and OCR). Prism AI was not used.")
+            else:
+                tags = i18n.t("Tags read from the PDF's own text only. OCR found nothing "
+                              "extra and Prism AI was not used.")
+            self._pipe("tags", route.DONE, tags)
         else:
             ev = evidence.for_reading(result)
             self._pipe("read", route.DONE, i18n.t("Drawing opened."))
