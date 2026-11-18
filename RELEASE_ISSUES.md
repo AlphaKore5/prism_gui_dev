@@ -151,6 +151,30 @@ something you did not run.
 
 ## Issue log (newest first)
 
+### ISS-025 — Dev 1.8.2 tagged with five new red tests on the Windows runner (2026-11-18) — FIXED in code, Windows CI rerun pending
+- **Seen:** `Tests · Windows` of v1.8.2: 7316 passed, 7 failing (2 are the known quotation-PDF entries). The five new ones:
+  1. `test_layering` — `widgets/send_to_ai.py` imported `dialogs.base` at module scope. **PROVEN** (the guard names the line; it
+     fails on any OS, so Linux was red too). The 1.8.2 STEP consent window was put in a widget file. **Fix:** the window moved to
+     `dialogs/send_consent.py`, imported inside `ask_consent`. Guard untouched.
+  2. `test_reel_run_transport_with_a_fake_encoder` — "Chromium isn't installed for the web renderer". **PROVEN** from the message
+     and code: the run asks `reel_web.available()` before rendering, and the test faked only `render`. Linux passed only because
+     Chromium is installed there. **Fix:** the test fakes the browser answer too; it now passes with `PLAYWRIGHT_BROWSERS_PATH`
+     pointing nowhere. The real-render test still skips when the browser is absent.
+  3. Two structured-file PDF tests (and the two known quotation-PDF failures) — PDF read back as `''`. **Cause LIKELY**: the
+     Windows runner's offscreen Qt has no system font, so `QTextDocument.print_` draws no glyphs. Reproduced on Linux by running
+     with fontconfig pointed at an empty config: the same four tests fail with the same `''`; registering the bundled fonts
+     (`theme.load_fonts()`, which the app does at start-up) fixes all four. Not seen on a real Windows machine. **Fix:** the tests
+     register the fonts first. **Open:** nobody has looked at a PDF the real Windows app wrote; the quotation entries in
+     `ci_known_failures.txt` stay until the Windows run says they pass.
+  4. `test_a_row_that_cannot_wrap_never_pushes_the_window` — `1054 not less than or equal to 1000`. **Cause NOT found**: on Linux
+     the screen's minimum is 959 at any font size, so the 95 px extra is Windows-only chrome I could not identify. The typed-in
+     1000 was the guess of whoever wrote the test. **Fix:** the limit is measured on the same screen (minimum before the rigid
+     row; the row must add nothing, and the whole must fit 1066). A mutation (removing the Ignored policy) fails the new test.
+     If Windows still fails, the message now shows the before and after numbers.
+- **Check that stops it recurring:** read both `Tests` jobs of a dev tag's run BEFORE telling the owner the build is ready, and
+  run the touched test files with `PLAYWRIGHT_BROWSERS_PATH=/nonexistent` and `FONTCONFIG_FILE` pointing at an empty config
+  (no browser, no system fonts) to approximate a bare Windows runner. A test must not depend on Chromium or system fonts being there.
+
 ### ISS-024 — Fixing the four red tests of 1.8.0 found a real product bug and a gate bug (2026-11-18) — FIXED in code, CI rerun pending
 - **Motion rhythm (PROVEN):** `rhythm.probe_video` asked `ffprobe` for the video size. The FFmpeg Prism ships (`imageio-ffmpeg`)
   has no ffprobe beside it and customers have none on PATH, so the check returned None for every customer; this dev machine

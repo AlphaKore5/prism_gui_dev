@@ -10,6 +10,23 @@ Tests: **1966 passing** (6 skipped, 8 Sep 2026 after Round 16 landed on main —
 
 ---
 
+# 1.8.3 — Test fixes for 1.8.2 (DEV build, 18 Nov 2026)
+
+**Dev channel only. Windows and Linux only (macOS deferred, as in 1.8.1/1.8.2).** No feature changes. 1.8.2 went red on the Windows
+test runner (7 failures); this build fixes the five that were this release's own.
+
+- **Code:** the "Send to Prism AI?" question window moved from `widgets/send_to_ai.py` to `dialogs/send_consent.py` and is opened
+  from the widget only when asked. A widget importing a dialog at module scope broke the layering rule; the window itself looks and
+  behaves the same.
+- **Tests only:** the reel transport test no longer needs Chromium on the machine (the encoder and the "is a browser here" answer
+  are both faked, as the test always meant); the STEP "row cannot push the window" test measures its limit on the same screen
+  instead of a typed-in 1000 px; the structured-file PDF tests and the quotation PDF tests register Prism's bundled fonts first,
+  as the app does, because the Windows runner's Qt has no system font and wrote PDFs with no text.
+- **Not proven yet:** the PDF and STEP-width causes were reproduced only by emulation on Linux; the Windows run of this build is
+  what confirms them. The two quotation-PDF entries in `devtools/ci_known_failures.txt` are left in place until that run.
+
+---
+
 # 1.8.2 — Reels as videos, real files, Usage screen, one-tap Home (DEV build, 18 Nov 2026)
 
 **Dev channel only. Windows and Linux only (macOS deferred, as in 1.8.1).** AI runs through the Prism licence server and is
