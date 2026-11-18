@@ -2419,13 +2419,22 @@ class MainWindow(QMainWindow):
         self._task_pos = index + 1
         self._route_one(self._task_queue[index])
 
+    def _ready_to_plan(self) -> bool:
+        """Can a task be planned? When AI runs on Prism's server (the normal case) there is no key or
+        agent to set up -- the licence is the only requirement, and licensing.require() has already
+        checked it -- so a missing key/agents/first-run flag must not block a task. Only the developer
+        escape hatch (PRISM_AI_DIRECT) and the terminal path still need their own key."""
+        if CB.ai_client.active():
+            return True
+        return CB.config.is_configured(self.cfg)
+
     def _route_one(self, query: str):
         if not query.strip():
             self.statusBar().showMessage("Type or speak a task first.", 4000)
             return
         if not licensing.require("core", self):
             return
-        if not CB.config.is_configured(self.cfg):
+        if not self._ready_to_plan():
             QMessageBox.warning(self, "Setup needed", "Finish Setup (API key + agents) first.")
             return
         self._last_query = query
