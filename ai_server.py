@@ -62,6 +62,34 @@ def _auth() -> dict:
             "platform": sys.platform}
 
 
+# Sentences elsewhere in the app that talk about Chrome, sign-ins and the
+# customer's own keys. They stay as they are for the developer switch; while
+# AI runs on Prism's server i18n.t() swaps them (i18n.set_rewording).
+_SERVER_WORDS = {
+    "Your Chrome opens and the tools are worked as you, in order.":
+        "Each step runs in order on your Prism plan, and the answers arrive here.",
+    "It drives your own browser": "It runs on your Prism plan",
+    "Prism opens your Chrome and works the tools as you, using the accounts you already pay for. Nothing is sent to a Prism server.":
+        "Prism's AI runs on Prism's server and is paid from your plan's credits. There is no AI account to sign in to and no browser to leave open. A file is only sent after you say yes.",
+    "Signing in to the AI tools": "Your Prism plan and credits",
+    "Prism uses your own accounts, in its own browser window. The first time — and occasionally after that — you need to sign in.\n\nClick Login tabs, sign in to each tool in the window that opens, and close it. Prism remembers from then on.":
+        "Prism's AI runs through your Prism plan, so there is nothing to sign in to. The credits you have left are shown at the top of the window.",
+    "Open Login tabs": "How AI works here",
+    "Re-open your tools in Chrome to sign in": "AI runs on your Prism plan: nothing to sign in to",
+    "Your Groq key and one tool per kind of step — the router suggests, you decide — plus where each one signs in.":
+        "Which helper does each kind of step, and what your Prism plan includes.",
+    "Your browser": "Browser used for drawing",
+    "Prism drives your own Chrome, signed in as you. It keeps a separate profile so those logins survive between runs — which is also why a login done in your everyday Chrome does not reach it.":
+        "Prism uses a Chrome-style browser in the background to draw reels, motion graphics and PDFs. It is never used for AI and you never sign in to anything in it.",
+    "Writing it in your browser — this takes a minute or two. Chrome will open by itself; leave it alone until it finishes.":
+        "Prism AI is writing it — this takes a few seconds.",
+    "The AI tool did not answer. Its tab is still open in Chrome — the reply may have arrived after Prism stopped waiting.":
+        "Prism AI did not answer. Nothing was charged for this try — please try again.",
+    "AI diagnosis uses your Groq key and a scrubbed recent log.":
+        "AI diagnosis runs on your Prism plan and sends only a scrubbed recent log.",
+}
+
+
 def install() -> None:
     """Route the engine's AI calls through Prism's server (unless the dev
     switch is set). Safe to call twice."""
@@ -75,6 +103,7 @@ def install() -> None:
         # Tools Prism's plan does not include are no longer offered anywhere.
         import core_bridge as CB
         CB.agents.prune_for_server()
+        i18n.set_rewording(_SERVER_WORDS)
 
 
 def active() -> bool:

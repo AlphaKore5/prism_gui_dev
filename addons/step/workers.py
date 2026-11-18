@@ -120,7 +120,7 @@ class StepAskWorker(_Worker):
                 attachments=self.attachments,
                 temperature=0.4, timeout=90,
                 role="vision" if self.attachments else "reasoner",
-                addon="step", feature="ask").strip()
+                addon="step", feature="ask", pin_model=True).strip()
             self.done.emit(text)
         except Exception as e:
             self.failed.emit(str(e))
@@ -150,7 +150,7 @@ class StepPlanWorker(_Worker):
                 attachments=self.attachments,
                 temperature=0.2, timeout=90,
                 role="vision" if self.attachments else "reasoner",
-                addon="step", feature="plan").strip()
+                addon="step", feature="plan", pin_model=True).strip()
             self.done.emit(text)
         except Exception as e:
             self.failed.emit(str(e))

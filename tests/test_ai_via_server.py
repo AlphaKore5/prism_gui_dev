@@ -46,6 +46,8 @@ class FakeAi:
     def __init__(self):
         self.calls: list[dict] = []
         self.text = '{"title": "Test job"}'
+        self.responder = None           # optional: body -> reply text, per request
+        self.image = PNG                # base64 returned by /v1/ai/image
         self.error = None               # (http status, code, message, detail)
         self.run_costs: dict = {}       # run_id -> {"mc": n, ...} for /v1/ai/run-cost
         self.status_body = {"api": 1, "ready": True, "reason": "", "mc_per_credit": 1000,
@@ -75,10 +77,10 @@ class FakeAi:
                     return self._json(200, {"runs": {r: outer.run_costs[r] for r in body.get("run_ids", [])
                                                      if r in outer.run_costs}, "mc_per_credit": 1000})
                 if self.path == "/v1/ai/image":
-                    return self._json(200, {"images": [PNG], "images_count": 1, "charged_mc": 40,
+                    return self._json(200, {"images": [outer.image], "images_count": 1, "charged_mc": 40,
                                             "balance_mc": 39_960})
                 if self.path == "/v1/ai/chat":
-                    return self._json(200, {"text": outer.text, "finish": "stop",
+                    return self._json(200, {"text": (outer.responder(body) if outer.responder else outer.text), "finish": "stop",
                                             "model": {"key": "m", "label": "M"},
                                             "usage": {"in": 11, "out": 7, "cached": 0},
                                             "charged_mc": 25, "balance_mc": 39_975})

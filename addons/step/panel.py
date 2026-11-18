@@ -42,7 +42,7 @@ class StepPanel(AddonFrontDoor):
     def tool_roles(self):
         """Mirrors StepDialog: ChatGPT draws a Draft; Claude Haiku 5.5 (or
         Claude Sonnet 5.5, if picked) answers and reviews the plan for Ask
-        and Edit, called directly with your own OpenRouter key. Every one
+        and Edit, on your Prism plan. Every one
         sees the measured numbers and, only with your consent each
         session, Prism's own render — never the model."""
         return [
@@ -54,8 +54,8 @@ class StepPanel(AddonFrontDoor):
              "ChatGPT"),
             ("bulb", "Answers and reviews the plan (Ask, Edit)",
              "Claude Haiku 5.5 by default, or Claude Sonnet 5.5 if you "
-             "pick it — called directly with your own OpenRouter key, "
-             "never a browser tab. It turns its own suggestions into the "
+             "pick it — both run on your Prism plan. "
+             "It turns its own suggestions into the "
              "exact changes Prism can apply, from the numbers alone.",
              "Claude Haiku 5.5"),
         ]

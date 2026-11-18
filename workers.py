@@ -84,6 +84,14 @@ class RouteWorker(_Worker):
     def run(self):
         try:
             routing = CB.router.route(self.query, self.cfg, self.attachments)
+            # What the plan will cost, asked of the server here (off the GUI
+            # thread) so the plan screen can say "about N credits". Never
+            # charges, and the plan is shown without a number if it fails.
+            try:
+                routing["_estimate"] = CB.router.estimate_run(
+                    routing, CB.config.active_agents(self.cfg))
+            except Exception:                              # noqa: BLE001
+                routing["_estimate"] = {}
             self.done.emit(routing)
         except Exception as e:
             self.failed.emit(str(e))

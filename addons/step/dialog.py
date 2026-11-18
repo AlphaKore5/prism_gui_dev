@@ -513,7 +513,7 @@ class StepDialog(PrismDialog):
         model_row.addStretch(1)
         step2_v.addWidget(model_host)
         model_hint = QLabel(i18n.t(
-            "Both run through your Prism plan — nothing to sign in to. Haiku answers in seconds; Sonnet is "
+            "Both run on your Prism plan. Haiku answers in seconds and costs fewer credits; Sonnet is "
             "stronger but slower and costs more per question."))
         model_hint.setWordWrap(True)
         model_hint.setStyleSheet(

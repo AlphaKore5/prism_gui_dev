@@ -202,6 +202,19 @@ def is_rtl(code: str | None = None) -> bool:
     return LANGUAGES.get(code or _active_code, ("", "", False))[2]
 
 
+# English sentences that are untrue while AI runs on Prism's server (they
+# talk about Chrome, sign-ins and the customer's own keys). ai_server.install()
+# registers {old: new}; t() swaps them before any lookup, so the screens that
+# hold the old words in module-level lists need no per-screen switch. The new
+# sentence has no translation yet and shows in English.
+_reworded: dict = {}
+
+
+def set_rewording(mapping: dict) -> None:
+    _reworded.clear()
+    _reworded.update(mapping or {})
+
+
 def t(text: str) -> str:
     """English in, the active language out — or English back, unchanged.
 
@@ -210,6 +223,11 @@ def t(text: str) -> str:
     every one of those would be a separate catalogue entry that a translator
     would have to get the padding right on.
     """
+    if _reworded:
+        s0 = str(text)
+        new = _reworded.get(s0.strip())
+        if new is not None:
+            text = s0[:len(s0) - len(s0.lstrip())] + new + s0[len(s0.rstrip()):]
     if not _active:
         return text
     s = str(text)

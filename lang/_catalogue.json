@@ -2407,7 +2407,7 @@
   "Both actions stop Prism working on this computer until a licence key is entered again. Your settings, your history and your files are untouched by either.": [
    "widgets/settings_panel.py"
   ],
-  "Both are called directly with your own OpenRouter key — never a browser tab. Haiku answers in seconds; Sonnet is stronger but slower and costs more per question.": [
+  "Both run on your Prism plan. Haiku answers in seconds and costs fewer credits; Sonnet is stronger but slower and costs more per question.": [
    "addons/step/dialog.py"
   ],
   "Bottom left": [

@@ -2432,6 +2432,16 @@ class MainWindow(QMainWindow):
         self._active_plan_worker = worker
         worker.start()
 
+    @staticmethod
+    def _estimate_note(routing: dict) -> str:
+        """' · about N credits' for the plan, from the server's estimate."""
+        est = (routing or {}).get("_estimate") or {}
+        mc = int(est.get("typical_mc") or 0)
+        if mc <= 0:
+            return ""
+        credits = max(1, round(mc / 1000))
+        return i18n.t(" · about {n} credits").format(n=credits)
+
     def _on_routed(self, routing: dict):
         if self.sender() is not self._active_plan_worker:
             return   # cancelled — this RouteWorker's answer came in too late
@@ -2468,6 +2478,7 @@ class MainWindow(QMainWindow):
             )
         else:
             extra = ""
+        extra += self._estimate_note(routing)
         self.statusBar().showMessage(
             "Steps ready — drop any you don't want, then Start the work." + extra
             if total <= 1 else
