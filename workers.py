@@ -46,6 +46,49 @@ class _Worker(QThread):
         _running.discard(self)
 
 
+class AttachWorker(_Worker):
+    """Read a file (or a folder's files) for the run without freezing the window.
+
+    Pulling text out of a PDF or profiling a 100,000-row spreadsheet takes
+    seconds; on the UI thread that read as "Prism is slow to open any file".
+    """
+
+    done = Signal(str, object)     # path, [attachment records]
+    failed = Signal(object)        # the exception
+
+    def __init__(self, path: str, parent=None):
+        super().__init__(parent)
+        self._path = path
+
+    def run(self):
+        import main_window
+        try:
+            self.done.emit(self._path,
+                           main_window.MainWindow._read_attachments(self._path))
+        except Exception as e:                      # noqa: BLE001
+            self.failed.emit(e)
+
+
+class UsageWorker(_Worker):
+    """Ask Prism's server what this licence has spent (Settings > Usage).
+    On a thread: it is a network round trip, and a sleeping server takes
+    tens of seconds to answer."""
+
+    done = Signal(object)      # the /v1/ai/usage dict
+    failed = Signal(object)    # the exception
+
+    def __init__(self, limit: int = 50, before: str = "", parent=None):
+        super().__init__(parent)
+        self._limit, self._before = limit, before
+
+    def run(self):
+        import ai_server
+        try:
+            self.done.emit(ai_server.fetch_usage(self._limit, self._before))
+        except Exception as e:                      # noqa: BLE001
+            self.failed.emit(e)
+
+
 class AuthorizeWorker(_Worker):
     """Ask the licence server whether this run may go ahead.
 

@@ -646,6 +646,19 @@ class Attachments(GateTest):
         self.grant(["core"])
         return MainWindow()
 
+    @staticmethod
+    def _attach_and_wait(win, path):
+        """A folder is read on a worker (so the window never freezes on a big
+        one); wait for it to land before asserting."""
+        import time
+        from PySide6.QtWidgets import QApplication
+        win._attach_path(path)
+        end = time.time() + 10
+        while win._attach_pending and time.time() < end:
+            QApplication.processEvents()
+            time.sleep(0.01)
+        QApplication.processEvents()
+
     def _tmpfiles(self):
         import tempfile
         root = tempfile.mkdtemp(prefix="prism-att-")
@@ -672,7 +685,7 @@ class Attachments(GateTest):
         loose, folder = self._tmpfiles()
         win = self._window()
         win._attach_path(loose)
-        win._attach_path(folder)
+        self._attach_and_wait(win, folder)
         # The tray is a column of controls.FileItem rows now rather than a
         # QListWidget, so a row's name and its "Folder · 3 files" line are two
         # fields instead of one string. Same assertion, read off both.
@@ -690,7 +703,7 @@ class Attachments(GateTest):
         loose, folder = self._tmpfiles()
         win = self._window()
         win._attach_path(loose)
-        win._attach_path(folder)
+        self._attach_and_wait(win, folder)
         win._detach_folder(folder)
         self.assertEqual([a["name"] for a in win.attachments], ["spec.png"])
 
@@ -700,7 +713,7 @@ class Attachments(GateTest):
         _loose, folder = self._tmpfiles()
         win = self._window()
         win._attach_path(os.path.join(folder, "logo.png"))   # on its own
-        win._attach_path(folder)
+        self._attach_and_wait(win, folder)
         win._detach_folder(folder)
         self.assertEqual([a["name"] for a in win.attachments], ["logo.png"])
         self.assertNotIn("from_dir", win.attachments[0])
@@ -709,7 +722,7 @@ class Attachments(GateTest):
         loose, folder = self._tmpfiles()
         win = self._window()
         win._attach_path(loose)
-        win._attach_path(folder)
+        self._attach_and_wait(win, folder)
         win._detach_all()
         self.assertEqual(win.attachments, [])
         self.assertEqual(win.files_panel.attached_count_value(), 0)
@@ -719,7 +732,7 @@ class Attachments(GateTest):
         to every tool twice."""
         loose, folder = self._tmpfiles()
         win = self._window()
-        win._attach_path(folder)
+        self._attach_and_wait(win, folder)
         win._attach_path(os.path.join(folder, "logo.png"))
         paths = [a["path"] for a in win.attachments]
         self.assertEqual(len(paths), len(set(paths)))

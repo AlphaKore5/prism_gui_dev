@@ -68,7 +68,7 @@ from widgets.output_panel import OutputPanel
 from workers import (RouteWorker, AutomationWorker, RecordWorker,
                      PlanBriefWorker,
                      StudioFollowupWorker,
-                     InterpretWorker, FindWorker, AuthorizeWorker,
+                     InterpretWorker, FindWorker, AuthorizeWorker, AttachWorker,
                      FFmpegWorker, QuietUpdateWorker, UpdateWorker, FollowupRouteWorker,
                      ReelWorker)
 import wakeword
@@ -83,6 +83,7 @@ from addons.whatsapp.dialog import WhatsAppDialog
 from dialogs.completion_dialog import CompletionDialog
 from dialogs.history_dialog import HistoryDialog
 
+_ATTACH_INLINE_BYTES = 256 * 1024     # bigger than this is read off the UI thread
 COMPOSE, RUNNING = 0, 1        # pages of the workbench's own inner stack
 
 # ── the body stack ──────────────────────────────────────────────────────────
@@ -372,6 +373,8 @@ class MainWindow(QMainWindow):
         self._workers = []    # keep references so QThreads aren't GC'd mid-run
         self._stage_agents: dict[str, str] = {}   # stage -> agent, from stage_start
         self._stage_results: list[dict] = []      # built up during a run, for the completion popup
+        self._attach_pending = 0                  # files being read off the UI thread
+        self._route_when_attached = False         # Home submitted while they were
         self._run_finished = False                # a finished plan is spent — see _back_to_plan
         self._run_id = ""                         # licence server's id for the current run
         self._active_run = None                   # the AutomationWorker, so Stop can reach it
@@ -644,6 +647,8 @@ class MainWindow(QMainWindow):
         self.lumi_overlay.command_requested.connect(self._handle_command)
         central._lumi_overlay = self.lumi_overlay
 
+        from widgets import usage_chip
+        usage_chip.set_opener(lambda: self._open_settings("usage"))
         self.home_panel.describe_task.connect(
             lambda: self._handle_command("workbench"))
         self.home_panel.task_submitted.connect(self._on_home_task_submitted)
@@ -765,6 +770,7 @@ class MainWindow(QMainWindow):
         # when they were last built may not be true now.
         if index == HOME:
             self.home_panel.refresh()
+            ai_server.warm_up()
         elif index == INQUIRY:
             self.inquiry_panel.refresh()
         elif index == SETTINGS:
@@ -1479,11 +1485,34 @@ class MainWindow(QMainWindow):
         self._handle_command(key)
 
     def _on_home_task_submitted(self, text: str, paths: list):
+        """Home's box was submitted: land on the task and start planning it.
+
+        This used to only copy the words into the Task box and switch
+        screens, so a person who had just pressed Send on Home had to find and
+        press "Make a plan" a second time (and on a busy run, was dropped on
+        the empty compose page and had to tap Tasks again to find their
+        run). Now one submit plans the task, and the screen it lands on shows
+        the plan with its one Start button.
+        """
         for p in paths:
             self._attach_path(p)
         if text:
             self.input_panel.set_query_text(text)
         self._handle_command("workbench")
+        if not text.strip():
+            return
+        if self._run_in_flight():
+            self.statusBar().showMessage(i18n.t(
+                "A task is already running. Your new task is waiting in the "
+                "Task box."), 8000)
+            return
+        if self._attach_pending:
+            self._route_when_attached = True      # plan once the files are read
+            return
+        self._route(text)
+
+    def _run_in_flight(self) -> bool:
+        return self.work_stack.currentIndex() == RUNNING and not self._run_finished
 
     def _handle_command(self, key: str):
         if key == "home":
@@ -1504,7 +1533,8 @@ class MainWindow(QMainWindow):
             # finish a sentence has not asked to lose it.
             if self.work_stack.currentIndex() == RUNNING and self._run_finished:
                 self._reset_for_new_task()
-            self.work_stack.setCurrentIndex(COMPOSE)
+            if not self._run_in_flight():
+                self.work_stack.setCurrentIndex(COMPOSE)
             self._show_screen("workbench")
         elif key == "reel":
             self._open_reel()
@@ -2049,22 +2079,70 @@ class MainWindow(QMainWindow):
         """
         if not path:
             return
-        already = {a["path"] for a in self.attachments}
+        # Reading a file (text out of a PDF, a profile of a 100,000-row sheet)
+        # takes seconds on a big one, and the window must not freeze while it
+        # does. Folders and anything over _ATTACH_INLINE_BYTES are read on a
+        # worker; a small file is read here, which is instant and keeps the
+        # row there the moment the click returns.
         try:
-            if os.path.isdir(path):
-                # Stamped with where they came from so the tray can show one
-                # row for the folder and take the whole group back out again.
-                # The engine still gets the flat list — it uploads files, not
-                # folders — so this is presentation only.
-                added = [{**a, "from_dir": path} for a in CB.files.attach_dir(path)]
-                if not added:
-                    self.statusBar().showMessage(
-                        i18n.t("Folder contains no supported files to attach."), 4000)
-                    return
-            else:
-                added = [CB.files.attach(path)]
+            heavy = os.path.isdir(path) or os.path.getsize(path) > _ATTACH_INLINE_BYTES
+        except OSError:
+            heavy = False
+        if heavy:
+            self._attach_pending += 1
+            self.statusBar().showMessage(i18n.t("Reading {name}…").format(
+                name=os.path.basename(path.rstrip("/\\")) or path))
+            worker = AttachWorker(path)
+            worker.done.connect(self._attach_read)
+            worker.failed.connect(self._attach_read_failed)
+            self._workers.append(worker)
+            worker.start()
+            return
+        try:
+            added = self._read_attachments(path)
         except Exception as e:                          # noqa: BLE001
             self._explain(e, "attach")
+            return
+        self._attach_put(path, added)
+
+    @staticmethod
+    def _read_attachments(path: str) -> list:
+        if os.path.isdir(path):
+            # Stamped with where they came from so the tray can show one
+            # row for the folder and take the whole group back out again.
+            # The engine still gets the flat list — it uploads files, not
+            # folders — so this is presentation only.
+            return [{**a, "from_dir": path} for a in CB.files.attach_dir(path)]
+        return [CB.files.attach(path)]
+
+    def _attach_read_failed(self, error: object):
+        self.statusBar().clearMessage()
+        self._explain(error, "attach")
+        self._attach_settled()
+
+    def _attach_settled(self):
+        """A worker read finished (well or badly); carry on with a Home submit
+        that was waiting for the files."""
+        self._attach_pending = max(0, self._attach_pending - 1)
+        if self._attach_pending == 0 and self._route_when_attached:
+            self._route_when_attached = False
+            if not self._run_in_flight():
+                self._route(self.input_panel.text.toPlainText())
+
+    def _attach_read(self, path: str, added: list):
+        """A worker finished reading: put the files in the run."""
+        try:
+            self._attach_put(path, added)
+        finally:
+            self._attach_settled()
+
+    def _attach_put(self, path: str, added: list):
+        """The file has been read (here or on the worker): put it in the run."""
+        self.statusBar().clearMessage()
+        already = {a["path"] for a in self.attachments}
+        if os.path.isdir(path) and not added:
+            self.statusBar().showMessage(
+                i18n.t("Folder contains no supported files to attach."), 4000)
             return
 
         # Attaching a folder and then a file inside it used to queue the same
