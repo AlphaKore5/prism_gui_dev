@@ -94,6 +94,9 @@ SECTIONS = [
     ("licence", "Licence", "Your copy",
      "What this copy is licensed for, which add-ons come with it, and until "
      "when."),
+    ("usage", "Usage", "Your copy",
+     "How many AI credits you have left, what each add-on has used, and "
+     "your recent AI calls."),
     ("profile", "Profile", "Your copy",
      "Who this copy files its work under, and where that work is kept."),
     ("agents", "Agents", "Configure",
@@ -115,6 +118,7 @@ SECTIONS = [
 
 _SECTION_SEARCH = {
     "licence": "license activate activation plan seat subscription expiry",
+    "usage": "credits balance ai spend cost calls history used today cycle",
     "profile": "name company team workspace folder shared designation",
     "agents": "ai api key groq tools models login credentials",
     "language": "translation output language hindi gujarati",
@@ -406,6 +410,7 @@ class SettingsPanel(QDialog):
 
         page = {
             "licence": self._licence,
+            "usage": self._usage,
             "profile": self._profile,
             "agents": self._agents,
             "language": self._language,
@@ -1242,6 +1247,13 @@ class SettingsPanel(QDialog):
         if line:
             body.addWidget(C.label(line, level="META", wrap=True))
         return card
+
+    # ── usage ─────────────────────────────────────────────────────────────
+    def _usage(self, col):
+        from widgets.usage_panel import UsagePanel
+        self.usage_panel = UsagePanel()
+        col.addWidget(self.usage_panel)
+        self.usage_panel.refresh()
 
     # ── agents ────────────────────────────────────────────────────────────
     def _agents(self, col):

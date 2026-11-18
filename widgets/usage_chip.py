@@ -63,7 +63,22 @@ def set_provider(provider: Optional[Provider]) -> None:
     _default_provider = provider or _no_server
 
 
+_opener: Optional[Callable[[], None]] = None
+
+
+def set_opener(fn: Optional[Callable[[], None]]) -> None:
+    """What a click on any chip does: the app opens Settings > Usage."""
+    global _opener
+    _opener = fn
+
+
 class UsageChip(QFrame):
+    def mousePressEvent(self, event):
+        if _opener is not None and event.button() == Qt.LeftButton:
+            _opener()
+        else:
+            super().mousePressEvent(event)
+
     def __init__(self, provider: Optional[Provider] = None, parent=None):
         super().__init__(parent)
         self.setObjectName("usageChip")
@@ -95,6 +110,8 @@ class UsageChip(QFrame):
         self.note.setObjectName("usageChipCaption")
         col.addWidget(self.note)
         self.setAccessibleName(i18n.t("Credits"))
+        self.setCursor(Qt.PointingHandCursor)
+        self.setToolTip(i18n.t("See your usage"))
         self.refresh()
         # The app-wide provider answers from a cache it fills in the
         # background, so the first draw can be empty; ask again shortly, then

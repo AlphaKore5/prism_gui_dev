@@ -106,6 +106,33 @@ def install() -> None:
         i18n.set_rewording(_SERVER_WORDS)
 
 
+WARM_EVERY = 240             # seconds; Render sleeps after ~15 idle minutes
+_warm = {"at": 0.0}
+
+
+def warm_up() -> None:
+    """Wake the server in the background so the first real click is not the
+    one that pays for a cold start (tens of seconds on a sleeping host). At
+    most one ping per WARM_EVERY seconds, never on the calling thread's
+    time. Does nothing unless AI runs through the server."""
+    if not active():
+        return
+    with _lock:
+        if time.time() - _warm["at"] < WARM_EVERY:
+            return
+        _warm["at"] = time.time()
+
+    def work():
+        try:
+            import requests
+            import licensing
+            requests.get(licensing.client.server_url().rstrip("/") + "/health",
+                         timeout=60)
+        except Exception:                                   # noqa: BLE001
+            pass
+    threading.Thread(target=work, daemon=True, name="prism-warm").start()
+
+
 def active() -> bool:
     return _ai().active()
 
@@ -172,9 +199,58 @@ def _fetch_run_cost(force: bool = False) -> None:
     threading.Thread(target=work, daemon=True, name="prism-ai-runcost").start()
 
 
+SESSION_KEEP = 200
+_session: list[dict] = []        # this run of Prism's own list, newest last
+
+
+def session_events() -> list[dict]:
+    """Calls heard since Prism started, newest first, in the same shape as the
+    server's /v1/ai/usage `events`. The fallback when the server has no usage
+    route yet."""
+    with _lock:
+        return [dict(e) for e in reversed(_session)]
+
+
+def session_usage() -> dict:
+    """The /v1/ai/usage shape built from what this session heard, for a server
+    that has no usage route. Balance is the cached one; nothing else is known."""
+    events = session_events()
+    day0 = int(time.time()) - int(time.time()) % 86400
+    by_addon: dict = {}
+    by_day: dict = {}
+    for e in events:
+        a = by_addon.setdefault(e["addon"], {"addon": e["addon"], "used_mc": 0, "calls": 0})
+        a["used_mc"] += e["used_mc"]
+        a["calls"] += 1
+        d = time.strftime("%Y-%m-%d", time.gmtime(e["ts"]))
+        by_day[d] = by_day.get(d, 0) + e["used_mc"]
+    return {"balance_mc": int(status_now().get("balance_mc") or 0),
+            "credit_usd_micros": 0,
+            "cycle": {"used_mc": sum(e["used_mc"] for e in events),
+                      "allowance_mc": None, "resets_at": None},
+            "today": {"used_mc": sum(e["used_mc"] for e in events if e["ts"] >= day0)},
+            "by_addon": sorted(by_addon.values(), key=lambda r: -r["used_mc"]),
+            "by_day": [{"day": d, "used_mc": mc} for d, mc in sorted(by_day.items())],
+            "events": events, "next": None}
+
+
+def fetch_usage(limit: int = 50, before: str = "") -> dict:
+    """The server's /v1/ai/usage. BLOCKING: call it from a worker thread."""
+    return _ai().usage(limit, before)
+
+
 def _heard(note: dict) -> None:
     """A call just settled: keep the cached balance in step with the server."""
     with _lock:
+        _session.append({
+            "ts": int(note.get("ts") or time.time()),
+            "addon": str(note.get("addon") or ""),
+            "feature": str(note.get("feature") or ""),
+            "role": str(note.get("role") or ""),
+            "model_label": str(note.get("model_label") or ""),
+            "used_mc": int(note.get("charged_mc") or 0),
+            "status": "ok", "run_id": str(note.get("run_id") or "")})
+        del _session[:-SESSION_KEEP]
         st = _cache.get("status")
         if st and st.get("ready") and note.get("balance_mc") is not None:
             st["balance_mc"] = int(note["balance_mc"])
