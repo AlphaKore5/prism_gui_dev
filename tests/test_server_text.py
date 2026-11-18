@@ -143,3 +143,71 @@ class LogLines(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PlanScreenServerMode(unittest.TestCase):
+    """Owner's decision: in server mode the plan shows no Chrome-era tool
+    pipeline (picker, tier badges, waiting budgets, grey SKIPPED rows)."""
+
+    ROUTING = {
+        "research": {"needed": False, "questions": []},
+        "brains": {"needed": True, "questions": ["Think about the greeting."]},
+        "content": {"needed": False, "questions": []},
+        "visual": {"needed": True, "questions": ["Make the picture."]},
+    }
+    CFG = {"research": "Grok", "brains": "ChatGPT", "content": "Jasper",
+           "visual": "Prism Image"}
+
+    def _panel(self):
+        panel = AgentsPanel()
+        panel.set_content(routing=dict(self.ROUTING), agents_cfg=dict(self.CFG),
+                          query="Instagram post for Tulsi Vivah")
+        return panel
+
+    def _all_text(self, panel):
+        from PySide6.QtWidgets import QPushButton
+        out = [l.text() for l in panel.findChildren(QLabel)]
+        out += [b.text() for b in panel.findChildren(QPushButton)]
+        return " | ".join(out)
+
+    def test_server_mode_has_no_tools_tiers_or_waits(self):
+        with server():
+            panel = self._panel()
+            text = self._all_text(panel)
+            for word in ("Freemium", "Paid/Trial", "API key", "makes pictures",
+                         "Included", "waits up to", "5-15s", "5–15s",
+                         "Grok", "ChatGPT", "Jasper"):
+                self.assertNotIn(word, text, word)
+            for row in panel._rows:
+                self.assertTrue(row.chip.isHidden())
+                self.assertEqual(row.engine_meta.text(), "Prism AI")
+            self.assertEqual(panel.count.text(), "2 steps")
+            self.assertTrue(panel.budget.isHidden())
+            # the run still names the real tools: nothing about running changed
+            self.assertEqual([s[1] for s in panel.selected_steps()],
+                             ["ChatGPT", "Prism Image"])
+
+    def test_left_out_steps_sit_under_a_fold(self):
+        with server():
+            panel = self._panel()
+            hidden = [r.stage for r in panel._rows if r.isHidden()]
+            self.assertEqual(hidden, ["research", "content"])
+            self.assertFalse(panel.leftout_btn.isHidden())
+            self.assertEqual(panel.leftout_btn.text(), "Steps Prism left out (2)")
+            shown = [r for r in panel._rows if not r.isHidden()]
+            self.assertEqual([r.number.text() for r in shown], ["01", "02"])
+            panel._toggle_fold()
+            self.assertEqual([r.isHidden() for r in panel._rows], [False] * 4)
+            panel._toggle_fold()
+            self.assertEqual(sum(r.isHidden() for r in panel._rows), 2)
+
+    def test_direct_mode_is_unchanged(self):
+        with server(False):
+            panel = self._panel()
+            text = self._all_text(panel)
+            self.assertIn("waits up to", text)
+            self.assertTrue(any(w in text for w in ("Freemium", "Paid/Trial", "Included")))
+            self.assertTrue(all(not r.isHidden() for r in panel._rows))
+            self.assertTrue(panel.leftout_btn.isHidden())
+            self.assertTrue(all(not r.chip.isHidden() for r in panel._rows))
+            self.assertEqual(panel.count.text(), "2 steps of 4")

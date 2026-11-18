@@ -165,6 +165,9 @@ def _minutes(seconds: int) -> str:
     return i18n.t("{n}m").format(n=max(1, round(seconds / 60)))
 
 
+PRISM_AI_LINE = "Prism AI"
+
+
 class PlanToolChip(ToolChip):
     """The tool picker, as a choice of execution engine rather than a combo box.
 
@@ -320,6 +323,9 @@ class PlanRow(QFrame):
         self._suggested = suggested or ""
         self._forced = forced or ""
         self._included = included
+        # Server mode: no website behind a step, so no tool choice, no price
+        # tier and no waiting budget (those describe the old browser tools).
+        self._srv = ai_server.active()
         # What the PLAN said, kept separate from what the row shows now. The
         # difference is the whole point: a row the planner never turned on
         # and the person never touched is not the same thing as a row the
@@ -410,6 +416,7 @@ class PlanRow(QFrame):
         engine.setSpacing(2)
         engine.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         engine.addWidget(self.chip, alignment=Qt.AlignRight)
+        self.chip.setVisible(not self._srv)
         # What choosing this engine actually costs you: the tool's price band,
         # how long it usually takes to answer, and the timeout Prism will
         # honour before giving up on it. All three are in the registry already
@@ -598,6 +605,8 @@ class PlanRow(QFrame):
 
     def _refresh_origin(self):
         text, style = _origin_copy(self._origin)
+        if self._srv:
+            text = ""           # "You picked this / Prism suggests" is about tools
         self.origin_tag.setText(text)
         self.origin_tag.setObjectName(style)
         self.origin_tag.setVisible(bool(text))
@@ -685,6 +694,11 @@ class PlanRow(QFrame):
 
     # ── tool ──────────────────────────────────────────────────────────────
     def _refresh_engine(self):
+        if self._srv:
+            self.engine_meta.setText(PRISM_AI_LINE)
+            self.engine_meta.setVisible(True)
+            self.engine_meta.setToolTip("")
+            return
         entry = CB.agents.resolve_agent(self.stage, self.chip.current()) or {}
         wait = int(entry.get("wait_time") or 0)
         bits = []
@@ -718,6 +732,11 @@ class PlanRow(QFrame):
 
     def is_checked(self) -> bool:
         return self._included
+
+    def left_out(self) -> bool:
+        """Server mode: a step Prism planned to skip and nobody has touched.
+        It is not shown as a grey row; it sits under "Steps Prism left out"."""
+        return self._srv and not self._included and not self._touched
 
     def was_planned(self) -> bool:
         """Was this step on when the plan arrived? See left_out_stages()."""
@@ -791,8 +810,11 @@ class AgentsPanel(QWidget):
 
         self.header = C.SectionHeader(
             i18n.t("Your plan"),
-            i18n.t("Prism drafted this. Reorder it, rewrite any prompt, change a "
-                   "tool, or drop a step — nothing runs until you say so.")
+            (i18n.t("Prism drafted this. Reorder it, rewrite any prompt, or "
+                    "drop a step — nothing runs until you say so.")
+             if ai_server.active() else
+             i18n.t("Prism drafted this. Reorder it, rewrite any prompt, change a "
+                    "tool, or drop a step — nothing runs until you say so."))
         )
         self.subtitle = self.header.subtitle
         self.count = C.Pill("", "neutral")
@@ -839,6 +861,14 @@ class AgentsPanel(QWidget):
         self.rows_box.setContentsMargins(0, 0, 0, 0)
         self.rows_box.setSpacing(theme.SPACE_2 + 2)
         root.addWidget(rows_wrap)
+
+        # Server mode: steps Prism planned to skip are tucked under this
+        # fold instead of standing as grey SKIPPED rows.
+        self._fold_open = False
+        self.leftout_btn = C.button("", "tertiary", "chevron-right", small=True,
+                                    on_click=self._toggle_fold)
+        self.leftout_btn.setVisible(False)
+        root.addWidget(self.leftout_btn, alignment=Qt.AlignLeft)
 
         # Steps the engine will run that are not rows: the final synthesis the
         # router asks for, and the file-reading pass ChatGPT does first when
@@ -1234,10 +1264,33 @@ class AgentsPanel(QWidget):
         self._refresh_count()
         self.plan_changed.emit()
 
+    def _toggle_fold(self):
+        self._fold_open = not self._fold_open
+        self._refresh_count()
+
     def _refresh_count(self):
-        for i, row in enumerate(self._rows, start=1):
-            row.set_index(i, last=i == len(self._rows))
+        shown = [r for r in self._rows
+                 if not r.left_out() or self._fold_open]
+        for r in self._rows:
+            r.setVisible(r in shown)
+        for i, row in enumerate(shown, start=1):
+            row.set_index(i, last=i == len(shown))
+        left = [r for r in self._rows if r.left_out()]
+        self.leftout_btn.setVisible(bool(left))
+        if left:
+            self.leftout_btn.setText(
+                i18n.t("Steps Prism left out ({n})").format(n=len(left)))
+            self.leftout_btn.setToolTip(i18n.t(
+                "Prism did not plan these. Open to switch one on."))
         on = sum(1 for r in self._rows if r.is_checked())
+        if ai_server.active():
+            self.count.setText("" if not self._rows else
+                               (i18n.t("{n} step") if on == 1
+                                else i18n.t("{n} steps")).format(n=on))
+            self.budget.setText("")
+            self.budget.setVisible(False)
+            self.set_run_enabled(on > 0)
+            return
         if not self._rows:
             self.count.setText("")
             self.budget.setText("")
