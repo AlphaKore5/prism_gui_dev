@@ -29,7 +29,7 @@ from widgets import controls as C                                  # noqa: E402
 from widgets import settings_panel as SP                           # noqa: E402
 
 SECTION_KEYS = ["licence", "profile", "agents", "language", "status",
-                "appearance", "privacy", "more"]
+                "components", "appearance", "privacy", "more"]
 
 
 def _panel(section="licence", cfg=None):
@@ -77,7 +77,7 @@ class TestShell(unittest.TestCase):
         self.assertIsInstance(p._nav_host, SP._SettingsNav)
         self.assertEqual(p._nav_host.width(), 220)
         btns = p.findChildren(QPushButton, "secBtn")
-        self.assertEqual(len(btns), 9)  # +1: Settings > Usage (stage 22)
+        self.assertEqual(len(btns), 10)  # +1: Settings > Usage (stage 22), +1: Components (stage 28)
         self.assertTrue(all(b.height() == 34 for b in btns))
         self.assertEqual([b.property("cur") for b in btns].count(True), 1)
 

@@ -26,7 +26,7 @@ import core_bridge as CB
 from addons import registry
 import i18n
 import theme
-import wakeword
+import deps
 from dialogs.base import PrismDialog
 from workers import AutomationWorker, MeasureWorker, RecordWorker
 from widgets import controls as C
@@ -1242,12 +1242,9 @@ class BoqDialog(PrismDialog):
             self._rec.stop()
             self.ask.set_recording(False)
             return
-        if not CB.voice.available():
-            QMessageBox.information(
-                self, "Speak",
-                "Voice needs PyAudio on this machine:\n\n"
-                f"    {wakeword.install_hint()}\n\n"
-                "Everything else works — just type instead.")
+        problem = deps.voice_problem(self.cfg)
+        if problem:
+            QMessageBox.information(self, "Speak", problem)
             return
         self.ask.set_recording(True)
         self.status.setText("Listening — press Stop when you're done.")

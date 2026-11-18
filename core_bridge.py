@@ -403,6 +403,18 @@ def studio_available() -> tuple[bool, str]:
     return ok, why if ok else _no_pip_in_a_frozen_build(why)
 
 
+def reset_browser_cache() -> None:
+    """Forget the engine's remembered answer to "where is Chromium", so a
+    browser installed (or moved) while Prism is open is found without a
+    restart. deps.py calls this after an install."""
+    try:
+        from core import browser
+        browser._cached_path = browser._UNSET
+        browser._retry_after = 0.0
+    except Exception:                           # noqa: BLE001
+        pass
+
+
 def studio_browser_path() -> str:
     """Where Studio's Chromium is on this machine, or "" — for Export
     diagnostics, so "Studio isn't offered here" comes with the path it

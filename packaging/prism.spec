@@ -346,6 +346,7 @@ def _addon_modules() -> list[str]:
 
 hiddenimports = _engine_modules() + _addon_modules() + [
     "rapidocr_onnxruntime", "onnxruntime",
+    "matplotlib", "matplotlib.backends.backend_agg",   # cad_render.py imports it lazily
     # Optional-at-runtime, imported inside functions.
     "pypdf", "docx", "openpyxl", "pyaudio",
     # Mail-server discovery: core/inbox.py does a lazy `import dns.resolver`
@@ -402,6 +403,7 @@ _REQUIRED = {
     "cryptography": "licensing", "certifi": "HTTPS trust",
     "selenium": "browser automation", "undetected_chromedriver": "browser automation",
     "googleapiclient": "Google Drive", "google_auth_oauthlib": "Google Drive",
+    "matplotlib": "drawing pictures for BOQ (cad_render.py)",
 }
 if sys.platform == "darwin":
     _REQUIRED.update({"Vision": "reading text in pictures on a Mac",
@@ -530,7 +532,7 @@ excludes = [
     #   · Prism Reel draws its frames with Pillow (PIL).
     # Both add-ons are things we sell. They cost ~50MB in the bundle; a
     # flagship feature that only works on a developer's machine costs more.
-    "tkinter", "matplotlib", "scipy", "pandas", "IPython",
+    "tkinter", "scipy", "pandas", "IPython",
     "pytest", "notebook",
 ]
 

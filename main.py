@@ -485,6 +485,10 @@ def main():
 
     import core_bridge as CB
     import identity
+    import deps
+    # A browser Prism installed itself (Settings > Components) is used from the
+    # next start on; file listing only, no network.
+    deps.ensure_environment()
     cfg = CB.config.load()
     i18n.start(cfg, app)
 

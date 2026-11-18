@@ -31,6 +31,7 @@ import diagnostics
 import i18n
 from widgets.loader import LoadingDialog
 import identity
+import deps
 import licensing
 import ai_server
 import paths
@@ -71,7 +72,6 @@ from workers import (RouteWorker, AutomationWorker, RecordWorker,
                      InterpretWorker, FindWorker, AuthorizeWorker, AttachWorker,
                      FFmpegWorker, QuietUpdateWorker, UpdateWorker, FollowupRouteWorker,
                      ReelWorker)
-import wakeword
 from wakeword import WakeWordListener
 from addons.email.dialog import EmailComposeDialog, EmailSetupDialog
 from addons.boq.dialog import BoqDialog
@@ -1640,7 +1640,10 @@ class MainWindow(QMainWindow):
 
     def _open_motion_dialog(self):
         ok, err = CB.motion_available()
+        if not ok and self._offer_components("motion"):
+            ok, err = CB.motion_available()
         if not ok:
+            err = deps.plain(err)
             if "ffmpeg" in err.lower():
                 self._offer_ffmpeg(then=self._open_motion_dialog)
                 return
@@ -1658,6 +1661,12 @@ class MainWindow(QMainWindow):
 
     def _open_whatsapp_dialog(self):
         WhatsAppDialog(self.cfg, self).exec()
+
+    def _offer_components(self, feature: str) -> bool:
+        """The first press of a feature whose part is missing: one clear
+        question instead of an error. True when the feature can now run."""
+        from dialogs.component_install import offer_for_feature
+        return offer_for_feature(self, feature)
 
     def _offer_ffmpeg(self, then=None):
         """Offer to fetch FFmpeg, then carry on with what they were doing.
@@ -2303,9 +2312,9 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, "Voice", "Set your Groq API key in Setup first.")
                 self.input_panel.set_recording(False)
                 return
-            ok, why = wakeword.available()
-            if not ok:
-                QMessageBox.warning(self, "Voice", why)
+            problem = deps.voice_problem(self.cfg)
+            if problem:
+                QMessageBox.warning(self, "Voice", problem)
                 self.input_panel.set_recording(False)
                 return
             self._record_worker = RecordWorker(self.cfg)
@@ -2726,7 +2735,10 @@ class MainWindow(QMainWindow):
         # calls later — and offer the renderer that does work.
         if "Prism Studio" in run_agents.values():
             ok, why = CB.studio_available()
+            if not ok and self._offer_components("studio"):
+                ok, why = CB.studio_available()
             if not ok:
+                why = deps.plain(why)
                 answer = QMessageBox.question(
                     self, "Prism Studio",
                     # Says what the swap costs. Prism Reel has no step that
@@ -2753,7 +2765,10 @@ class MainWindow(QMainWindow):
         # same fallback to the one renderer with none of those dependencies.
         if "Prism Motion" in run_agents.values():
             ok, why = CB.motion_available()
+            if not ok and self._offer_components("motion"):
+                ok, why = CB.motion_available()
             if not ok:
+                why = deps.plain(why)
                 answer = QMessageBox.question(
                     self, "Prism Motion",
                     # Says what the swap costs. Prism Reel has no step that
@@ -4268,15 +4283,15 @@ class MainWindow(QMainWindow):
                 return
             # Packaged builds ship without PortAudio (it's a system library, not
             # a wheel), so say what's missing instead of failing silently.
-            ok, why = wakeword.available()
-            if not ok:
+            why = deps.voice_problem(self.cfg)
+            if why:
                 QMessageBox.warning(self, "Wake word", why)
                 self.sidebar.set_listening(False)
                 return
             self._wake_listener = WakeWordListener(self.cfg)
             self._wake_listener.heard.connect(self._on_wake_heard)
             self._wake_listener.error.connect(
-                lambda e: QMessageBox.warning(self, "Wake word", e))
+                lambda e: QMessageBox.warning(self, "Wake word", deps.voice_error(e)))
             self._wake_listener.start()
             self.statusBar().showMessage('Listening for "Prism"…')
         elif self._wake_listener:

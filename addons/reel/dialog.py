@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
 import core_bridge as CB
 import i18n
 import theme
-import wakeword
+import deps
 from dialogs.base import PrismDialog
 from widgets import controls as C
 from workers import (AutomationWorker, RecordWorker, ReelWorker,
@@ -309,12 +309,9 @@ class ReelDialog(PrismDialog):
             self._rec.stop()
             self.ask.set_recording(False)
             return
-        if not CB.voice.available():
-            QMessageBox.information(
-                self, "Speak",
-                "Voice needs PyAudio on this machine:\n\n"
-                f"    {wakeword.install_hint()}\n\n"
-                "Everything else works — just type instead.")
+        problem = deps.voice_problem(self.cfg)
+        if problem:
+            QMessageBox.information(self, "Speak", problem)
             return
         self.ask.set_recording(True)
         self._rec = RecordWorker(self.cfg)

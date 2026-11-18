@@ -98,6 +98,13 @@ cadquery
 shapely
 gerbonara
 
+# BOQ's "read this DXF/DWG drawing with AI" draws the drawing to a PNG with
+# ezdxf's matplotlib backend (addons/boq/cad_render.py). It was neither listed
+# here nor allowed through packaging/prism.spec (it sat in `excludes`), so in a
+# packaged build that button died with "No module named 'matplotlib'" while
+# working from source. Agg backend only; ~35 MB.
+matplotlib
+
 # FFmpeg, as a wheel. Pillow draws the frames and this encodes them.
 #
 # Not optional for a BUILD, and this is why: Windows does not come with

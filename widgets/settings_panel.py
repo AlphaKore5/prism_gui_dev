@@ -107,6 +107,9 @@ SECTIONS = [
     ("status", "Connections", "Configure",
      "Everything else Prism has to be able to reach: your browser, your "
      "team folder."),
+    ("components", "Components", "Configure",
+     "The extra parts Prism uses to make videos, read pictures and listen "
+     "to you, and a way to get any that are missing."),
     ("appearance", "Appearance", "Configure",
      "Dark or light mode, background wallpaper, card glassmorphism and visual effects."),
     ("privacy", "Privacy & data", "Configure",
@@ -123,6 +126,8 @@ _SECTION_SEARCH = {
     "agents": "ai api key groq tools models login credentials",
     "language": "translation output language hindi gujarati",
     "status": "connection browser chrome drive sync login",
+    "components": "chromium browser ffmpeg video install download missing "
+                  "microphone voice speak ocr playwright dependency repair",
     "appearance": "theme dark light wallpaper display",
     "privacy": "data files storage privacy folders",
     "more": "help meeting contact email phone legal support",
@@ -415,6 +420,7 @@ class SettingsPanel(QDialog):
             "agents": self._agents,
             "language": self._language,
             "status": self._connections,
+            "components": self._components,
             "appearance": self._appearance,
             "privacy": self._privacy,
             "more": self._more,
@@ -1688,6 +1694,55 @@ class SettingsPanel(QDialog):
             C.button(i18n.t("Close Prism's browser"), "secondary",
                      on_click=self._close_browser),
         ]))
+
+    # ── components ────────────────────────────────────────────────────────
+    _COMPONENT_PILL = {"ready": ("Ready", "ok"), "missing": ("Missing", "err"),
+                       "update": ("Needs update", "warn")}
+
+    def _components(self, col):
+        """Every part Prism leans on that is not its own code, with what it is
+        for and, where Prism can fetch it, an Install / Repair button."""
+        import deps
+        states = deps.detect_all()
+        for c in deps.COMPONENTS:
+            st = states[c.key]
+            label, tone = self._COMPONENT_PILL[st.state]
+            card = Card("white")
+            body = card.body((theme.CARD_PAD - 2, theme.SPACE_3 + 2,
+                              theme.CARD_PAD, theme.SPACE_4), spacing=theme.SPACE_2)
+            top = QHBoxLayout()
+            top.addWidget(C.label(c.name, level="BODY", weight=600, wrap=True),
+                          stretch=1)
+            pill = Pill(i18n.t(label), tone)
+            pill.setObjectName("componentState")
+            top.addWidget(pill)
+            body.addLayout(top)
+            body.addWidget(C.label(i18n.t(c.purpose), level="SUPPORT",
+                                   colour=theme.NEUTRAL[600], wrap=True))
+            body.addWidget(C.label(i18n.t(st.detail), level="SUPPORT", wrap=True))
+            if c.install:
+                button = C.button(
+                    i18n.t("Repair") if st.state == "ready" else i18n.t("Install"),
+                    "secondary",
+                    on_click=lambda _=False, k=c.key: self._install_component(k))
+                button.setObjectName("componentInstall_" + c.key)
+                body.addWidget(self._buttons([button]))
+            elif st.state != "ready":
+                button = C.button(i18n.t("Install"), "secondary")
+                button.setEnabled(False)
+                reason = i18n.t(deps.plain_install_reason(c))
+                button.setToolTip(reason)
+                button.setObjectName("componentInstall_" + c.key)
+                body.addWidget(self._buttons([button]))
+                body.addWidget(C.label(reason, level="SUPPORT",
+                                       colour=theme.NEUTRAL[600], wrap=True))
+            col.addWidget(card)
+
+    def _install_component(self, key: str):
+        from dialogs.component_install import ComponentInstallDialog
+        dlg = ComponentInstallDialog(key, self)
+        dlg.exec()
+        self.refresh()
 
     def _detect_chrome(self, field: QLineEdit):
         try:

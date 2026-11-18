@@ -421,7 +421,8 @@ class RecordWorker(_Worker):
             text, lang = CB.voice.transcribe(wav, self.cfg)
             self.done.emit(text, lang)
         except Exception as e:
-            self.failed.emit(str(e))
+            import deps
+            self.failed.emit(deps.voice_error(str(e)))
 
 
 class InterpretWorker(_Worker):
