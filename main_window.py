@@ -3567,7 +3567,7 @@ class MainWindow(QMainWindow):
         # One task: its answer and files are already on the conversation, so
         # no recap window is put on top of them. Several queued tasks share
         # the one page, so those still get the recap.
-        if len(groups) == 1:
+        if len(groups) == 1 and not self._queue_stopped:
             return
         else:
             CompletionDialog(groups[0]["stages"], self, task_groups=groups).exec()

@@ -77,6 +77,8 @@ def inline_workers(monkeypatch, tmp_path_factory):
     def no_modal(*a, **k):
         raise AssertionError("a window popped up in the conversation")
     monkeypatch.setattr(QMessageBox, "exec", no_modal)
+    # A stopped run still shows its recap; it is not what these tests look at.
+    monkeypatch.setattr(main_window.CompletionDialog, "exec", lambda self: 0)
     monkeypatch.setattr(QMessageBox, "information", no_modal)
     monkeypatch.setattr(main_window.MainWindow, "_explain",
                         lambda self, *a, **k: None)
