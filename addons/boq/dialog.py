@@ -45,6 +45,8 @@ from addons.boq.elv_dialog import ElvReadDialog
 from addons.boq.takeoff import IndustryTakeoffDialog
 from addons.boq.workers import OpenRouterWriteWorker
 from widgets.output_panel import short_duration
+from widgets import send_to_ai
+from addons.boq import converter_dialog, converter_setup
 
 
 # Said once a drawing is measured. Shown on steps 1-2 only: from "make" on it is
@@ -486,6 +488,7 @@ class BoqDialog(PrismDialog):
         # (bundled or installed): a client on a covered platform, or one who
         # has installed ODA themselves, can attach .dwg all day and must not
         # be nagged about a problem they do not have.
+        converter_setup.apply_saved(self.cfg)
         if not self.boq.find_dwg_converter():
             dxf_note = QLabel(
                 "Attaching a drawing? Save it as <b>DXF</b> first — in AutoCAD "
@@ -1146,6 +1149,7 @@ class BoqDialog(PrismDialog):
     def _measure(self):
         if not self.cad_path or not os.path.exists(self.cad_path):
             return
+        converter_setup.apply_saved(self.cfg)
         self.progress.set_stage(0)
         self._set_busy(True, f"Reading {os.path.basename(self.cad_path)} — "
                              "a large drawing can take a minute…")
@@ -1233,7 +1237,20 @@ class BoqDialog(PrismDialog):
         # Don't auto-start a deferred run on a failed measure — the user should
         # see the error and decide (they can still run a derived/spec BOQ).
         self._run_pending = False
+        if converter_setup.is_missing_message(error):
+            self._offer_converter()
+            return
         QMessageBox.warning(self, "BOQ", error)
+
+    def _offer_converter(self):
+        """No DWG converter on this computer: the install / choose / DXF window."""
+        outcome = converter_dialog.ask_for_converter(self, self.cfg)
+        if outcome == "ready":
+            self._measure()
+        elif outcome == "dxf":
+            self.status.setText(i18n.t(
+                "In your drawing program, save the drawing as a DXF file, then press "
+                "\"Change drawing\" and pick that file."))
 
     # ── voice ───────────────────────────────────────────────────────────
 
@@ -1774,6 +1791,9 @@ class BoqDialog(PrismDialog):
         QMessageBox.warning(self, "BOQ", error)
 
     def _set_busy(self, busy: bool, message: str):
+        if not busy and getattr(self, "_sending", None) is not None:
+            send_to_ai.hide_panel(self._sending)
+            self._sending = None
         if busy:
             self.progress.set_message(message)
         self.progress.setVisible(busy)
@@ -1782,17 +1802,13 @@ class BoqDialog(PrismDialog):
         self._refresh_primary()
 
     def _drawing_consent(self) -> bool:
-        """The drawing leaves this computer only after this explicit yes."""
-        agent = self.writer_combo.currentText().strip() or "the writing AI"
-        answer = QMessageBox.question(
-            self, i18n.t("Send the drawing to AI?"),
-            i18n.t("You are now permitting {name} to be sent to {agent} so it "
-                   "can recheck the measured quantities. The drawing file "
-                   "leaves this computer. Continue?").replace(
-                       "{name}", os.path.basename(self.cad_path)).replace(
-                       "{agent}", agent),
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-        return answer == QMessageBox.Yes
+        """The drawing leaves this computer only after the shared 'Send to Prism AI?'
+        yes (asked once, "Don't ask again" remembered). Shows the sending card."""
+        if not send_to_ai.ask_consent(self, self.cfg, self.cad_path, what=i18n.t("drawing")):
+            return False
+        send_to_ai.hide_panel(getattr(self, "_sending", None))
+        self._sending = send_to_ai.show_panel(self, self.cad_path)
+        return True
 
     def _ask_recheck(self):
         if not self._drawing_consent():

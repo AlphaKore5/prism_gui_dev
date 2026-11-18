@@ -68,11 +68,39 @@ class PickingADrawingEnablesTheReadButton(unittest.TestCase):
         self.assertFalse(hasattr(d, "tiled_rb"))
 
 
+from widgets import send_to_ai as _S                              # noqa: E402
+from dialogs.send_consent import SendConsentDialog as _SCD       # noqa: E402
+
+
+def _exec(accept=None):
+    """The shared 'Send to Prism AI?' window answered without opening (a real modal would
+    hang the run): True = Send, False = Cancel."""
+    _S.reset_session()
+
+    seen = mock.MagicMock()                       # .called / .call_count, as before
+
+    def answer(self_):
+        from PySide6.QtWidgets import QLabel
+        seen()
+        _exec.texts = " ".join(l.text() for l in self_.findChildren(QLabel))
+        return _SCD.Accepted if accept else _SCD.Rejected
+
+    class _Patch:
+        def __enter__(self_):
+            self_.p = mock.patch.object(_SCD, "exec", answer)
+            self_.p.start()
+            return seen
+
+        def __exit__(self_, *exc):
+            self_.p.stop()
+    return _Patch()
+
+
 class NoApiKeyRefusesToReadAPdfAtAll(unittest.TestCase):
     def test_no_key_shows_a_message_and_never_asks_consent_for_a_pdf(self):
         d = _dialog_with_key(api_key="", path="/x/fake.pdf")
         with mock.patch.object(D.QMessageBox, "information") as info, \
-                mock.patch.object(D.QMessageBox, "question") as q:
+                _exec() as q:
             d._read()
         self.assertTrue(info.called)
         self.assertFalse(q.called)
@@ -97,18 +125,17 @@ class OnlyAPdfEverAsksConsent(unittest.TestCase):
 
     def test_a_pdf_asks_consent_before_reading(self):
         d = _dialog_with_key(path="/x/fake.pdf")
-        with mock.patch.object(D.QMessageBox, "question",
-                               return_value=QMessageBox.No) as q, \
+        with _exec(False) as q, \
                 mock.patch.object(D, "ElvReadWorker", _FakeWorker):
             d._read()
         self.assertTrue(q.called)
-        message = q.call_args.args[2]
-        self.assertIn("NOT sent", message)
-        self.assertIn("as a whole", message)
+        message = _exec.texts
+        self.assertIn("never the whole drawing", message)
+        self.assertIn("Prism AI", message)
 
     def test_a_dxf_never_asks_consent(self):
         d = _dialog_with_key(path="/x/fake.dxf")
-        with mock.patch.object(D.QMessageBox, "question") as q, \
+        with _exec() as q, \
                 mock.patch.object(D, "ElvReadWorker", _FakeWorker):
             d._read()
         self.assertFalse(q.called)
@@ -116,7 +143,7 @@ class OnlyAPdfEverAsksConsent(unittest.TestCase):
 
     def test_a_dwg_never_asks_consent(self):
         d = _dialog_with_key(path="/x/fake.dwg")
-        with mock.patch.object(D.QMessageBox, "question") as q, \
+        with _exec() as q, \
                 mock.patch.object(D, "ElvReadWorker", _FakeWorker):
             d._read()
         self.assertFalse(q.called)
@@ -124,8 +151,7 @@ class OnlyAPdfEverAsksConsent(unittest.TestCase):
 
     def test_declining_consent_on_a_pdf_never_starts_the_worker(self):
         d = _dialog_with_key(path="/x/fake.pdf")
-        with mock.patch.object(D.QMessageBox, "question",
-                               return_value=QMessageBox.No), \
+        with _exec(False), \
                 mock.patch.object(D, "ElvReadWorker", _FakeWorker):
             _FakeWorker.last = None
             d._read()
@@ -133,8 +159,7 @@ class OnlyAPdfEverAsksConsent(unittest.TestCase):
 
     def test_accepting_consent_on_a_pdf_starts_the_worker(self):
         d = _dialog_with_key(path="/x/fake.pdf")
-        with mock.patch.object(D.QMessageBox, "question",
-                               return_value=QMessageBox.Yes), \
+        with _exec(True), \
                 mock.patch.object(D, "ElvReadWorker", _FakeWorker):
             _FakeWorker.last = None
             d._read()

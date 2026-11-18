@@ -56,6 +56,7 @@ from PySide6.QtWidgets import (
 import core_bridge as CB
 import email_config
 import i18n
+from widgets import send_to_ai
 from widgets.loader import Loader
 import theme
 from dialogs.base import PrismDialog
@@ -2233,6 +2234,16 @@ class InquiryDialog(PipelineActions, PipelineScreen, QWidget):
         if not text:
             self._show_po(None, row, advice=advice)
             return
+        # A file (not just mail text) is about to leave this computer: the shared yes.
+        self._po_sending = None
+        if path and not send_to_ai.ask_consent(self, self.cfg, path, what=i18n.t("order")):
+            self._show_po(None, row, advice=i18n.t(
+                "Nothing was sent. Type the fields from the printed order and everything "
+                "else carries on as normal."))
+            return
+        if path:
+            self._po_sending = send_to_ai.show_panel(
+                self, path, i18n.t("Reading your order…"))
         self.po_btn.setEnabled(False)
         self.progress.setVisible(True)
         self.status.setText(i18n.t("Reading the purchase order…"))
@@ -2242,7 +2253,12 @@ class InquiryDialog(PipelineActions, PipelineScreen, QWidget):
             lambda message: self._po_read_failed(message, row))
         self._po_worker.start()
 
+    def _end_po_sending(self):
+        send_to_ai.hide_panel(getattr(self, "_po_sending", None))
+        self._po_sending = None
+
     def _po_read(self, order, row: dict):
+        self._end_po_sending()
         self.po_btn.setEnabled(True)
         self.progress.setVisible(False)
         self.status.setText("")
@@ -2256,6 +2272,7 @@ class InquiryDialog(PipelineActions, PipelineScreen, QWidget):
         self._show_po(order, row, advice=advice, differences=differences)
 
     def _po_read_failed(self, message: str, row: dict):
+        self._end_po_sending()
         """Extraction failed — a scan, a dead key, a rate limit. The POError
         text already says what to do, and the typed-in form is always the way
         through: an unreadable file must never block accepting a real order.

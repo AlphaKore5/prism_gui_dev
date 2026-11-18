@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
 import i18n
 import theme
 from widgets import controls as C
+from widgets import send_to_ai
 from addons.boq import industries
 from addons.boq.measured import _TintDelegate
 from addons.boq.workers import HvacTakeoffWorker
@@ -672,22 +673,17 @@ class IndustryTakeoffDialog(QDialog):
         self.use_btn.setEnabled(self.result is not None and self.scale_confirm_cb.isChecked())
 
     def _ai_tag_consent(self) -> bool:
-        """The same explicit, every-time yes addons/boq/dialog.py's own
-        _drawing_consent() already asks before a BOQ drawing attachment
-        leaves this computer -- small cropped PIECES of the drawing here,
-        not the whole file, and the wording says so plainly (the owner's
-        own instruction: lead with what does NOT happen -- the whole
-        drawing never goes -- not with an alarm about what does). Still
-        asked every time, never remembered from ticking the box above:
-        that box only says OCR should run; this is the one place that
-        actually sends anything."""
-        answer = QMessageBox.question(
-            self, i18n.t("Use AI to help read tags?"),
-            i18n.t("Your drawing is NOT sent to AI as a whole -- only a "
-                   "few small cropped pieces, to help OCR catch tags it "
-                   "missed. Continue?"),
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-        return answer == QMessageBox.Yes
+        """The shared "Send to Prism AI?" yes (asked once, remembered). What leaves
+        this computer is small cropped PIECES of the drawing, not the whole file,
+        and the wording says so plainly."""
+        ok = send_to_ai.ask_consent(
+            self, self.cfg, self.pdf_path, what=i18n.t("drawing"),
+            note=i18n.t("Only a few small cropped pieces are sent, to help read tags the "
+                        "first pass missed, never the whole drawing. Nothing else leaves "
+                        "your computer."))
+        if ok:
+            self._sending = send_to_ai.show_panel(self, self.pdf_path)
+        return ok
 
     # ── Step 2 ───────────────────────────────────────────────────────────
 
@@ -736,7 +732,12 @@ class IndustryTakeoffDialog(QDialog):
         self._worker.failed.connect(self._on_extract_failed)
         self._worker.start()
 
+    def _end_sending(self):
+        send_to_ai.hide_panel(getattr(self, "_sending", None))
+        self._sending = None
+
     def _on_extracted(self, result: dict):
+        self._end_sending()
         self.result = result
         self.review.set_result(self.industry, result)
         self.review.setVisible(True)
@@ -760,6 +761,7 @@ class IndustryTakeoffDialog(QDialog):
         self._set_warnings(result.get("warnings") or [])
 
     def _on_extract_failed(self, error: str):
+        self._end_sending()
         self.extract_btn.setEnabled(True)
         self.status.setText("")
         QMessageBox.warning(self, "BOQ", error)

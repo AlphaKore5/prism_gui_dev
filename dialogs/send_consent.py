@@ -11,10 +11,12 @@ from widgets.send_to_ai import _Preview
 class SendConsentDialog(PrismDialog):
     """Asked once: this file leaves your computer for Prism AI."""
 
-    def __init__(self, path: str, what: str, parent=None):
+    def __init__(self, path: str, what: str, parent=None, note: str = ""):
         super().__init__(i18n.t("Send to Prism AI?"),
                          i18n.t("This {what} will be sent to Prism AI so it can read it. "
-                                "Nothing else leaves your computer.").format(what=what),
+                                "{note}").format(
+                             what=what,
+                             note=note or i18n.t("Nothing else leaves your computer.")),
                          icon="send", parent=parent, closable=False)
         self.preview = _Preview(path)
         self.body.addWidget(self.preview)

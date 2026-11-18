@@ -33,7 +33,8 @@ from PySide6.QtWidgets import (
 
 import i18n
 from widgets import controls as C
-from addons.boq import industries
+from widgets import send_to_ai
+from addons.boq import converter_dialog, converter_setup, industries
 from addons.boq.workers import ElvReadWorker
 
 _DRAWING_FILTER = "Drawings (*.pdf *.dwg *.dxf)"
@@ -117,17 +118,18 @@ class ElvReadDialog(QDialog):
         `tag_reader` unless that path found nothing). The wording is true
         unconditionally: a drawing is read tile by tile, never as a whole
         -- a small page already collapses to one tile on its own."""
-        answer = QMessageBox.question(
-            self, i18n.t("Use AI to help read this drawing?"),
-            i18n.t("Your drawing is NOT sent to AI as a whole -- only "
-                   "small cropped pieces, to read tags and labels. "
-                   "Continue?"),
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-        return answer == QMessageBox.Yes
+        ok = send_to_ai.ask_consent(
+            self, self.cfg, self.pdf_path, what=i18n.t("drawing"),
+            note=i18n.t("Only small cropped pieces are sent, never the whole drawing. "
+                        "Nothing else leaves your computer."))
+        if ok:
+            self._sending = send_to_ai.show_panel(self, self.pdf_path)
+        return ok
 
     def _read(self):
         if not self.pdf_path:
             return
+        converter_setup.apply_saved(self.cfg)
         api_key = (self.cfg.get("openrouter_api_key") or "").strip()
         if self._is_pdf():
             # A DWG/DXF may read entirely from real entities, no AI, no
@@ -135,8 +137,8 @@ class ElvReadDialog(QDialog):
             if not api_key:
                 QMessageBox.information(self, i18n.t(
                     "{industry} drawing reading").format(industry=self.industry),
-                    i18n.t("Reading a PDF drawing needs an OpenRouter key — "
-                           "add one in Settings → Agents."))
+                    i18n.t("Reading a PDF drawing needs an AI key. Add one in "
+                           "Settings → Agents."))
                 return
             if not self._consent():
                 return
@@ -147,7 +149,12 @@ class ElvReadDialog(QDialog):
         self._worker.failed.connect(self._on_read_failed)
         self._worker.start()
 
+    def _end_sending(self):
+        send_to_ai.hide_panel(getattr(self, "_sending", None))
+        self._sending = None
+
     def _on_read(self, result: dict):
+        self._end_sending()
         self.result = result
         self.read_btn.setEnabled(True)
         self.status.setText(i18n.t("Read."))
@@ -156,6 +163,11 @@ class ElvReadDialog(QDialog):
         self.use_btn.setEnabled(True)
 
     def _on_read_failed(self, message: str):
+        self._end_sending()
+        if converter_setup.is_missing_message(message):
+            if converter_dialog.ask_for_converter(self, self.cfg) == "ready":
+                self._read()
+            return
         self.read_btn.setEnabled(True)
         self.status.setText("")
         QMessageBox.warning(self, i18n.t("{industry} drawing reading").format(

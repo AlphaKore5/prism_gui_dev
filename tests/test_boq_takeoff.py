@@ -132,6 +132,34 @@ def _dialog_with_key(role: str = "supply", api_key: str = "sk-or-x") -> T.Indust
     return d
 
 
+from widgets import send_to_ai as _S                              # noqa: E402
+from dialogs.send_consent import SendConsentDialog as _SCD       # noqa: E402
+
+
+def _exec(accept=None):
+    """The shared 'Send to Prism AI?' window answered without opening (a real modal would
+    hang the run): True = Send, False = Cancel."""
+    _S.reset_session()
+
+    seen = mock.MagicMock()                       # .called / .call_count, as before
+
+    def answer(self_):
+        from PySide6.QtWidgets import QLabel
+        seen()
+        _exec.texts = " ".join(l.text() for l in self_.findChildren(QLabel))
+        return _SCD.Accepted if accept else _SCD.Rejected
+
+    class _Patch:
+        def __enter__(self_):
+            self_.p = mock.patch.object(_SCD, "exec", answer)
+            self_.p.start()
+            return seen
+
+        def __exit__(self_, *exc):
+            self_.p.stop()
+    return _Patch()
+
+
 class TheAiTagRecheckRidesTheSameOcrTickNeverASecondCheckbox(unittest.TestCase):
     """item 2 (5 Nov 2026): per the owner's own instruction, no dedicated
     GUI space for this -- it is offered or withheld entirely through
@@ -142,7 +170,7 @@ class TheAiTagRecheckRidesTheSameOcrTickNeverASecondCheckbox(unittest.TestCase):
 
     def test_no_api_key_never_asks_and_never_turns_on_ai_tags(self):
         d = _dialog_with_key(api_key="")
-        with mock.patch.object(T.QMessageBox, "question") as q, \
+        with _exec() as q, \
                 mock.patch.object(T, "HvacTakeoffWorker", _FakeWorker):
             d._extract()
         self.assertFalse(q.called)
@@ -151,7 +179,7 @@ class TheAiTagRecheckRidesTheSameOcrTickNeverASecondCheckbox(unittest.TestCase):
     def test_ocr_box_unticked_never_asks_even_with_a_key_set(self):
         d = _dialog_with_key()
         d.ocr_cb.setChecked(False)
-        with mock.patch.object(T.QMessageBox, "question") as q, \
+        with _exec() as q, \
                 mock.patch.object(T, "HvacTakeoffWorker", _FakeWorker):
             d._extract()
         self.assertFalse(q.called)
@@ -159,8 +187,7 @@ class TheAiTagRecheckRidesTheSameOcrTickNeverASecondCheckbox(unittest.TestCase):
 
     def test_a_key_and_a_ticked_box_ask_once_and_a_yes_turns_it_on(self):
         d = _dialog_with_key()
-        with mock.patch.object(T.QMessageBox, "question",
-                               return_value=QMessageBox.Yes) as q, \
+        with _exec(True) as q, \
                 mock.patch.object(T, "HvacTakeoffWorker", _FakeWorker):
             d._extract()
         self.assertEqual(q.call_count, 1)
@@ -172,18 +199,16 @@ class TheAiTagRecheckRidesTheSameOcrTickNeverASecondCheckbox(unittest.TestCase):
         # Owner's own instruction (5 Nov 2026): say positively that the
         # whole drawing does NOT go, rather than lead with "will be sent".
         d = _dialog_with_key()
-        with mock.patch.object(T.QMessageBox, "question",
-                               return_value=QMessageBox.No) as q, \
+        with _exec(False) as q, \
                 mock.patch.object(T, "HvacTakeoffWorker", _FakeWorker):
             d._extract()
-        message = q.call_args.args[2]
-        self.assertIn("NOT sent", message)
-        self.assertIn("as a whole", message)
+        message = _exec.texts
+        self.assertIn("never the whole drawing", message)
+        self.assertIn("Prism AI", message)
 
     def test_declining_the_consent_still_extracts_with_ocr_only(self):
         d = _dialog_with_key()
-        with mock.patch.object(T.QMessageBox, "question",
-                               return_value=QMessageBox.No), \
+        with _exec(False), \
                 mock.patch.object(T, "HvacTakeoffWorker", _FakeWorker):
             _FakeWorker.last = None
             d._extract()

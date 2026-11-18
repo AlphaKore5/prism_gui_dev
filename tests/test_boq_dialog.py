@@ -341,8 +341,9 @@ class TheDrawingGoesToAIOnlyAfterAYes(unittest.TestCase):
         from addons.boq import dialog as BD
         with mock.patch.object(BD, "AutomationWorker", self._Capture), \
                 mock.patch("addons.boq.run_dialog.BoqRunDialog", _FakeRunDialog), \
-                mock.patch.object(BD.QMessageBox, "question",
-                                  staticmethod(lambda *a, **k: answer)):
+                mock.patch.object(BD.send_to_ai, "ask_consent",
+                                  return_value=(answer == BD.QMessageBox.Yes)), \
+                mock.patch.object(BD.send_to_ai, "show_panel"):
             self.d._ask_recheck()
 
     def test_the_button_is_off_without_a_drawing_on_regardless_of_an_answer(self):

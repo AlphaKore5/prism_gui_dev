@@ -531,6 +531,52 @@ class ThePurchaseOrderStop(unittest.TestCase):
         self.assertIsNone(shown["order"])
         self.assertIn("computer", shown["advice"].lower())
 
+    def test_a_po_file_asks_the_shared_consent_once_and_cancel_sends_nothing(self):
+        """Stage 25: a PO FILE leaving the computer goes through the same
+        'Send to Prism AI?' question as every drawing; Cancel reads nothing."""
+        from widgets import send_to_ai
+        from dialogs.send_consent import SendConsentDialog as SCD
+        send_to_ai.reset_session()
+        pdf = os.path.join(self.folder, "PO 4471.pdf")
+        with open(pdf, "wb") as f:
+            f.write(b"%PDF-1.4 fake")
+        self.dialog.cfg["api_key"] = "k"
+        self.dialog.cfg["inquiry"]["local_only"] = False
+        row = self._register_with_quoted_row()
+        item = mailflow.Item("order", UI_MESSAGE(), row, self.folder)
+        self.dialog._orders = [item]
+        self.dialog.orders_table.setRowCount(1)
+        self.dialog.orders_table.setCurrentCell(0, 0)
+        shown = {}
+        self.dialog._show_po = (
+            lambda order, target, advice="", differences=None:
+            shown.update(order=order, advice=advice))
+        fake_po = mock.Mock()
+        fake_po.text_from.return_value = "PO text"
+        with mock.patch.object(SCD, "exec", return_value=SCD.Rejected) as ex, \
+                mock.patch.object(self.dialog, "_po_file", return_value=pdf), \
+                mock.patch.object(UI.CB, "get_po", return_value=fake_po), \
+                mock.patch.object(UI, "POReadWorker",
+                                  side_effect=AssertionError("sent after Cancel")):
+            self.dialog._review_po()
+        ex.assert_called_once()
+        self.assertIsNone(shown["order"])
+        self.assertIn("Nothing was sent", shown["advice"])
+        # Yes: the question is asked, the worker starts, the 'sending' card is up.
+        worker = mock.MagicMock()
+        with mock.patch.object(SCD, "exec", return_value=SCD.Accepted) as ex, \
+                mock.patch.object(self.dialog, "_po_file", return_value=pdf), \
+                mock.patch.object(UI.CB, "get_po", return_value=fake_po), \
+                mock.patch.object(UI, "POReadWorker", return_value=worker):
+            self.dialog._review_po()
+            self.dialog._review_po()
+        ex.assert_called_once()                       # remembered for the session
+        self.assertTrue(worker.start.called)
+        self.assertIsNotNone(self.dialog._po_sending)
+        self.assertEqual(self.dialog._po_sending.preview.name.text(), "PO 4471.pdf")
+        self.dialog._po_read_failed("x", row)
+        self.assertIsNone(self.dialog._po_sending)
+
     def test_the_review_refuses_to_accept_without_number_and_value(self):
         dialog = UI._POReviewDialog({"Inquiry no": "INQ/26-27/0087"})
         with mock.patch.object(QMessageBox, "information") as told:

@@ -63,13 +63,13 @@ class _Preview(QWidget):
         row.addLayout(col, 1)
 
 
-def ask_consent(parent, cfg: dict, path: str, what: str = "drawing") -> bool:
+def ask_consent(parent, cfg: dict, path: str, what: str = "drawing", note: str = "") -> bool:
     """True when this file may be sent. Asks once; 'Don't ask again' is saved to
     the user's config. Cancel sends nothing and is not remembered."""
     if not needs_question(cfg):
         return True
     from dialogs.send_consent import SendConsentDialog  # a window to open: imported where it opens
-    dlg = SendConsentDialog(path, what, parent)
+    dlg = SendConsentDialog(path, what, parent, note=note)
     if dlg.exec() != SendConsentDialog.Accepted:
         return False
     _session["ok"] = True
@@ -120,3 +120,18 @@ class SendingPanel(QFrame):
     def finish(self) -> None:
         self.hide()
         self.deleteLater()
+
+
+def show_panel(parent: QWidget, path: str, message: str = "") -> "SendingPanel":
+    """Open the 'Sending to Prism AI' card over `parent`; pass it to hide_panel() when done."""
+    panel = SendingPanel(parent, path, message)
+    panel.show_over()
+    return panel
+
+
+def hide_panel(panel) -> None:
+    if panel is not None:
+        try:
+            panel.finish()
+        except RuntimeError:                    # already gone with its parent
+            pass
