@@ -72,12 +72,12 @@ def _centre(widget, root):
 
 
 class TestShell(unittest.TestCase):
-    def test_nav_is_a_soft_220px_panel_with_eight_34px_buttons(self):
+    def test_nav_is_a_soft_220px_panel_with_nine_34px_buttons(self):
         p = _panel()
         self.assertIsInstance(p._nav_host, SP._SettingsNav)
         self.assertEqual(p._nav_host.width(), 220)
         btns = p.findChildren(QPushButton, "secBtn")
-        self.assertEqual(len(btns), 8)
+        self.assertEqual(len(btns), 9)  # +1: Settings > Usage (stage 22)
         self.assertTrue(all(b.height() == 34 for b in btns))
         self.assertEqual([b.property("cur") for b in btns].count(True), 1)
 
