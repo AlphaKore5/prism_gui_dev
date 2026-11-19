@@ -223,7 +223,7 @@ class TheExportsWriteWhatTheGridShows(unittest.TestCase):
 
     def test_the_save_button_reports_where_it_went(self):
         target = os.path.join(self.dir, "chosen.csv")
-        with mock.patch.object(pricing.QFileDialog, "getSaveFileName",
+        with mock.patch("widgets.file_pick.QFileDialog.getSaveFileName",
                                return_value=(target, "")):
             self.t._export("csv")
         self.assertTrue(os.path.exists(target))

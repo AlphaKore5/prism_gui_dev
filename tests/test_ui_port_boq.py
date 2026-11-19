@@ -624,10 +624,10 @@ class TheFrontDoorLeadsWithTheDropZone(unittest.TestCase):
         p = self._panel()
         got = []
         p.files_chosen.connect(got.append)
-        with mock.patch("addons.boq.panel.QFileDialog.getOpenFileNames", return_value=([], "")):
+        with mock.patch("widgets.file_pick.QFileDialog.getOpenFileNames", return_value=([], "")):
             p.drop_zone.button.click()
         self.assertEqual(got, [])
-        with mock.patch("addons.boq.panel.QFileDialog.getOpenFileNames", return_value=(["/x/a.dxf"], "")):
+        with mock.patch("widgets.file_pick.QFileDialog.getOpenFileNames", return_value=(["/x/a.dxf"], "")):
             p.drop_zone.button.click()
         self.assertEqual(got, [["/x/a.dxf"]])
 

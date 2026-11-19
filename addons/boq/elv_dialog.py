@@ -27,13 +27,13 @@ import os
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QDialog, QFileDialog, QHBoxLayout, QLabel, QMessageBox, QTextBrowser,
+    QDialog, QHBoxLayout, QLabel, QMessageBox, QTextBrowser,
     QVBoxLayout,
 )
 
 import i18n
 from widgets import controls as C
-from widgets import send_to_ai
+from widgets import send_to_ai, file_pick
 from dialogs.base import PrismDialog
 from addons.boq import converter_dialog, converter_setup, drawing_reader, industries
 from addons.boq.workers import ElvReadWorker
@@ -103,9 +103,7 @@ class ElvReadDialog(PrismDialog):
             self.read_btn.setEnabled(True)
 
     def _pick_pdf(self):
-        path, _ = QFileDialog.getOpenFileName(
-            self, i18n.t("Drawing"), os.path.expanduser("~"),
-            i18n.t(_DRAWING_FILTER))
+        path = file_pick.open_file(self, "Drawing", "boq-elv-drawing", file_pick.DRAWINGS, self.cfg)
         if not path:
             return
         self.pdf_path = path

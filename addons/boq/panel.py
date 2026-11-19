@@ -7,12 +7,13 @@ from __future__ import annotations
 
 
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QWidget
 
 import i18n
 import theme
 from addons.boq import history
 from widgets import controls as C
+from widgets import file_pick
 from widgets.stepper import DropZone
 from widgets.panel_base import (
     AddonFrontDoor,
@@ -73,7 +74,7 @@ class BoqPanel(AddonFrontDoor):
         super().build()
 
     def _choose_drawing(self):
-        paths, _ = QFileDialog.getOpenFileNames(self, i18n.t("Choose a drawing"))
+        paths = file_pick.open_files(self, "Choose a drawing", "boq-drawing", file_pick.DRAWINGS, self.cfg)
         if paths:
             self.files_chosen.emit(paths)
 

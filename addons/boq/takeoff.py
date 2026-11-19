@@ -22,7 +22,7 @@ import os
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QImage, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
-    QComboBox, QDialog, QFileDialog, QHBoxLayout, QLabel, QLineEdit, QListWidget,
+    QComboBox, QDialog, QHBoxLayout, QLabel, QLineEdit, QListWidget,
     QListWidgetItem, QMessageBox, QScrollArea, QTableWidget, QTableWidgetItem,
     QVBoxLayout, QWidget, QAbstractItemView, QCheckBox, QHeaderView,
 )
@@ -31,7 +31,7 @@ import i18n
 import theme
 from widgets import controls as C
 from dialogs.base import PrismDialog
-from widgets import send_to_ai
+from widgets import send_to_ai, file_pick
 from addons.boq import industries
 from addons.boq.measured import _TintDelegate
 from addons.boq.workers import HvacTakeoffWorker
@@ -526,8 +526,7 @@ class IndustryTakeoffDialog(PrismDialog):
     # ── Step 1 ───────────────────────────────────────────────────────────
 
     def _pick_pdf(self):
-        path, _ = QFileDialog.getOpenFileName(
-            self, i18n.t("Tender PDF"), os.path.expanduser("~"), i18n.t("PDF (*.pdf)"))
+        path = file_pick.open_file(self, "Tender PDF", "boq-tender-pdf", file_pick.PDF, self.cfg)
         if not path:
             return
         self._load_pdf(path)

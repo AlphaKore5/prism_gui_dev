@@ -49,6 +49,10 @@ class AskPanel(QWidget):
     def __init__(self, placeholder: str, parent=None, compact: bool = False):
         super().__init__(parent)
         self._paths: list[str] = []
+        # Set by the owner so the file chooser starts where this person last picked.
+        self.cfg: dict | None = None
+        self.pick_kind = "attach"
+        self.pick_filters = "All files (*)"
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -116,7 +120,8 @@ class AskPanel(QWidget):
 
     # ── files ───────────────────────────────────────────────────────────
     def _pick_file(self):
-        paths, _ = QFileDialog.getOpenFileNames(self, i18n.t("Attach files"))
+        from widgets import file_pick
+        paths = file_pick.open_files(self, "Attach files", self.pick_kind, self.pick_filters, self.cfg)
         if paths:
             self.add_paths(paths)
 

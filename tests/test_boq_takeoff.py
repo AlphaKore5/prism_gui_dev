@@ -403,7 +403,7 @@ class MeasuringAScaleOverridesTheDropdownAndCountsAsConfirmation(unittest.TestCa
         d = _dialog_with_one_layer("supply")
         d._measured_pt_per_ft = 12.5
         d.measured_scale_label.setVisible(True)
-        with mock.patch.object(T, "QFileDialog") as fd, \
+        with mock.patch("widgets.file_pick.QFileDialog") as fd, \
                 mock.patch.object(T.industries, "scan_layers", return_value=[]):
             fd.getOpenFileName.return_value = ("/x/new.pdf", "")
             d._pick_pdf()

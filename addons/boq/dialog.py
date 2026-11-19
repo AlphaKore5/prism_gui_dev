@@ -18,7 +18,7 @@ import time
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel, QPushButton,
-    QPlainTextEdit, QTextEdit, QLineEdit, QMessageBox, QCheckBox, QFileDialog,
+    QPlainTextEdit, QTextEdit, QLineEdit, QMessageBox, QCheckBox,
     QComboBox, QWidget, QStackedWidget, QGridLayout, QSizePolicy, QFrame,
 )
 
@@ -30,6 +30,7 @@ import deps
 from dialogs.base import PrismDialog
 from workers import AutomationWorker, MeasureWorker, RecordWorker
 from widgets import controls as C
+from widgets import file_pick
 from widgets.loader import Loader
 from widgets.stepper import ChoiceCard, FileCard, StepTabs
 from widgets.usage_chip import UsageChip
@@ -250,9 +251,8 @@ class InputMeasurementsDialog(QDialog):
         col.addLayout(btn_row)
 
     def _upload(self):
-        path, _ = QFileDialog.getOpenFileName(
-            self, i18n.t("Measurements file"), os.path.expanduser("~"),
-            i18n.t("Text, JSON or CSV (*.txt *.json *.csv *.md);;All files (*)"))
+        path = file_pick.open_file(self, "Measurements file", "boq-measurements",
+                                   file_pick.MEASUREMENTS, getattr(self.parent(), "cfg", None))
         if not path:
             return
         try:
@@ -519,6 +519,9 @@ class BoqDialog(PrismDialog):
                 "\"BOQ for CCTV, cabling and fibre for this site\"  (attach the drawing)\n"
                 "\"materials to build one 36x24 jaw crusher, 100 TPH\"  (no drawing needed)")
         self.ask = AskPanel(placeholder, compact=self.mode == "boq")
+        self.ask.cfg = self.cfg
+        self.ask.pick_kind = "boq-drawing"
+        self.ask.pick_filters = file_pick.DRAWINGS
         self.ask.speak_clicked.connect(self._toggle_record)
         self.ask.files_added.connect(self._on_files_added)
         if self.mode == "boq":
@@ -2520,9 +2523,8 @@ class BoqDialog(PrismDialog):
                 "Make the {noun} first — there is nothing yet to fill a "
                 "template with.").replace("{noun}", self._noun))
             return
-        template_path, _ = QFileDialog.getOpenFileName(
-            self, i18n.t("Pick the client's own BOQ template"), "",
-            "Word documents (*.docx)")
+        template_path = file_pick.open_file(self, "Pick the client's own BOQ template",
+                                            "boq-template", file_pick.WORD, self.cfg)
         if not template_path:
             return
         try:

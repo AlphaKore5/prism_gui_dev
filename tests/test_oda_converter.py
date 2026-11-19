@@ -342,9 +342,12 @@ class Dialog(_Env):
              mock.patch.object(BD.QMessageBox, "warning") as warn:
             d._on_measure_failed(boq.NO_CONVERTER_TEXT + "\nmore")
         ask.assert_called_once(); measure.assert_called_once(); warn.assert_not_called()
+        # any other read problem is shown inline with one "Choose another drawing" button
+        # (the BOQ UX round replaced the pop-up), not as a message box
         with mock.patch.object(BD.QMessageBox, "warning") as warn:
             d._on_measure_failed("some other error")
-        warn.assert_called_once()
+        warn.assert_not_called()
+        self.assertTrue(d.fix_bar.isVisibleTo(d))
 
 
 class SharedConsentInBoq(_Env):
