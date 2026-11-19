@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
 import i18n
 import theme
 from widgets import controls as C
+from dialogs.base import PrismDialog
 from widgets import send_to_ai
 from addons.boq import industries
 from addons.boq.measured import _TintDelegate
@@ -363,7 +364,7 @@ class _ReviewTable(QWidget):
         self._filling = False
 
 
-class IndustryTakeoffDialog(QDialog):
+class IndustryTakeoffDialog(PrismDialog):
     """Pick a PDF, confirm what each line colour is (Step 1, folded away
     by default), extract, review and correct the readings, then hand the
     result back to BoqDialog exactly like InputMeasurementsDialog does --
@@ -372,7 +373,10 @@ class IndustryTakeoffDialog(QDialog):
 
     def __init__(self, industry: str, parent=None, cfg: dict | None = None,
                  path: str = ""):
-        super().__init__(parent)
+        super().__init__(
+            i18n.t("{industry} tender PDF").format(industry=industry),
+            i18n.t("Prism measures the ducts off your PDF. The PDF stays on this computer."),
+            icon="file", parent=parent, scrollable=True)
         self.industry = industry
         self.cfg = cfg if cfg is not None else {}
         self.pdf_path = ""
@@ -381,8 +385,8 @@ class IndustryTakeoffDialog(QDialog):
         self._measured_pt_per_ft: float | None = None
 
         self.setWindowTitle(i18n.t("{industry} PDF takeoff").format(industry=industry))
-        self.resize(640, 560)
-        col = QVBoxLayout(self)
+        self.resize(780, 700)
+        col = self.body
         # item 2 (5 Nov 2026): OCR alone still reads this tool's own
         # labels locally only -- true regardless of industry, so said
         # plainly, with no industry-specific carve-out named here (this
@@ -406,7 +410,7 @@ class IndustryTakeoffDialog(QDialog):
         col.addLayout(pick_row)
 
         settings_row = QHBoxLayout()
-        settings_row.addWidget(QLabel(i18n.t("Drawing scale:")))
+        settings_row.addWidget(QLabel(i18n.t("Drawing scale (from the title block):")))
         self.scale_combo = QComboBox()
         for label in industries.scales(self.industry):
             self.scale_combo.addItem(label, label)
@@ -463,6 +467,7 @@ class IndustryTakeoffDialog(QDialog):
         # Step 1 -- folded away by default; opening the main add-on must
         # not grow a second, cluttered PDF-reading screen for the common
         # case of someone who never needs to touch this.
+        col.addWidget(C.label(i18n.t("Step 1: what each line colour is"), level="SUPPORT"))
         self.mapping_btn = C.button("", "tertiary", small=True,
                                     on_click=self._toggle_mapping)
         self.mapping_btn.setVisible(False)
@@ -476,6 +481,7 @@ class IndustryTakeoffDialog(QDialog):
         self.mapping_area.setWidget(self.mapping_inner)
         col.addWidget(self.mapping_area)
 
+        col.addWidget(C.label(i18n.t("Step 2: extract the duct runs and labels"), level="SUPPORT"))
         self.extract_btn = C.button(i18n.t("Extract"), "primary", icon_name="check",
                                     small=True, on_click=self._extract)
         self.extract_btn.setEnabled(False)
@@ -508,15 +514,12 @@ class IndustryTakeoffDialog(QDialog):
         self.review.setVisible(False)
         col.addWidget(self.review, stretch=1)
 
-        btn_row = QHBoxLayout()
-        btn_row.addStretch(1)
-        btn_row.addWidget(C.button(i18n.t("Cancel"), "secondary", on_click=self.reject))
-        self.use_btn = C.button(i18n.t("Use these measurements"), "primary",
-                                on_click=self._confirm)
+        self.footer.add_secondary(self.button(i18n.t("Cancel"), on_click=self.reject))
+        self.use_btn = self.button(i18n.t("Use these measurements"), "primary",
+                                   on_click=self._confirm)
         self.use_btn.setEnabled(False)
         self.use_btn.setToolTip(i18n.t("Extract the measurements and tick the scale check first."))
-        btn_row.addWidget(self.use_btn)
-        col.addLayout(btn_row)
+        self.footer.set_primary(self.use_btn)
         if path:                       # already chosen on the BOQ screen
             self._load_pdf(path)
 
@@ -633,7 +636,9 @@ class IndustryTakeoffDialog(QDialog):
             self._role_combos.append((layer, combo))
         self.mapping_btn.setText(i18n.t("▾ Layer mapping ({n} found)").format(n=len(layers)))
         self.mapping_btn.setVisible(bool(layers))
-        self.mapping_area.setVisible(False)
+        # Step 1 is part of the tool's flow, so it is open, not folded away.
+        self.mapping_area.setVisible(bool(layers))
+        self.mapping_btn.setText(i18n.t("▴ Layer mapping ({n} found)").format(n=len(layers)))
 
     def _preview_layer(self, layer: dict):
         if not self.pdf_path:

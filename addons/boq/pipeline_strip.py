@@ -28,6 +28,9 @@ _STATE_WORDS = {route.WAITING: "Waiting", route.RUNNING: "Working", route.DONE: 
 
 
 class _Tile(QFrame):
+    """One step as a small pill: a state mark and a short name. The state
+    words (Done / Needs you...) live in the tooltip and in the line under the
+    row, so the whole road fits on one thin line."""
     clicked = Signal(str)
 
     def __init__(self, stage: route.Stage, number: int, parent=None):
@@ -36,27 +39,33 @@ class _Tile(QFrame):
         self.setObjectName("pipeTile")
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setCursor(Qt.PointingHandCursor)
-        col = QVBoxLayout(self)
-        col.setContentsMargins(theme.SPACE_2, theme.SPACE_2, theme.SPACE_2, theme.SPACE_2)
-        col.setSpacing(2)
+        row = QHBoxLayout(self)
+        row.setContentsMargins(theme.SPACE_2, 0, theme.SPACE_2, 0)
+        row.setSpacing(4)
         self.mark = QLabel("")
-        self.name = QLabel(f"{number}. {i18n.t(stage.label)}")
-        self.name.setWordWrap(True)
-        self.name.setStyleSheet("font-weight: 600; font-size: 12px;")
-        self.setToolTip(i18n.t(route.where_words(stage.where)))
-        col.addWidget(self.mark)
-        col.addWidget(self.name)
-        col.addStretch(1)
-        self.setMinimumHeight(64)
+        self.name = QLabel(i18n.t(route.SHORT.get(stage.key, stage.label)))
+        self.name.setToolTip(i18n.t(stage.label))
+        row.addWidget(self.mark)
+        row.addWidget(self.name)
+        row.addStretch(1)
+        self.setFixedHeight(28)
         self.set_state(route.WAITING, False)
 
     def set_state(self, state: str, selected: bool):
-        self.mark.setText(f"{_MARK[state]}  {i18n.t(_STATE_WORDS[state])}")
-        self.mark.setStyleSheet(f"font-size: 11px; font-weight: 600; color: {_COLOUR[state]};")
+        self._state = state
+        self.mark.setText(_MARK[state])
+        self.mark.setStyleSheet(f"font-size: 12px; font-weight: 700; color: {_COLOUR[state]};"
+                                " background: transparent;")
+        self.name.setStyleSheet(
+            f"font-size: 12px; background: transparent; font-weight: {600 if selected else 500};"
+            f" color: {theme.INK if state in (route.NEEDS_YOU, route.RUNNING, route.FAILED) or selected else theme.NEUTRAL[600]};")
         border = theme.INK if selected else theme.HAIRLINE
+        bg = theme.CANVAS if selected else theme.CARD
         self.setStyleSheet(
-            f"#pipeTile {{ background: {theme.CARD}; border: 1px solid {border};"
-            f" border-radius: {theme.R_CONTROL}px; }}")
+            f"#pipeTile {{ background: {bg}; border: 1px solid {border};"
+            f" border-radius: 14px; }}")
+        self.setToolTip(f"{i18n.t(_STATE_WORDS[state])}: {i18n.t(self.stage.label)}. "
+                        f"{i18n.t(route.where_words(self.stage.where))}")
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -84,9 +93,10 @@ class PipelineStrip(QWidget):
         line_row = QHBoxLayout()
         line_row.setSpacing(theme.SPACE_2)
         self.line = C.label("", level="SUPPORT", wrap=True)
-        self.line.setMinimumHeight(34)
+        self.line.setMinimumHeight(18)
         line_row.addWidget(self.line, stretch=1)
-        self.detail_btn = QPushButton(i18n.t("Details"))
+        self.detail_btn = QPushButton(i18n.t("Open this step"))
+        self.detail_btn.setObjectName("linkBtn")
         self.detail_btn.setCursor(Qt.PointingHandCursor)
         self.detail_btn.clicked.connect(lambda: self.detail_requested.emit(self._selected))
         self.detail_btn.setVisible(False)
@@ -153,4 +163,4 @@ class PipelineStrip(QWidget):
         said = (f"{i18n.t(route.where_words(st.where))}: {self._line[st.key]}"
                 if self._line.get(st.key) else i18n.t(st.detail))
         self.line.setText(said)
-        self.detail_btn.setVisible(st.key in ("read", "measure", "tags", "check", "write", "prices"))
+        self.detail_btn.setVisible(st.key in ("read", "scale", "layers", "measure", "tags", "drawing", "check", "write", "prices"))

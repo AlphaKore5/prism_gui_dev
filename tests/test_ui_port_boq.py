@@ -435,7 +435,10 @@ class TheFooterIsThreeThings(unittest.TestCase):
                     d._show_step(step)
                     _app.processEvents()
                     btns = self._footer_buttons(d)
-                    self.assertLessEqual(len(btns), 3, (mode, step, [b.text() for b in btns]))
+                    # Back, Close, the one primary; plus "Finish without prices" on the
+                    # BOQ's made step (the preview's skip button, a real way out).
+                    cap = 4 if (mode == "boq" and step == d.S_MAKE) else 3
+                    self.assertLessEqual(len(btns), cap, (mode, step, [b.text() for b in btns]))
                     for b in btns:
                         need = b.fontMetrics().horizontalAdvance(b.text())
                         self.assertGreaterEqual(b.width(), need + 8, (width, mode, step, b.text()))
@@ -703,11 +706,11 @@ class StepFourShowsFourRowsAndShortTotals(unittest.TestCase):
         self.assertTrue(t.gst_spin.isVisibleTo(t))
         self.assertIn("Rupees", t.totals.text())
 
-    def test_the_measured_line_shows_on_steps_one_and_two_only(self):
+    def test_the_measured_line_is_not_repeated_on_a_boq_because_the_strip_says_it(self):
         d = _dialog()
         d.ask.set_text("x")
         d._set_busy(False, "Measured from the drawing itself — not by an AI.")
-        for step, shown in ((0, True), (1, True), (2, False), (3, False)):
+        for step, shown in ((0, False), (1, False), (2, False), (3, False)):
             d._show_step(step)
             self.assertEqual(not d.status.isHidden(), shown, step)
         d.status.setText("Done. Check the numbers.")

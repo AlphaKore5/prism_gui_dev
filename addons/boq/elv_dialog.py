@@ -34,13 +34,14 @@ from PySide6.QtWidgets import (
 import i18n
 from widgets import controls as C
 from widgets import send_to_ai
+from dialogs.base import PrismDialog
 from addons.boq import converter_dialog, converter_setup, drawing_reader, industries
 from addons.boq.workers import ElvReadWorker
 
 _DRAWING_FILTER = "Drawings (*.pdf *.dwg *.dxf *.png *.jpg *.jpeg *.bmp *.tif *.tiff *.webp)"
 
 
-class ElvReadDialog(QDialog):
+class ElvReadDialog(PrismDialog):
     """Pick a drawing, read it, review the result, then hand it back
     exactly like IndustryTakeoffDialog does -- a plain-text summary,
     treated from there on like any other external measurement
@@ -48,15 +49,18 @@ class ElvReadDialog(QDialog):
 
     def __init__(self, industry: str, parent=None, cfg: dict | None = None,
                  path: str = ""):
-        super().__init__(parent)
+        super().__init__(
+            i18n.t("{industry} drawing reading").format(industry=industry),
+            i18n.t("Prism reads the labels and symbols on your drawing. A DXF is read here, "
+                   "with no AI."), icon="file", parent=parent, scrollable=True)
         self.industry = industry
         self.cfg = cfg if cfg is not None else {}
         self.pdf_path = ""
         self.result: dict | None = None
 
         self.setWindowTitle(i18n.t("{industry} drawing reading").format(industry=industry))
-        self.resize(640, 560)
-        col = QVBoxLayout(self)
+        self.resize(780, 640)
+        col = self.body
         col.addWidget(C.label(i18n.t(
             "Reads a PDF, DWG or DXF drawing. A DWG/DXF with real text or "
             "named blocks is read directly -- no AI, nothing leaves this "
@@ -88,15 +92,11 @@ class ElvReadDialog(QDialog):
         self.output.setVisible(False)
         col.addWidget(self.output, stretch=1)
 
-        btn_row = QHBoxLayout()
-        btn_row.addStretch(1)
-        btn_row.addWidget(C.button(i18n.t("Cancel"), "secondary", on_click=self.reject))
-        self.use_btn = C.button(i18n.t("Use this reading"), "primary",
-                                on_click=self.accept)
+        self.footer.add_secondary(self.button(i18n.t("Cancel"), on_click=self.reject))
+        self.use_btn = self.button(i18n.t("Use this reading"), "primary", on_click=self.accept)
         self.use_btn.setEnabled(False)
         self.use_btn.setToolTip(i18n.t("Read a drawing first, then use the reading."))
-        btn_row.addWidget(self.use_btn)
-        col.addLayout(btn_row)
+        self.footer.set_primary(self.use_btn)
         if path:                       # the drawing is already chosen on the BOQ screen
             self.pdf_path = path
             self.path_label.setText(os.path.basename(path))

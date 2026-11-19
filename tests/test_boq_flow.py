@@ -102,15 +102,17 @@ class TheTwoQuestions(unittest.TestCase):
     def test_both_questions_are_visible_cards_not_buried(self):
         d = _dialog()
         page = d.pages.widget(0)
-        self.assertEqual(set(d.input_cards), {route.CAD, route.SCAN, route.DESCRIBE})
+        # The "what do you have" cards are gone (the file you add says it); only the
+        # kind of work is asked, as one short row.
+        self.assertFalse(hasattr(d, "input_cards"))
         self.assertEqual(set(d.job_cards), set(I.NAMES))
-        for c in list(d.input_cards.values()) + list(d.job_cards.values()):
+        for c in list(d.job_cards.values()) + list(d.extra_chips.values()) + [d.add_chip]:
             self.assertTrue(c.isVisibleTo(page))
 
     def test_each_job_card_has_a_short_example_line(self):
         d = _dialog()
-        self.assertIn("CCTV", d.job_cards[I.ELV].hint.text())
-        self.assertIn("Ducts", d.job_cards[I.HVAC].hint.text())
+        self.assertIn("CCTV", d.job_cards[I.ELV].hint_text)
+        self.assertIn("Ducts", d.job_cards[I.HVAC].hint_text)
 
     def test_first_run_starts_on_general_and_picking_a_card_sets_the_industry(self):
         d = _dialog()
@@ -133,12 +135,11 @@ class TheTwoQuestions(unittest.TestCase):
         d._absorb([_dxf()])
         self.assertEqual(d.industry_combo.currentText(), I.GENERAL)
 
-    def test_describe_hides_the_drawing_box_and_cad_shows_it(self):
+    def test_the_drawing_box_is_always_there_so_the_file_decides_the_road(self):
         d = _dialog()
         page = d.pages.widget(0)
+        self.assertTrue(d.drawing_card.isVisibleTo(page))
         d._set_input(route.DESCRIBE)
-        self.assertFalse(d.drawing_card.isVisibleTo(page))
-        d._set_input(route.CAD)
         self.assertTrue(d.drawing_card.isVisibleTo(page))
 
     def test_hvac_from_a_picture_is_disabled_and_says_why_in_plain_words(self):
@@ -147,7 +148,7 @@ class TheTwoQuestions(unittest.TestCase):
         d._absorb([_png()])
         card = d.job_cards[I.HVAC]
         self.assertFalse(card.isEnabled())
-        self.assertIn("picture", card.hint.text())
+        self.assertIn("picture", card.hint_text)
         self.assertIn("picture", card.toolTip())
         d._pick_job(I.HVAC)                             # a disabled card does nothing
         self.assertEqual(d.industry_combo.currentText(), I.GENERAL)
@@ -260,11 +261,16 @@ class ThePdfAndPictureRoads(unittest.TestCase):
         self.assertEqual(d.cad_path, png)
         self.assertEqual(d.images, [])
 
-    def test_without_saying_so_a_picture_stays_a_legend_screenshot_as_before(self):
+    def test_a_lone_picture_is_the_drawing_but_beside_a_cad_file_it_stays_a_legend(self):
         d = _dialog()
-        d._absorb([_png()])
-        self.assertEqual(d.cad_path, "")
-        self.assertEqual(len(d.images), 1)
+        png = _png()
+        d._absorb([png])                         # nobody is asked: no CAD file, so it IS the drawing
+        self.assertEqual(d.cad_path, png)
+        self.assertEqual(d._input_kind, route.SCAN)
+        d2 = _dialog()
+        d2._absorb([_dxf(), _png()])
+        self.assertTrue(d2.cad_path.endswith(".dxf"))
+        self.assertEqual(len(d2.images), 1)
 
     def test_a_pdf_for_general_goes_to_the_ai_reads_it_road_after_consent(self):
         d = _dialog()
@@ -274,8 +280,8 @@ class ThePdfAndPictureRoads(unittest.TestCase):
         self.assertTrue(d._with_drawing)
         d._refresh_primary()
         self.assertTrue(d.choice_drawing.selected())
-        self.assertEqual(d.pipe.state("tags"), route.NEEDS_YOU)
-        self.assertIn("With the drawing", d.pipe.line_of("tags"))
+        self.assertEqual(d.pipe.state("drawing"), route.NEEDS_YOU)
+        self.assertIn("With the drawing", d.pipe.line_of("drawing"))
 
     def test_hvac_pdf_shows_the_measure_button_and_opens_the_tool_with_the_file_chosen(self):
         d = _dialog()
@@ -310,7 +316,9 @@ class ThePdfAndPictureRoads(unittest.TestCase):
         self.assertIn("On this computer", d.pipe.line_of("measure"))
         self.assertEqual(d.pipe.state("check"), route.NEEDS_YOU)
         self.assertIn("DUCT SUMMARY", d.summary)
-        self.assertIn("Prism AI was not used", d.pipe.line_of("tags"))      # said, not implied
+        self.assertIn("Prism AI was not used", d.pipe.line_of("measure"))   # said, not implied
+        self.assertEqual(d.pipe.state("scale"), route.DONE)                 # his tool's own steps
+        self.assertEqual(d.pipe.state("layers"), route.DONE)
 
     def test_elv_picture_opens_the_reader_and_is_called_a_reading(self):
         d = _dialog()

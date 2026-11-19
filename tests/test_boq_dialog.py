@@ -2374,6 +2374,8 @@ class TheIndustryDropdownGatesThePdfTakeoffButton(unittest.TestCase):
     def test_picking_hvac_shows_the_button(self):
         d = _dialog()
         d.industry_combo.setCurrentText("HVAC")
+        # it lives under "More settings" now (an expert's door, one click away)
+        d.more.toggle.click()
         self.assertTrue(d.takeoff_btn.isVisibleTo(d))
 
     def test_the_button_text_names_the_selected_industry_not_always_hvac(self):
@@ -2439,6 +2441,7 @@ class TheIndustryDropdownGatesThePdfTakeoffButton(unittest.TestCase):
     def test_elv_shows_the_button_too(self):
         d = _dialog()
         d.industry_combo.setCurrentText("ELV")
+        d.more.toggle.click()
         self.assertTrue(d.takeoff_btn.isVisibleTo(d))
 
     def test_elv_opens_the_ai_read_dialog_not_the_hvac_one(self):

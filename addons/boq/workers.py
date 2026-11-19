@@ -185,3 +185,29 @@ class OpenRouterWriteWorker(_Worker):
             self.done.emit(text)
         except Exception as e:                           # noqa: BLE001
             self.failed.emit(str(e))
+
+
+class CreditEstimateWorker(_Worker):
+    """Ask Prism's server what the AI steps of this job would typically cost
+    (never charges). `wanted` is {key: (role, approx_in_chars, images)}; the
+    answer is {key: typical_mc}. A step the server cannot price is left out, so
+    the screen says nothing about it instead of inventing a number."""
+
+    done = Signal(dict)
+
+    def __init__(self, wanted: dict):
+        super().__init__()
+        self.wanted = dict(wanted)
+
+    def run(self):
+        out = {}
+        for key, (role, chars, images) in self.wanted.items():
+            try:
+                got = CB.ai_client.estimate(role, approx_in_chars=int(chars), images=int(images),
+                                            addon="boq", feature="estimate")
+                mc = int((got or {}).get("typical_mc") or 0)
+                if mc > 0:
+                    out[key] = mc
+            except Exception:                            # noqa: BLE001
+                continue
+        self.done.emit(out)

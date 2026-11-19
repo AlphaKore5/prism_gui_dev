@@ -51,6 +51,18 @@ JOB_CARDS = (
      "Ducts, grilles, dampers, air-handling units."),
 )
 
+# What each built-in trade has of its own, said plainly (shown under the cards).
+TOOL_NOTES = {
+    industries.GENERAL: "No takeoff tool of its own: a DXF or DWG is measured by layer.",
+    industries.ELV: "Its own PDF and picture reader; DXF or DWG counted by device.",
+    industries.HVAC: "Its own duct takeoff for tender PDFs and DXF or DWG.",
+}
+OTHER_NOTE = "No takeoff tool of its own: measured like General. Nothing is guessed about your trade."
+
+# Short names for the compact strip.
+SHORT = {"describe": "Describe", "read": "Read", "measure": "Measure", "tags": "Read tags",
+         "check": "Check", "scale": "Scale", "layers": "Colours", "drawing": "With drawing", "write": "Write", "prices": "Prices", "files": "Files"}
+
 # Who does a step ------------------------------------------------------------
 LOCAL = "local"          # on this computer
 AI = "ai"                # Prism AI, through Prism's server
@@ -124,17 +136,17 @@ def stages(input_kind: str, industry: str, path: str = "") -> list[Stage]:
         ] + tail
 
     if input_kind == CAD:
-        measure = {
-            industries.HVAC: Stage(
-                "measure", "Measure ducts and fittings", LOCAL,
-                "Pairs duct lines into runs and counts dampers and units, on this computer."),
-            industries.ELV: Stage(
-                "measure", "Count devices and cable", LOCAL,
-                "Counts camera, reader and outlet symbols and adds up cable lines, "
-                "on this computer."),
-        }.get(industry, Stage(
+        # core.boq.measure() is ONE routine: it adds up line lengths and areas by
+        # layer and counts block symbols. HVAC only adds Hitarth's HVAC drawing rules
+        # (pair duct lines into runs, bridge gaps, read size labels, count elbows).
+        # There is no ELV-specific measuring, so ELV and General share the plain one.
+        measure = (Stage(
+            "measure", "Measure (HVAC rules)", LOCAL,
+            "Adds up lengths and areas by layer and counts symbols, and applies the HVAC "
+            "drawing rules: pairs duct lines into runs, reads duct size labels, counts "
+            "elbows. On this computer.") if industry == industries.HVAC else Stage(
             "measure", "Measure", LOCAL,
-            "Adds up lengths and areas by layer and counts symbols, on this computer."))
+            "Adds up lengths and areas by layer and counts block symbols, on this computer."))
         return [
             Stage("read", "Read the drawing", LOCAL,
                   "Opens the DXF (a DWG is converted first) on this computer. Nothing is "
@@ -143,16 +155,26 @@ def stages(input_kind: str, industry: str, path: str = "") -> list[Stage]:
 
     # SCAN: a PDF or a picture
     if industry == industries.HVAC:
+        # The same order as the HVAC PDF takeoff tool (hvac_takeoff/README.md):
+        # open the PDF, set the scale, Step 1 map each line colour to a role,
+        # Step 2 extract, then look at the warnings and readings.
         return [
-            Stage("read", "Read the PDF", LOCAL,
-                  "Opens the PDF's own lines and text on this computer."),
-            Stage("measure", "Find the ducts", LOCAL,
-                  "Pairs the PDF's lines into duct runs. It needs a PDF made from CAD; a "
-                  "scan has no lines to measure."),
-            Stage("tags", "Read the size tags", LOCAL_AI,
-                  "Reads sizes and tags (OCR) on this computer. If you agree, small cropped "
+            Stage("read", "Open the PDF", LOCAL,
+                  "Opens your tender PDF on this computer. It has to be a PDF made from "
+                  "CAD: a scan has no lines to measure."),
+            Stage("scale", "Set the drawing scale", YOU,
+                  "Pick the scale from the title block (for example 1/8\" = 1'-0\"), or "
+                  "measure one dimension you know. You confirm it before extracting."),
+            Stage("layers", "Step 1: map the line colours", YOU,
+                  "Say what each line colour or layer is (supply, return and so on). "
+                  "Prism remembers it for the next drawing."),
+            Stage("measure", "Step 2: extract", LOCAL_AI,
+                  "Pairs the duct lines into runs and reads size, CFM and TR labels from "
+                  "the PDF's text and OCR, on this computer. If you agree, small cropped "
                   "pieces also go to Prism AI to catch tags OCR missed."),
-            check, write] + tail
+            Stage("check", "You check the readings", YOU,
+                  "Look at the warnings and each reading before the numbers are used."),
+            write] + tail
     if industry == industries.ELV:
         return [
             Stage("read", "Open the drawing", LOCAL,
@@ -161,16 +183,16 @@ def stages(input_kind: str, industry: str, path: str = "") -> list[Stage]:
                   "OCR on this computer, plus Prism AI reading small cropped pieces. This is "
                   "a reading, not a measurement. Prism asks you first."),
             check, write] + tail
+    # General (and Other / your own industry): "Make with drawing" is Hitarth's one
+    # step in which the AI reads the file and writes the BOQ from it.
     return [
         Stage("read", "Open the drawing", LOCAL,
               "Opens the PDF or picture on this computer."),
-        Stage("tags", "AI reads the drawing", AI,
-              "Prism AI looks at the whole drawing and its notes. This is a reading, not a "
-              "measurement. Prism asks you first."),
+        Stage("drawing", "Make with the drawing", AI,
+              "Prism AI looks at the whole drawing and writes the BOQ from it. This is a "
+              "reading, not a measurement. Prism asks you first."),
         Stage("check", "You check the BOQ", YOU,
               "Nothing was measured, so check every quantity against the drawing."),
-        Stage("write", "Write the BOQ", AI,
-              "Prism AI writes the BOQ from its reading of your drawing."),
     ] + tail
 
 
