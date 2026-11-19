@@ -68,7 +68,7 @@ ACTIONS = (
     ("draft", "Draft",
      "Measure and draw the dimensioned sheet here — flat pattern, "
      "isometric, every hole sized and placed on the drawing itself — no "
-     "AI. ChatGPT drawing a second, styled copy is optional (below); "
+     "AI. Prism AI drawing a second, styled copy is optional (below); "
      "compared against Prism's own sheet it turned out to just trace the "
      "picture it was shown, text and all, worse — it is not an "
      "independent check on the numbers, only a different look."),
@@ -102,8 +102,8 @@ ACTION_BUTTON = {
 # own rendered picture of the parts only with the person's own consent —
 # see StepDialog._drawing_consent().
 MODEL_CHOICES = (
-    ("Claude Haiku 5.5", "Claude Haiku 5.5 (fast, in-house)"),
-    ("Claude Sonnet 5.5", "Claude Sonnet 5.5 (stronger, in-house)"),
+    ("Claude Haiku 5.5", "Haiku 5.5 (fast, in-house)"),
+    ("Claude Sonnet 5.5", "Sonnet 5.5 (stronger, in-house)"),
 )
 
 DEFAULT_MODEL = "Claude Haiku 5.5"
@@ -1883,7 +1883,7 @@ class StepDialog(PrismDialog):
                 self._notify_error(i18n.t(
                     "{model} needs an OpenRouter key — add one in "
                     "Settings → Agents.")
-                    .replace("{model}", self._chosen_model()))
+                    .replace("{model}", WB.shown_name(self._chosen_model())))
                 return
         if not self._ensure_root():
             return
@@ -2043,7 +2043,7 @@ class StepDialog(PrismDialog):
             # positions marked on the drawing itself). Nothing left for an
             # AI to add unless the person actually asked for its copy.
             self._notes.append(f"{report['file']}: Prism's own drawing "
-                               "sheet stands — ChatGPT's copy wasn't asked "
+                               "sheet stands — Prism AI's copy wasn't asked "
                                "for")
             self._next()
             return
@@ -2061,7 +2061,7 @@ class StepDialog(PrismDialog):
         self._set_busy(True, i18n.t(
             "{agent} is drawing the dimensioned sheet for {file} — from "
             "the measured numbers only; the model stays here…")
-            .replace("{agent}", artist).replace("{file}", report["file"]), 1)
+            .replace("{agent}", WB.shown_name(artist)).replace("{file}", report["file"]), 1)
         self._agent_worker = AutomationWorker(
             {}, self.cfg, files, f"STEP — draft sheet for {report['file']}",
             custom_stages=[("visual", artist, [self.sf.auto_brief(report)])],
@@ -2143,7 +2143,7 @@ class StepDialog(PrismDialog):
 
     def _no_key_message(self, model: str) -> str:
         return i18n.t("{model} needs an OpenRouter key — add one in "
-                      "Settings → Agents.").replace("{model}", model)
+                      "Settings → Agents.").replace("{model}", WB.shown_name(model))
 
     def _ask(self, m: dict):
         report = m["report"]
@@ -2155,7 +2155,7 @@ class StepDialog(PrismDialog):
             "Asking {model} about {file} — the measured numbers (and, if "
             "you allow it, Prism's own picture of the part) and your "
             "question only; the model itself never leaves this machine…")
-            .replace("{model}", model).replace("{file}", report["file"]), 1)
+            .replace("{model}", WB.shown_name(model)).replace("{file}", report["file"]), 1)
         self._ask_worker = StepAskWorker(
             self.cfg, report, self.ask.text().strip(),
             model=MODEL_IDS[model], attachments=self._attachments_for(m))
@@ -2338,7 +2338,7 @@ class StepDialog(PrismDialog):
             self._set_busy(True, i18n.t(
                 "{model} is turning the answer into an exact change plan "
                 "for {file}…")
-                .replace("{model}", model).replace("{file}", report["file"]), 1)
+                .replace("{model}", WB.shown_name(model)).replace("{file}", report["file"]), 1)
         self._plan_worker = StepPlanWorker(
             self.cfg, report, self.ask.text().strip(), suggestions,
             model=MODEL_IDS[model], attachments=self._attachments_for(m))

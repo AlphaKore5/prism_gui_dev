@@ -47,15 +47,15 @@ class StepPanel(AddonFrontDoor):
         session, Prism's own render — never the model."""
         return [
             ("image", "Draws the styled sheet (Draft)",
-             "ChatGPT, always — its image model is the one that draws a "
+             "Prism AI, always — its image model is the one that draws a "
              "dimension sheet well from a numbers-only brief. It is handed "
              "the measured figures and Prism's own plain render — never "
              "the model. Prism's own dimensioned sheet is made regardless.",
-             "ChatGPT"),
+             "Prism AI"),
             ("bulb", "Answers and reviews the plan (Ask, Edit)",
-             "Claude Haiku 5.5 by default, or Claude Sonnet 5.5 if you "
+             "Haiku 5.5 by default, or Sonnet 5.5 if you "
              "pick it — both run on your Prism plan. "
              "It turns its own suggestions into the "
              "exact changes Prism can apply, from the numbers alone.",
-             "Claude Haiku 5.5"),
+             "Haiku 5.5"),
         ]

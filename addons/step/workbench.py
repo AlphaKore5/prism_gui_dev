@@ -90,6 +90,16 @@ def linkify(label: QLabel, colour: str) -> QLabel:
     return label
 
 
+def shown_name(name: str) -> str:
+    """What the person reads for an AI name. Owner, 19 Nov 2026: "say it as
+    HAIKU 5.5 not claude HAIKU", and no website names. Stored names (cfg,
+    run records, MODEL_IDS keys) stay as they are, so old settings and
+    past runs still match; only the words on screen change."""
+    name = str(name or "")
+    if name == "ChatGPT":
+        return "Prism AI"
+    return name.replace("Claude ", "", 1) if name.startswith("Claude ") else name
+
 class Link(QLabel):
     """A text link that is really a styled label: Qt's rich-text anchors take
     the application palette, which on this style comes out black."""
@@ -790,7 +800,7 @@ class PlanPanel(QWidget):
         if agent:
             # Which AI wrote this plan.
             who = QLabel(f"<span style='color:{theme.badge_color(agent)}'>●</span>"
-                         f"&nbsp;{i18n.t('Planned by')} <b>{agent}</b>")
+                         f"&nbsp;{i18n.t('Planned by')} <b>{shown_name(agent)}</b>")
             who.setTextFormat(Qt.RichText)
             who.setStyleSheet(f"color: {theme.NEUTRAL[600]}; font-size: 12px;"
                               " padding: 8px 14px 0 14px;")
@@ -1145,7 +1155,7 @@ class _Turn(QFrame):
             turn["action"], "neutral")
         hl.addWidget(chip(f"{number} · {turn['action']}", tone), 0, Qt.AlignTop)
         if turn.get("agent") and turn["action"] in ("Ask", "Edit"):
-            hl.addWidget(chip(turn["agent"], "neutral"), 0, Qt.AlignTop)
+            hl.addWidget(chip(shown_name(turn["agent"]), "neutral"), 0, Qt.AlignTop)
         text = turn["question"] or (
             i18n.t("Measured and drew the dimensioned sheet")
             if turn["action"] == "Draft" else turn["file"])
@@ -1256,10 +1266,10 @@ class _Turn(QFrame):
         if agent:
             # Which AI gave this answer: its name, with its own colour.
             label = QLabel(f"<span style='color:{theme.badge_color(agent)}'>●</span>"
-                           f"&nbsp;{who.upper()}")
+                           f"&nbsp;{shown_name(who).upper()}")
             label.setTextFormat(Qt.RichText)
         else:
-            label = QLabel(who.upper())
+            label = QLabel(shown_name(who).upper())
         label.setStyleSheet(f"color: {theme.NEUTRAL[500]}; font-size: 10.5px;"
                             " font-weight: 700; letter-spacing: 1px;"
                             " border: none; background: transparent;")
@@ -1484,7 +1494,7 @@ class Composer(QFrame):
         row.setSpacing(8)
         self.agent = QComboBox()
         for key, label in choices:
-            self.agent.addItem(label, key)
+            self.agent.addItem(shown_name(label), key)
         row.addWidget(self.agent)
         row.addStretch(1)
         # One verb per situation. "Ask" always; "Make a change" only while the

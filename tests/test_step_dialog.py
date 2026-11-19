@@ -1231,7 +1231,10 @@ class AskAndEditAreTwoThingsAndEachSaysWhoAnswered(unittest.TestCase):
         from PySide6.QtWidgets import QLabel
         card = dlg.chat.cards[0]
         texts = [l.text() for l in card.findChildren(QLabel)]
-        self.assertTrue(any("CHATGPT" in t for t in texts), texts)
+        # Shown as "Prism AI" (owner, 19 Nov 2026: no website names); the
+        # stored agent name stays "ChatGPT".
+        self.assertTrue(any("PRISM AI" in t for t in texts), texts)
+        self.assertFalse(any("CHATGPT" in t.upper() for t in texts), texts)
 
     def test_ask_offers_only_ask_and_edit_adds_make_a_change(self):
         dlg, m, key = self._asked()
@@ -1517,8 +1520,8 @@ class ItIsOnTheShelfAndInHistory(unittest.TestCase):
         from addons.step.panel import StepPanel
         panel = StepPanel({"agents": {"visual": "ChatGPT", "brains": "Claude"}})
         roles = panel.tool_roles()
-        self.assertEqual([r[3] for r in roles],
-                         ["ChatGPT", "Claude Haiku 5.5"])
+        self.assertEqual([r[3] for r in roles],          # owner, 19 Nov 2026:
+                         ["Prism AI", "Haiku 5.5"])      # "HAIKU 5.5 not claude HAIKU"
         self.assertEqual(panel.KIND, "step")
 
     def test_the_offer_takes_plain_paths(self):
@@ -2090,3 +2093,16 @@ class DeletingFromTheSidebar(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+
+def test_ai_names_on_screen_say_haiku_and_prism_ai():
+    """Owner, 19 Nov 2026: "say it as HAIKU 5.5 not claude HAIKU", and no
+    website names. Only what is shown changes; stored names stay."""
+    from addons.step import dialog as SD2, workbench as WB2
+    assert WB2.shown_name("Claude Haiku 5.5") == "Haiku 5.5"
+    assert WB2.shown_name("Claude Sonnet 5.5") == "Sonnet 5.5"
+    assert WB2.shown_name("ChatGPT") == "Prism AI"
+    labels = [label for _key, label in SD2.MODEL_CHOICES]
+    assert labels == ["Haiku 5.5 (fast, in-house)", "Sonnet 5.5 (stronger, in-house)"]
+    assert "Claude Haiku 5.5" in SD2.MODEL_IDS            # saved settings still match
