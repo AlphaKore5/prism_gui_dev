@@ -67,6 +67,11 @@ def _kinds(panel) -> list[str]:
 _REAL_START = workers._Worker.start
 
 
+# When set, start() only records the worker (the network test wants the
+# worker built, not run).
+_RECORD_ONLY: list | None = None
+
+
 def _run_on_its_own_thread(self, *a, **k):
     """A worker runs as the app runs it: on its own QThread. Wait for it, then
     hand its queued signals (stage_event / done / failed) to the GUI thread.
@@ -75,9 +80,27 @@ def _run_on_its_own_thread(self, *a, **k):
     file in 9-16 of 30 runs (access violation in the next QThread.__init__,
     1.8.6 included); the app never runs a worker that way (ISS-026)."""
     from PySide6.QtCore import QCoreApplication
+    if _RECORD_ONLY is not None:
+        _RECORD_ONLY.append(self)
+        return
     _REAL_START(self, *a, **k)
     self.wait(60000)
     QCoreApplication.sendPostedEvents()
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _workers_start_patched_once():
+    """_Worker.start is replaced ONCE for this file and put back at the end.
+
+    It used to be patched per test (and again inside two tests). Windows
+    crash dump, 20 Nov 2026: pyside6!SignalManager::retrieveMetaObject while
+    constructing AutomationWorker. Every setattr on a Qt class makes PySide
+    rebuild its dynamic metaobject, and a subclass can be left pointing at
+    the freed one; 9-16 of 30 Windows runs crashed. The app never patches
+    its classes."""
+    workers._Worker.start = _run_on_its_own_thread
+    yield
+    workers._Worker.start = _REAL_START
 
 
 @pytest.fixture(autouse=True)
@@ -85,7 +108,6 @@ def inline_workers(monkeypatch, tmp_path_factory):
     import workspace
     runs = str(tmp_path_factory.mktemp("runs"))
     monkeypatch.setattr(workspace, "runs_dir", lambda *a, **k: runs)
-    monkeypatch.setattr(workers._Worker, "start", _run_on_its_own_thread)
     monkeypatch.setattr(licensing, "has", lambda *a, **k: True)
     monkeypatch.setattr(licensing, "require", lambda *a, **k: True)
     monkeypatch.setattr(licensing, "report_usage", lambda *a, **k: None)
@@ -388,10 +410,13 @@ def test_nothing_touches_the_network_on_the_ui_thread(ai, win, no_chrome):
         if threading.current_thread() is main:
             seen.append(addr)
         return orig(sock, addr)
-    started = []
-    with mock.patch.object(socket.socket, "connect", watch), \
-            mock.patch.object(workers._Worker, "start", lambda self, *a, **k: started.append(self)):
-        _send(win, "tell me more")          # submit only; the worker is not started
+    global _RECORD_ONLY
+    started = _RECORD_ONLY = []
+    with mock.patch.object(socket.socket, "connect", watch):
+        try:
+            _send(win, "tell me more")      # submit only; the worker is not started
+        finally:
+            _RECORD_ONLY = None
         assert started and seen == []        # the UI thread did no I/O
 
 
