@@ -170,7 +170,10 @@ jobs:
             libegl1 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 \
             libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 \
             libxcb-xinerama0 libxcb-xfixes0 libdbus-1-3 \
-            portaudio19-dev libfuse2 xvfb
+            portaudio19-dev libfuse2 xvfb libpulse0
+        # libpulse0: the bundle now ships QtMultimedia (video and audio play
+        # inside Prism), and the smoke test's selftest requires it to load.
+        # Every Linux desktop with sound has libpulse; a bare runner does not.
 
       - name: Install PortAudio (macOS)
         if: runner.os == 'macOS'
