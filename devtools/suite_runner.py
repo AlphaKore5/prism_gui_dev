@@ -169,6 +169,12 @@ def main(argv=None) -> int:
         retried = False
         if died:
             retried = True
+            # Show the first attempt even if the retry passes: a hang or crash
+            # that goes away on the second try is still a bug, and its stack
+            # is the only evidence (1.8.8's filter-panel hang was lost this way).
+            print(f"RETRY  {f.name}  first attempt: {died}", flush=True)
+            if tail:
+                print("    " + tail.replace("\n", "\n    "), flush=True)
             cases, died, tail = run_file(f, out_dir, args.timeout, args.file_timeout)
         secs = time.monotonic() - t0
         if died:
