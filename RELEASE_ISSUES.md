@@ -151,6 +151,23 @@ something you did not run.
 
 ## Issue log (newest first)
 
+### ISS-026 — Dev 1.8.7 and 1.8.8 never published: four different CI failures (2026-11-19) — runner fixed, two flakes UNEXPLAINED
+- **1.8.7, `Tests · Windows`:** two new test files did `import pwd` (Unix only) at module level. **PROVEN** (collection error).
+  **Fix:** `_real_home()` falls back to `expanduser("~")`. Rule: never import `pwd`/`fcntl`/`termios` at test module level.
+- **1.8.8 attempt 1, `Tests · Windows`:** `test_chat_thread.py` died with 0xC0000005 (access violation) on BOTH tries (the runner
+  retries once); every other file passed (7630). Same code passed on the 1.8.7 run and 12/12 locally. Cause **UNKNOWN**: the
+  runner printed only the last 500 characters, which for a faulthandler dump are pytest's entry point, not the crashing frame.
+- **1.8.8 attempt 1, `Tests · Linux`:** stalled after `test_leads_evidence.py` (next file `test_leads_filter_panel.py`, normally
+  13 s; 5/5 locally) until cancelled 48 min later. pytest-timeout's default *signal* method cannot fire while a test sits in Qt's
+  C++ event loop, so only the 25-min file timeout applied, twice with the retry. Which test hung is **UNKNOWN** for the same reason.
+- **1.8.8 attempt 2, `Windows (x64)` build:** packaged-app selftest failed "HTTPS trust store — HTTP 429": Google rate-limited the
+  runner. A 429 means TLS verification already succeeded. **Fix:** `main.py` counts any `HTTPError` as a passed TLS check.
+- **Runner fix:** `devtools/suite_runner.py` uses `--timeout-method=thread` (a hung test is killed after 300 s with every thread's
+  stack) and prints the crash/timeout dump around the failing frame instead of the output's last lines. Verified with a
+  deliberately hanging and a deliberately segfaulting test: both now name the test and line. The next recurrence is diagnosable.
+- **Process (owner's suggestion):** run the workflow on the branch (`workflow_dispatch`, no tag) and tag only a green commit, so
+  a red run never burns a version number.
+
 ### ISS-025 — Dev 1.8.2 tagged with five new red tests on the Windows runner (2026-11-18) — FIXED in code, Windows CI rerun pending
 - **Seen:** `Tests · Windows` of v1.8.2: 7316 passed, 7 failing (2 are the known quotation-PDF entries). The five new ones:
   1. `test_layering` — `widgets/send_to_ai.py` imported `dialogs.base` at module scope. **PROVEN** (the guard names the line; it

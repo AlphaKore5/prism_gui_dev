@@ -68,6 +68,33 @@ def _env() -> dict:
     return env
 
 
+def _fault_excerpt(text: str, size: int = 2500) -> str:
+    """The part of a dead process's output that says where it died, instead
+    of its last lines (which are only pytest's own entry point).
+
+    A native crash dump (faulthandler) lists the innermost frame FIRST, so
+    start at it. A pytest-timeout dump lists each thread's stack innermost
+    LAST, so keep each thread's header and its last frames. Without a dump,
+    keep the end as before."""
+    i = text.find("+ Timeout +")
+    if i != -1:
+        out, block = [], []
+        for line in text[i:].splitlines():
+            if "Stack of " in line or "+ Timeout +" in line:
+                out += block[-16:]
+                block = []
+                out.append(line)
+            else:
+                block.append(line)
+        out += block[-16:]
+        return "\n".join(out)[-size * 2:]
+    for marker in ("Fatal Python error", "Windows fatal exception"):
+        i = text.find(marker)
+        if i != -1:
+            return text[max(0, i - 300):i + size]
+    return text[-1500:]
+
+
 def run_file(test_file: Path, out_dir: Path, per_test_timeout: int, file_timeout: int):
     """One pytest process for one file. Returns (cases, died, tail) where cases
     is [(key, status, message)] and died is a string if the process produced no
@@ -78,13 +105,19 @@ def run_file(test_file: Path, out_dir: Path, per_test_timeout: int, file_timeout
     cmd = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
            f"--junitxml={xml}", str(test_file)]
     if per_test_timeout:
-        cmd.insert(3, f"--timeout={per_test_timeout}")
+        # thread method: a test stuck inside Qt's C++ event loop never runs a
+        # Python signal handler, so the default (signal) method on Linux never
+        # fired and the file sat until the 25-min file timeout (twice, with the
+        # retry). The thread method dumps every thread's stack and ends the
+        # process, which is what names the hung test.
+        cmd[3:3] = [f"--timeout={per_test_timeout}", "--timeout-method=thread"]
     try:
         p = subprocess.run(cmd, cwd=ROOT, env=_env(), capture_output=True, text=True,
                            encoding="utf-8", errors="replace", timeout=file_timeout)
-        rc, tail = p.returncode, (p.stdout + p.stderr)[-1500:]
+        rc, tail = p.returncode, _fault_excerpt(p.stdout + p.stderr)
     except subprocess.TimeoutExpired as e:
-        return [], f"timed out after {file_timeout}s", str(e.stdout or "")[-800:]
+        out = e.stdout.decode("utf-8", "replace") if isinstance(e.stdout, bytes) else (e.stdout or "")
+        return [], f"timed out after {file_timeout}s", _fault_excerpt(out)
     if not xml.exists():
         return [], f"the process died before reporting (exit {rc})", tail
     cases = []
@@ -127,7 +160,7 @@ def main(argv=None) -> int:
             (crashes if not ok_known else []).append(f"{f.name}: {died}")
             print(f"{'KNOWN' if ok_known else 'CRASH'}  {f.name}  {died}  ({secs:.0f}s)", flush=True)
             if not ok_known and tail:
-                print("    " + tail[-500:].replace("\n", "\n    "), flush=True)
+                print("    " + tail.replace("\n", "\n    "), flush=True)
             continue
         bad = [(k, m) for k, s, m in cases if s == "fail"]
         total += len(cases)
