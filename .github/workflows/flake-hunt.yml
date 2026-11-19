@@ -41,12 +41,13 @@ jobs:
           QT_QPA_PLATFORM: offscreen
           PYTHONUTF8: "1"
         run: |
-          choco install procdump -y --no-progress | Out-Null
+          Invoke-WebRequest -Uri "https://live.sysinternals.com/procdump64.exe" -OutFile procdump64.exe
+          $pd = (Resolve-Path .\procdump64.exe).Path
           $dbg = "C:\Program Files (x86)\Windows Kits\10\Debuggers\x64"
           $py = (Get-Command python).Source
           New-Item -ItemType Directory -Force dumps | Out-Null
           for ($i = 1; $i -le 12; $i++) {
-            & procdump -accepteula -ma -e -x dumps $py -X faulthandler -m pytest -q -p no:cacheprovider tests/test_chat_thread.py *> out.txt
+            & $pd -accepteula -ma -e -x dumps $py -X faulthandler -m pytest -q -p no:cacheprovider tests/test_chat_thread.py *> out.txt
             $d = Get-ChildItem dumps -Filter *.dmp -ErrorAction SilentlyContinue | Select-Object -First 1
             if ($d) { Write-Host "run ${i}: dump captured $($d.Name)"; break } else { Write-Host "run ${i}: no crash" }
           }
