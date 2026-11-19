@@ -56,5 +56,23 @@ class ReadyToPlan(unittest.TestCase):
         self.assertEqual(shown, [])
 
 
+class NoWizardInServerMode(unittest.TestCase):
+    """The owner saw the Groq-key / agents Setup wizard open at launch although every AI call goes
+    through Prism's server (main_window.py first-run branch). It must not open there."""
+
+    def _build(self, active):
+        import main_window
+        with mock.patch.object(CB.ai_client, "active", return_value=active), \
+             mock.patch.object(main_window.QTimer, "singleShot") as shot:
+            main_window.MainWindow()
+        return [c for c in shot.call_args_list if c.args and c.args[1:] and getattr(c.args[1], "__name__", "") == "_first_run"]
+
+    def test_server_mode_does_not_schedule_the_wizard(self):
+        self.assertEqual(self._build(True), [])
+
+    def test_direct_mode_still_schedules_it(self):
+        self.assertTrue(self._build(False))
+
+
 if __name__ == "__main__":
     unittest.main()

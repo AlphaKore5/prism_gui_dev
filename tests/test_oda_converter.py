@@ -87,6 +87,8 @@ class Detection(_Env):
             found = boq._installed_converter_paths()
         self.assertIn("/Applications/ODAFileConverter.app/Contents/MacOS/ODAFileConverter", found)
 
+    @unittest.skipIf(sys.platform == "win32",
+                     "simulates Linux on Windows: expanduser/joins use Windows rules there, so the paths cannot match")
     def test_linux_deb_paths_and_appimage_in_downloads(self):
         os.environ["HOME"] = self.root
         os.environ["USERPROFILE"] = self.root          # Windows' expanduser("~") reads this, not HOME

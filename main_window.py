@@ -418,7 +418,8 @@ class MainWindow(QMainWindow):
         # not left alone with a locked sidebar and no context. _first_run
         # keeps the Groq key dialog behind the licence check: a customer who
         # cannot use Prism yet does not need a key dialog on top of that.
-        if not CB.config.is_configured(self.cfg):
+        if not self._ready_to_plan():
+            # (server mode needs no key or agents, so no setup wizard: see _ready_to_plan)
             # Deferred to the event loop rather than run here. A modal opened
             # from inside __init__ blocks before the window is on screen, so
             # it can appear behind it or with nowhere to centre itself — and

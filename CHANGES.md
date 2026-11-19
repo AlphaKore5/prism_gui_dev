@@ -10,6 +10,17 @@ Tests: **1966 passing** (6 skipped, 8 Sep 2026 after Round 16 landed on main —
 
 ---
 
+# 1.8.6 — No key or agent setup in server mode (DEV build, 19 Nov 2026)
+
+**Dev channel only. Windows and Linux.** 1.8.5 was never published either: its Windows tests had one failure left (a test that
+simulates Linux paths cannot match on Windows; it is now skipped there with the reason).
+
+- **Setup wizard:** a never-configured machine no longer opens the Groq-key / agents Setup wizard at launch when AI runs on
+  Prism's server (the licence is the only requirement). The developer switch `PRISM_AI_DIRECT=1` keeps the old wizard.
+- **Still to do:** the Settings Agents / keys sections have not been reviewed for server mode yet.
+
+---
+
 # 1.8.5 — 1.8.4 with its Windows test fixes (DEV build, 19 Nov 2026)
 
 **Dev channel only. Windows and Linux.** 1.8.4 was never published: its Windows test job failed on 2 tests, which blocked the
