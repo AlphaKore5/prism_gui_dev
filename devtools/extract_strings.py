@@ -209,6 +209,10 @@ COPY_TABLES = {
     "KIND_LABEL", "SOURCE_LINE",
     # …and Find mobiles: what the panel says under a person's own mobile.
     "PERSON_LINE",
+    # ai_server: the sentence i18n shows INSTEAD of an old Chrome/Groq one
+    # while AI runs on Prism's server (i18n.set_rewording). Only the old
+    # sentence was catalogued, so in Hindi the new one stayed English.
+    "_SERVER_WORDS",
 }
 
 # Strings that reach the UI from somewhere this scan cannot see: the engine's
@@ -365,7 +369,33 @@ def collect() -> dict[str, list[str]]:
 
     for s in EXTRA:
         found.setdefault(s, set()).add("(built-in)")
+    for s in _engine_category_copy():
+        found.setdefault(s, set()).add("prism_terminal/core/agents.py")
     return {k: sorted(v) for k, v in sorted(found.items(), key=lambda kv: kv[0].lower())}
+
+
+def _engine_category_copy() -> list[str]:
+    """The step names and descriptions Settings shows (core.agents.CATEGORIES
+    "label"/"desc", passed through i18n.t). prism_terminal is skipped as a
+    whole, so these were never catalogued; read from the engine's source with
+    ast, never imported."""
+    path = os.path.join(ROOT, "prism_terminal", "core", "agents.py")
+    if not os.path.isfile(path):
+        return []
+    tree = ast.parse(open(path, encoding="utf-8").read())
+    out = []
+    for node in tree.body:
+        if (isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "CATEGORIES"
+                                                 for t in node.targets)
+                and isinstance(node.value, ast.Dict)):
+            for cat in node.value.values:
+                if not isinstance(cat, ast.Dict):
+                    continue
+                for k, v in zip(cat.keys, cat.values):
+                    if (isinstance(k, ast.Constant) and k.value in ("label", "desc")
+                            and isinstance(v, ast.Constant) and isinstance(v.value, str)):
+                        out.append(v.value)
+    return out
 
 
 def main() -> int:

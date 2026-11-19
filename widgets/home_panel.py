@@ -813,7 +813,7 @@ class HomePanel(QWidget):
         prompt = festivals.post_prompt(f) if kind == "post" else festivals.reel_prompt(f)
         question = (i18n.t("{name} is coming up {when} — want to make a "
                            "{kind} about it?").format(
-            name=f["name"], when=festivals.when_phrase(f),
+            name=f["name"], when=_when_words(f),
             kind=i18n.t("post") if kind == "post" else i18n.t("reel")))
         label = QLabel(question)
         label.setWordWrap(True)
@@ -1111,3 +1111,15 @@ class HomePanel(QWidget):
             col.addLayout(cards)
         if stalled:
             col.addWidget(self._stalled_row(stalled))
+
+
+def _when_words(f: dict) -> str:
+    """festivals.when_phrase() for the screen, translatable: "in 2 days" was
+    built with an f-string and stayed English in Hindi. when_phrase itself
+    feeds the English prompts and is left alone."""
+    days = f.get("days_until", 0)
+    if days == 0:
+        return i18n.t("today")
+    if days == 1:
+        return i18n.t("tomorrow")
+    return i18n.t("in {n} days").format(n=days)
