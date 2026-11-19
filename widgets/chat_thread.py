@@ -71,8 +71,11 @@ def _row(widget: QWidget, right: bool) -> QWidget:
         lay.addStretch(1)
         lay.addWidget(widget)
     else:
-        lay.addWidget(widget)
-        lay.addStretch(1)
+        # The answer grows first, up to MAX_BUBBLE; the spacer takes the rest.
+        # With the spacer at stretch 1 and the answer at 0, the spacer won
+        # every spare pixel and an answer sat at its 420 px minimum.
+        lay.addWidget(widget, 1)
+        lay.addStretch(0)
     return host
 
 
