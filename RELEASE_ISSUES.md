@@ -177,6 +177,10 @@ something you did not run.
   deleted. Suspect: `viewer.route_links` (709cf33) connected a lambda holding the browser to the browser's own signal, a cycle
   only the GC frees. Before it: 0 crashes in 3 Windows runs; after: 2 in 7. **Fix:** weak reference; new test proves the browser is
   freed without the GC (fails on the old code). **NOT PROVEN** as the cause until several Windows runs pass without a retry.
+- **Pushed the engine to the WRONG repo (19 Nov, ~16:00):** in `wt-engine-int`, `origin` is Hitarth's
+  `HitarthTrivedi/prism_terminal`, not AlphaKore's (`alphakore`). `git push origin ai-via-server-int:ai-via-server` created a new
+  public branch there with all the server-mode work. Deleted within about a minute; his `main` untouched. **Rule:** name the remote
+  by URL before every push (`git remote -v`); in engine worktrees AlphaKore's remote is `alphakore`, in GUI worktrees `alphakore-dev`.
 - **Process (owner's suggestion):** run the workflow on the branch (`workflow_dispatch`, no tag) and tag only a green commit, so
   a red run never burns a version number.
 

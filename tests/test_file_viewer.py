@@ -151,11 +151,15 @@ class TheDataLayerReadsFilesAsData(unittest.TestCase):
         self.assertEqual(sheet["rows"][1], ["nut", "2"])
         self.assertFalse(sheet["truncated"])
 
-    def test_xlsx_gives_both_sheets_and_formulas_stay_text_or_cached(self):
+    def test_xlsx_gives_both_sheets_and_an_uncalculated_formula_is_computed(self):
+        # Was "formulas stay text". 19 Nov 2026: Prism's own priced BOQ showed
+        # =SUM(...) where the totals belong, so simple formulas are now computed
+        # by viewer_data's own calculator (never eval); the rest stay text
+        # (tests/test_viewer_xlsx_formulas.py).
         data = VD.read(FILES["xlsx"])
         self.assertEqual([s["name"] for s in data["sheets"]], ["Items", "Totals"])
         self.assertEqual(data["sheets"][1]["rows"], [["99"]])
-        self.assertEqual(data["sheets"][0]["rows"][1], ["formula", "=SUM(B2:B2)"])  # never run
+        self.assertEqual(data["sheets"][0]["rows"][1], ["formula", "4"])
         self.assertFalse(data["sheets"][0]["cols_cut"])
 
     def test_docx_blocks_in_order(self):
