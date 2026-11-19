@@ -18,7 +18,7 @@ jobs:
       - name: Check out the commit under test
         shell: bash
         run: |
-          git checkout -q 7c1a891
+          git checkout -q ff651b8
           git submodule update -q --init --recursive
           git log --oneline -1
       - uses: actions/setup-python@v5
@@ -51,10 +51,11 @@ jobs:
           $found = 0
           for ($i = 1; $i -le 12 -and $found -lt 2; $i++) {
             & "$dbg\cdb.exe" -o -cf cmds.txt -y "srv*C:\symbols*https://msdl.microsoft.com/download/symbols" $py -m pytest -q -p no:cacheprovider -p no:faulthandler tests/test_chat_thread.py *> out.txt
-            if (Select-String -Path out.txt -Pattern "=== ACCESS VIOLATION ===" -Quiet) {
+            $hit = Select-String -Path out.txt -Pattern "c0000005" | Select-Object -First 1
+            if ($hit) {
               $found++
-              Write-Host "run ${i}: ACCESS VIOLATION caught"
-              Select-String -Path out.txt -Pattern "=== ACCESS VIOLATION ===" -Context 0,75 | ForEach-Object { $_.Context.PostContext } | Write-Host
+              Write-Host "run ${i}: ACCESS VIOLATION (c0000005) at line $($hit.LineNumber)"
+              Get-Content out.txt | Select-Object -Skip ($hit.LineNumber - 3) -First 90 | Where-Object { $_ -notmatch '^ModLoad' } | Write-Host
             } else {
               Write-Host "run ${i}: no crash"; Get-Content out.txt -Tail 3 | Write-Host
             }
