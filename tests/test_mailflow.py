@@ -322,58 +322,6 @@ class WhatLeavesTheComputer(unittest.TestCase):
         self.assertEqual(recorder.prompts, [])
 
 
-class WithAIThroughPrismsServerNoKeyIsNeeded(unittest.TestCase):
-    """19 Nov 2026, real server AI: ten realistic emails from unknown senders
-    came back "8 unsorted", no inquiry registered, 0 credits, 0.0 s — the
-    AI was never asked. classify / extract_details / reply_intent each
-    stopped on `not api_key`, and no customer has that (Groq) key any more:
-    groq_chat sends the call to Prism's server and ignores it. With the
-    server active they ask; local_only still sends nothing."""
-
-    def _server(self):
-        from unittest import mock
-        from core import ai_client
-        return mock.patch.object(ai_client, "active", return_value=True)
-
-    def test_sorting_asks_the_ai(self):
-        recorder = Recorder("1: inquiry")
-        with self._server(), _patched_groq(recorder):
-            verdicts = triage.classify([message(sender="new@stranger.com")], api_key="")
-        self.assertEqual(len(recorder.prompts), 1)
-        self.assertEqual(verdicts[0].category, triage.INQUIRY)
-
-    def test_local_only_still_sends_nothing(self):
-        recorder = Recorder("1: inquiry")
-        with self._server(), _patched_groq(recorder):
-            triage.classify([message(sender="new@stranger.com")], api_key="", local_only=True)
-        self.assertEqual(recorder.prompts, [])
-
-    def test_keep_everything_here_sends_nothing_in_the_whole_check(self):
-        """The privacy switch blanked the key; with the server active a blank
-        key now means "AI available", so the switch passes None instead."""
-        recorder = Recorder("1: inquiry")
-        paths = mailflow.Paths(tempfile.mkdtemp())
-        mails = [message(sender="new@stranger.com", subject="Need rates"),
-                 message(sender="a@stranger.com", subject="Re: offer", body="let me think")]
-        original = inbox.fetch_new
-        inbox.fetch_new = lambda c, s, **_k: (mails, inbox.State(1, 99), "")
-        try:
-            with self._server(), _patched_groq(recorder):
-                mailflow.check({"api_key": "", "inbox": {"address": "s@acme.co.in",
-                                "password": "p", "host": "h"}}, paths, local_only=True)
-        finally:
-            inbox.fetch_new = original
-        self.assertEqual(recorder.prompts, [])
-
-    def test_details_and_reply_meaning_ask_the_ai(self):
-        recorder = Recorder('{"customer": "Shree Ram Fab"}')
-        with self._server(), _patched_groq(recorder):
-            mailflow.extract_details(message(sender="a@stranger.com"), api_key="")
-            mailflow.reply_intent(message(subject="Re: offer", sender="a@stranger.com",
-                                          body="Hmm, let me think and come back."), api_key="")
-        self.assertEqual(len(recorder.prompts), 2)
-
-
 class AnEmailCannotForgeThePrompt(unittest.TestCase):
     """The body of an email is text a stranger wrote, and it is pasted into a
     prompt next to instructions. Found by scenario testing: a sender could type

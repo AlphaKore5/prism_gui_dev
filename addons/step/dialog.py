@@ -1820,7 +1820,7 @@ class StepDialog(PrismDialog):
         part of the deterministic result above it."""
         if self._catalog_ids is None or self._catalog_nearest_miss is None:
             return
-        if not self._ai_ready():
+        if not self.cfg.get("openrouter_api_key"):
             return
         model = MODEL_IDS[self._chosen_model()]
         prompt = self.sf.catalog_explain_prompt(
@@ -1879,7 +1879,7 @@ class StepDialog(PrismDialog):
                     "question in the box above."))
                 self.ask.setFocus()
                 return
-            if not self._ai_ready():
+            if not self.cfg.get("openrouter_api_key"):
                 self._notify_error(i18n.t(
                     "{model} needs an OpenRouter key — add one in "
                     "Settings → Agents.")
@@ -2145,18 +2145,10 @@ class StepDialog(PrismDialog):
         return i18n.t("{model} needs an OpenRouter key — add one in "
                       "Settings → Agents.").replace("{model}", model)
 
-    def _ai_ready(self) -> bool:
-        """Can Ask / Edit reach an AI? Through Prism's server, as every
-        customer build does (no key of their own; core.openrouter sends the
-        call there and ignores the key), or the old direct way with the
-        person's own OpenRouter key. Checking only the key blocked Ask and
-        Edit for every customer (19 Nov 2026)."""
-        return CB.ai_client.active() or bool(self.cfg.get("openrouter_api_key"))
-
     def _ask(self, m: dict):
         report = m["report"]
         model = self._chosen_model()
-        if not self._ai_ready():
+        if not self.cfg.get("openrouter_api_key"):
             self._notify_error(self._no_key_message(model))
             return
         self._set_busy(True, i18n.t(
@@ -2332,7 +2324,7 @@ class StepDialog(PrismDialog):
         model = self._stage_agents_map.get(key)
         if model not in MODEL_IDS:
             model = self._chosen_model()
-        if not self._ai_ready():
+        if not self.cfg.get("openrouter_api_key"):
             msg = self._no_key_message(model)
             if popup is not None:
                 popup.set_busy(False)
