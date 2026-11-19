@@ -13,8 +13,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { ref: f36ac8b, label: "before gui_gc" }
-          - { ref: 4c78bd3, label: "with gui_gc" }
+          - { ref: 57a115b, label: "workers on real threads" }
     steps:
       - uses: actions/checkout@v4
         with:
@@ -43,7 +42,7 @@ jobs:
           PYTHONUTF8: "1"
         run: |
           set +e
-          for f in test_chat_thread test_usage_panel; do
+          for f in test_chat_thread; do
             bad=0
             for i in $(seq 1 30); do
               python -X faulthandler -m pytest -q -p no:cacheprovider --timeout=120 --timeout-method=thread tests/$f.py > out.txt 2>&1
