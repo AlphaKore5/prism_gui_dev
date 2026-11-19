@@ -211,3 +211,40 @@ class CreditEstimateWorker(_Worker):
             except Exception:                            # noqa: BLE001
                 continue
         self.done.emit(out)
+
+
+class CadPeekWorker(_Worker):
+    """Step 1, before counting: what is IN a DXF/DWG (drawing unit from the header, layers
+    with object counts, a small picture). Read-only: it never measures and does not
+    change how measuring works. Uses ezdxf and cad_render, which BOQ already uses."""
+
+    done = Signal(str, dict)          # path, info
+
+    def __init__(self, path: str, out_dir: str):
+        super().__init__()
+        self.path, self.out_dir = path, out_dir
+
+    def run(self):
+        import os
+        info = {}
+        try:
+            from collections import Counter
+            from addons.boq import cad_render
+            import ezdxf
+            if self.path.lower().endswith(".dwg"):
+                doc = cad_render.dwg_to_drawing(self.path)
+            else:
+                doc = ezdxf.readfile(self.path)
+            info["unit_code"] = int(doc.header.get("$INSUNITS", 0) or 0)
+            counts = Counter(e.dxf.layer for e in doc.modelspace())
+            info["layer_total"] = len(counts)
+            info["layers"] = counts.most_common(8)
+            try:
+                os.makedirs(self.out_dir, exist_ok=True)
+                info["png"] = cad_render.render_dxf_to_png(
+                    doc, os.path.join(self.out_dir, "peek.png"), dpi=50)
+            except Exception:                                    # noqa: BLE001
+                info["png"] = ""
+        except Exception as e:                                   # noqa: BLE001
+            info = {"error": str(e)[:200]}
+        self.done.emit(self.path, info)

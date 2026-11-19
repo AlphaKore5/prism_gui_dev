@@ -45,6 +45,10 @@ def tearDownModule():
     shutil.rmtree(_HOME, ignore_errors=True)
 
 
+# the file peek is a real thread; these tests run it by hand where they need it
+D.CadPeekWorker.start = lambda self: None
+
+
 def _dialog(cfg=None):
     d = BoqDialog({"api_key": "k"} if cfg is None else cfg, [], None)
     d._measure = mock.Mock()           # never start the measuring thread

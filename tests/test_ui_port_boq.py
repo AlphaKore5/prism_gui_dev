@@ -23,6 +23,8 @@ theme.load_fonts()
 QSS = open(os.path.join(ROOT, "style.qss"), encoding="utf-8").read()
 _app.setStyleSheet(QSS.replace("%ASSETS%", os.path.join(ROOT, "assets").replace(os.sep, "/")))
 
+from addons.boq.workers import CadPeekWorker                              # noqa: E402
+CadPeekWorker.start = lambda self: None     # the file peek is a real thread; not run in these tests
 from addons.boq.dialog import BoqDialog                                  # noqa: E402
 from widgets import usage_chip                                           # noqa: E402
 from widgets.stepper import ChoiceCard, FileCard                         # noqa: E402

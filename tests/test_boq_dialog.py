@@ -46,6 +46,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtWidgets import QApplication                # noqa: E402
 
 from addons import registry                               # noqa: E402
+from addons.boq.workers import CadPeekWorker                              # noqa: E402
+CadPeekWorker.start = lambda self: None     # the file peek is a real thread; not run in these tests
 from addons.boq.dialog import BoqDialog                   # noqa: E402
 
 _app = QApplication.instance() or QApplication([])

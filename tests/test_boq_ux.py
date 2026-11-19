@@ -46,6 +46,10 @@ def tearDownModule():
     shutil.rmtree(_HOME, ignore_errors=True)
 
 
+# the file peek is a real thread; these tests run it by hand where they need it
+D.CadPeekWorker.start = lambda self: None
+
+
 def _dialog(cfg=None):
     d = BoqDialog({"api_key": "k"} if cfg is None else cfg, [], None)
     d._measure = mock.Mock()
@@ -363,6 +367,120 @@ class HitarthsHvacToolKeepsEveryStep(unittest.TestCase):
         for name in ("pick_btn", "scale_combo", "measure_btn", "ocr_cb", "scale_confirm_cb",
                      "extract_btn", "use_btn"):
             self.assertFalse(getattr(t, name).isHidden(), name)
+
+
+import pwd
+REAL = os.path.join(pwd.getpwuid(os.getuid()).pw_dir, "prism-test-data", "client") + os.sep
+
+
+def _peek(d, path):
+    """Run the read-only file peek on this thread (no QThread, no event loop)."""
+    from addons.boq.workers import CadPeekWorker
+    w = CadPeekWorker(path, tempfile.mkdtemp(dir=_HOME))
+    seen = {}
+    w.done.connect(lambda p, info: seen.update(info))
+    w.run()
+    d.takeoff_block.show_peek(seen)
+    return seen
+
+
+class TradeBlockOnStepOne(unittest.TestCase):
+    def test_hvac_always_shows_the_pdf_tender_block_even_with_no_file(self):
+        d = _dialog()
+        d._pick_job(I.HVAC)
+        b = d.takeoff_block
+        self.assertTrue(b.isVisibleTo(d.pages.widget(0)))
+        self.assertIn("HVAC drawing a PDF tender", b.title.text())
+        self.assertEqual(b.btn.text(), "Measure the PDF")
+        self.assertIn("scale", b.sub.text())
+        self.assertIn("colours", b.sub.text())
+
+    def test_general_has_no_block_and_the_unit_field_goes_back_to_more_settings(self):
+        d = _dialog()
+        d._pick_job(I.HVAC)
+        self.assertIs(d.unit_edit.parentWidget() is not d.more.body, True)
+        d._pick_job(I.GENERAL)
+        self.assertFalse(d.takeoff_block.isVisibleTo(d.pages.widget(0)))
+        self.assertIs(d.unit_edit.parentWidget(), d.more.body)
+
+    def test_the_button_opens_hitarths_tool(self):
+        d = _dialog()
+        d._pick_job(I.HVAC)
+        with mock.patch.object(d, "_open_industry_takeoff") as opened:
+            d.takeoff_block.btn.click()
+        opened.assert_called_once()
+
+    def test_elv_gets_its_own_wording_and_its_reader(self):
+        d = _dialog()
+        d._pick_job(I.ELV)
+        self.assertIn("ELV drawing a PDF or a picture", d.takeoff_block.title.text())
+        self.assertEqual(d.takeoff_block.btn.text(), "Read the PDF or picture")
+
+    def test_a_dxf_says_plainly_that_the_scale_and_colour_steps_are_for_pdfs(self):
+        d = _dialog()
+        d._pick_job(I.HVAC)
+        d._absorb([_dxf()])
+        self.assertIn("Only a PDF tender needs the scale and colour steps", d.takeoff_block.sub.text())
+        self.assertTrue(d.takeoff_block.btn.isVisibleTo(d.takeoff_block))   # the tool stays reachable
+
+    def test_the_unit_field_is_in_the_block_for_hvac_not_in_the_fold(self):
+        d = _dialog()
+        d._pick_job(I.HVAC)
+        path = _dxf()
+        d._absorb([path])
+        _peek(d, path)
+        self.assertIsNot(d.unit_edit.parentWidget(), d.more.body)
+        self.assertTrue(d.unit_edit.isVisibleTo(d.pages.widget(0)))
+
+    @unittest.skipUnless(os.path.exists(REAL + "HVAC_sample_L02_M-201.dxf"), "client sample not on this machine")
+    def test_a_real_hvac_dxf_shows_unit_layers_with_counts_and_a_picture(self):
+        d = _dialog()
+        d._pick_job(I.HVAC)
+        info = _peek(d, REAL + "HVAC_sample_L02_M-201.dxf")
+        b = d.takeoff_block
+        self.assertIn("millimeters", b.unit_line.text())
+        self.assertEqual(b.unit_warn.text(), "")
+        self.assertIn("M-DUCT-SUPP", b.layers_text.text())
+        self.assertIn("looks like ducts", b.layers_text.text())
+        self.assertRegex(b.layers_text.text(), r"M-DUCT-SUPP: \d+")
+        self.assertTrue(os.path.exists(info["png"]))
+        self.assertIsNotNone(b.picture.pixmap())
+
+    def test_unconfirmed_units_are_warned_plainly(self):
+        import ezdxf
+        p = os.path.join(tempfile.mkdtemp(dir=_HOME), "nounit.dxf")
+        doc = ezdxf.new()
+        doc.header["$INSUNITS"] = 0
+        doc.modelspace().add_line((0, 0), (10, 0))
+        doc.saveas(p)
+        d = _dialog()
+        d._pick_job(I.HVAC)
+        _peek(d, p)
+        self.assertIn("does not say", d.takeoff_block.unit_line.text())
+        self.assertIn("Unit not confirmed", d.takeoff_block.unit_warn.text())
+
+    def test_a_file_that_cannot_be_peeked_says_it_will_be_read_on_next(self):
+        d = _dialog()
+        d._pick_job(I.HVAC)
+        _peek(d, os.path.join(_HOME, "missing.dxf"))
+        self.assertIn("press Next", d.takeoff_block.unit_line.text())
+
+    def test_a_tender_pdf_gets_the_tool_not_a_cad_peek(self):
+        d = _dialog()
+        d._pick_job(I.HVAC)
+        d._set_input(route.SCAN)
+        d.cad_path = "x.pdf"
+        with mock.patch.object(d, "_open_route_tool") as opened:
+            d.takeoff_block.btn.click()
+        opened.assert_called_once()
+
+
+class LayerHints(unittest.TestCase):
+    def test_hints_come_from_the_name_only(self):
+        from addons.boq.takeoff_block import layer_hint
+        self.assertEqual(layer_hint("M-DUCT-SUPP"), "looks like ducts")
+        self.assertEqual(layer_hint("P-CHW-PIPE"), "looks like pipes")
+        self.assertEqual(layer_hint("A-WALL"), "")
 
 
 if __name__ == "__main__":

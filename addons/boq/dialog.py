@@ -39,6 +39,8 @@ from addons.boq import evidence
 from addons.boq import industries
 from addons.boq import route
 from addons.boq import custom_industries as CI
+from addons.boq.takeoff_block import TakeoffBlock
+from addons.boq.workers import CadPeekWorker
 from addons.boq import credits as credit_words
 import friendly
 from addons.boq.industry_dialog import IndustryDialog
@@ -872,7 +874,15 @@ class BoqDialog(PrismDialog):
         self.rules_line.setVisible(False)
         self.industry_combo.currentTextChanged.connect(
             lambda name: self.rules_line.setVisible(name == industries.HVAC))
-        root.addWidget(self.rules_line)
+        _lay = root._layouts[0]                         # step 1's column
+        _at = _lay.indexOf(self.drawing_card) + 1      # right under the drawing, before the optional row
+        _lay.insertWidget(_at, self.rules_line)
+        # The trade's own tool, always visible for HVAC / ELV (the owner could not find
+        # scale and colours when this was folded away), plus what a CAD file holds.
+        self.takeoff_block = TakeoffBlock()
+        self.takeoff_block.open_tool.connect(self._open_trade_tool)
+        self.takeoff_block.setVisible(False)
+        _lay.insertWidget(_at + 1, self.takeoff_block)
 
         # Everything technical lives here, shut by default.
         self.more = MoreOptions("More settings: most people skip this", optional_suffix=False)
@@ -892,7 +902,7 @@ class BoqDialog(PrismDialog):
         extra_row.addStretch(1)
         self.more.add_layout(extra_row)
         self.unit_edit = QLineEdit()
-        self.unit_edit.setPlaceholderText("Drawing unit, if you know it — e.g. meters")
+        self.unit_edit.setPlaceholderText(i18n.t("Drawing unit, if you know it — e.g. meters"))
         self.more.add(self.unit_edit)
         self.scope_edit = QLineEdit()
         self.scope_edit.setPlaceholderText("Only include layers containing… (comma separated)")
@@ -1684,6 +1694,7 @@ class BoqDialog(PrismDialog):
     def _absorb(self, paths: list):
         self._absorb_files(paths)
         self._sync_chips()
+        self._sync_takeoff_block()
         self._refresh_primary()
 
     def _absorb_files(self, paths: list):
@@ -1790,10 +1801,52 @@ class BoqDialog(PrismDialog):
         scan = getattr(self, "_input_kind", "") == route.SCAN
         self.takeoff_btn.setVisible(industries.has_takeoff(industry) and not scan)
         self.takeoff_btn.setText(i18n.t("{industry} PDF takeoff…").format(industry=industry))
+        self._sync_takeoff_block()
         if hasattr(self, "route_btn"):
             self.route_btn.setText(self._route_button_text())
             self.route_btn.setVisible(scan and industry != industries.GENERAL
                                       and bool(self.cad_path))
+
+    def _sync_takeoff_block(self):
+        """Show the trade's tool block for HVAC and ELV (always, with or without a file);
+        the Drawing unit field lives in it while it is up, otherwise back under More settings."""
+        if not hasattr(self, "takeoff_block") or self.mode != "boq":
+            return
+        industry = self.industry_combo.currentText()
+        on = industries.has_takeoff(industry)
+        cad = bool(self.cad_path) and os.path.splitext(self.cad_path)[1].lower() in (".dwg", ".dxf")
+        self.takeoff_block.setVisible(on)
+        if on:
+            self.takeoff_block.set_trade(industry, cad, industries.has_ai_read_modes(industry))
+            self.takeoff_block.unit_slot.addWidget(self.unit_edit)
+            if cad:
+                self._peek_cad()
+        else:
+            self.more.add(self.unit_edit)
+        self.unit_edit.setVisible(True)
+
+    def _peek_cad(self):
+        path = self.cad_path
+        if getattr(self, "_peeked", "") == path:
+            return
+        self._peeked = path
+        import tempfile
+        self._peek_worker = CadPeekWorker(path, tempfile.mkdtemp(prefix="prism-peek-"))
+        self._peek_worker.done.connect(self._on_peek)
+        self._peek_worker.start()
+
+    def _on_peek(self, path: str, info: dict):
+        if path == self.cad_path:
+            self.takeoff_block.show_peek(info)
+            self.scroll.ensureWidgetVisible(self.takeoff_block.peek)
+
+    def _open_trade_tool(self):
+        """The block's one button: the trade's own tool (HVAC: scale, colours, extract)."""
+        industry = self.industry_combo.currentText()
+        if self._input_kind == route.SCAN and self.cad_path:
+            self._open_route_tool()
+        else:
+            self._open_industry_takeoff()
 
     def _open_industry_takeoff(self):
         # item 63: an industry read purely by an AI vision model (no
