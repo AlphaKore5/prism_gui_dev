@@ -400,6 +400,10 @@ class MainWindow(QMainWindow):
         self._task_runs: list[dict] = []
         self._queue_stopped = False               # a licence refusal kills the rest
         self._auto_run = False                    # set once Start the work is pressed
+        # Home's Send: plan AND start, no stop at the plan (owner, 19 Nov
+        # 2026: "dont stop at plan just sent it directly"). Set only there;
+        # "Make a plan" on the Task page still stops for review.
+        self._start_when_planned = False
         self._current_run_file = None
         self._turn_begun = False          # the composer already put this message on the thread
         self._is_followup_run = False
@@ -1450,6 +1454,7 @@ class MainWindow(QMainWindow):
         self._task_runs = []
         self._queue_stopped = False
         self._auto_run = False
+        self._start_when_planned = False
         if not keep_attachments:
             self.attachments = []
         self.files_panel.set_attached(self.attachments)
@@ -1533,6 +1538,7 @@ class MainWindow(QMainWindow):
                 "A task is already running. Your new task is waiting in the "
                 "Task box."), 8000)
             return
+        self._start_when_planned = True
         if self._attach_pending:
             self._route_when_attached = True      # plan once the files are read
             return
@@ -2519,6 +2525,7 @@ class MainWindow(QMainWindow):
         eventually reaches finds itself no longer current and discards its
         answer instead of surprising the user with a plan they cancelled."""
         self._active_plan_worker = None
+        self._start_when_planned = False
         self.input_panel.set_busy(False)
         self.input_panel.set_state("ready")
         self.statusBar().showMessage("Cancelled — nothing was kept.", 4000)
@@ -2598,6 +2605,11 @@ class MainWindow(QMainWindow):
                 4000)
             self._run_pipeline()
             return
+        if self._start_when_planned:
+            self._start_when_planned = False
+            self.statusBar().showMessage(i18n.t("Plan ready — starting the work…"), 4000)
+            self._run_pipeline()
+            return
         total = len(self._task_queue)
         # If the research guardrail added a research step, surface that in the
         # status bar so the user knows why the step appeared.
@@ -2621,6 +2633,7 @@ class MainWindow(QMainWindow):
         if self.sender() is not self._active_plan_worker:
             return   # cancelled — this RouteWorker's failure came in too late
         self._active_plan_worker = None
+        self._start_when_planned = False
         self.input_panel.set_busy(False)
         self.input_panel.set_state("ready")
         # Keep the task. Planning is where runs fail most often — a Groq rate

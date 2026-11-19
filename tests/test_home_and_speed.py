@@ -147,10 +147,14 @@ class HomeSubmitIsOneTap(_Base):
         self.assertEqual(self.win.input_panel.text.toPlainText(), "make a reel about tea")
         self.assertEqual(calls, ["make a reel about tea"])     # planned once, not twice
 
-    def test_real_planning_path_shows_the_plan_with_its_one_start_button(self):
+    def _plan_for_real(self, submit):
+        """The real planning path (RouteWorker faked to answer at once);
+        returns how many times the run was started."""
         _Plan.started.clear()
+        started = []
         with mock.patch.object(main_window, "RouteWorker", _Plan), \
-                mock.patch.object(main_window, "AuthorizeWorker") as auth:
+                mock.patch.object(main_window, "AuthorizeWorker") as auth, \
+                mock.patch.object(self.win, "_run_pipeline", lambda: started.append(1)):
             def fake_auth(feature, action):
                 w = mock.MagicMock()
                 w.start = lambda: self.win._start_route(
@@ -158,13 +162,37 @@ class HomeSubmitIsOneTap(_Base):
                 w.done = mock.MagicMock()
                 return w
             auth.side_effect = fake_auth
+            submit()
+            _pump(100)
+        return started
+
+    def test_home_send_plans_and_starts_the_work_with_no_stop_at_the_plan(self):
+        """Owner, 19 Nov 2026: "dont stop at plan just sent it directly".
+        Home's Send plans the task and starts it; the plan stays on screen
+        as the run's steps."""
+        def submit():
             self.win._show_screen("home")
             self.win.home_panel._prompt_input.setText("write a poem")
             self.win.home_panel._submit_home_task()
-            _pump(100)
+        started = self._plan_for_real(submit)
         self.assertEqual(_Plan.started, ["write a poem"])
-        self.assertEqual(self.win.work_stack.currentIndex(), COMPOSE)
+        self.assertEqual(started, [1])
+        self.assertFalse(self.win._start_when_planned)        # used up, never left armed
+
+    def test_make_a_plan_on_the_task_page_still_stops_for_review(self):
+        started = self._plan_for_real(lambda: self.win._route("write a haiku"))
+        self.assertEqual(_Plan.started, ["write a haiku"])
+        self.assertEqual(started, [])
         self.assertEqual(self.win.input_panel._state, "planned")
+
+    def test_a_failed_home_plan_does_not_start_the_next_plan_by_itself(self):
+        self.win._start_when_planned = True
+        self.win._active_plan_worker = None
+        with mock.patch.object(self.win, "sender", return_value=None), \
+                mock.patch.object(self.win, "_explain"), \
+                mock.patch.object(self.win, "_save_run"):
+            self.win._on_route_failed("rate limited")
+        self.assertFalse(self.win._start_when_planned)
 
     def test_empty_submit_goes_to_the_task_page_and_plans_nothing(self):
         calls = self._route_calls()
