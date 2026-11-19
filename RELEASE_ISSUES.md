@@ -171,6 +171,12 @@ something you did not run.
   **Runner fix 2:** `tests/conftest.py` arms `faulthandler.dump_traceback_later` (set by the runner, file timeout minus 60 s) and
   writes every thread's stack to its own file; the runner reports it even when all tests passed. File timeout 1500 s -> 900 s
   (slowest healthy file 363 s). Verified with probes that hang at import and at exit: both now name the file and line.
+- **Windows crash located (branch run 44538341953, 84aed91):** the runner's first-attempt dump showed 0xC0000005 in
+  `workers.py:182` (`QThread.__init__`) called from `test_nothing_touches_the_network_on_the_ui_thread`; no worker thread was
+  running (workers run inline in that file). A crash inside an allocation = the garbage collector freeing something Qt had already
+  deleted. Suspect: `viewer.route_links` (709cf33) connected a lambda holding the browser to the browser's own signal, a cycle
+  only the GC frees. Before it: 0 crashes in 3 Windows runs; after: 2 in 7. **Fix:** weak reference; new test proves the browser is
+  freed without the GC (fails on the old code). **NOT PROVEN** as the cause until several Windows runs pass without a retry.
 - **Process (owner's suggestion):** run the workflow on the branch (`workflow_dispatch`, no tag) and tag only a green commit, so
   a red run never burns a version number.
 

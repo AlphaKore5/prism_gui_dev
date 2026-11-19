@@ -377,6 +377,33 @@ class EveryDoorRoutesThroughTheViewer(unittest.TestCase):
         vf.assert_called_once()
         qt.assert_called_once()
 
+    def test_routing_links_does_not_keep_the_browser_alive(self):
+        """route_links must not make a reference cycle through the browser:
+        a cycle is freed by the garbage collector at a random later moment,
+        and on Windows that crashed test_chat_thread (ISS-026). Without the
+        cycle, dropping the last reference frees the widget at once."""
+        import gc
+        import weakref
+        from PySide6.QtWidgets import QTextBrowser
+        gc.disable()
+        try:
+            browser = QTextBrowser()
+            viewer.route_links(browser)
+            alive = weakref.ref(browser)
+            del browser
+            self.assertIsNone(alive(), "the link handler still holds the browser")
+        finally:
+            gc.enable()
+
+    def test_a_clicked_link_in_a_routed_browser_reaches_the_viewer(self):
+        from PySide6.QtCore import QUrl
+        from PySide6.QtWidgets import QTextBrowser
+        browser = QTextBrowser()
+        viewer.route_links(browser)
+        with mock.patch.object(viewer, "open_link") as ol:
+            browser.anchorClicked.emit(QUrl("file:///tmp/x.csv"))
+        ol.assert_called_once_with("file:///tmp/x.csv", browser)
+
     def test_the_answer_reader_does_not_hand_links_to_the_os(self):
         from dialogs.answer_dialog import AnswerDialog
         dlg = AnswerDialog("t", "s", "q", "[x](file:///etc/passwd)", "Groq")

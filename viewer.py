@@ -58,4 +58,11 @@ def route_links(browser) -> None:
     the OS. Text from an AI or a customer's email can contain such a link."""
     browser.setOpenLinks(False)
     browser.setOpenExternalLinks(False)
-    browser.anchorClicked.connect(lambda url: open_link(url.toString(), browser))
+    # A weak reference, not the browser itself: a slot that holds its own
+    # sender makes a cycle only Python's garbage collector can free, at some
+    # random later allocation, after Qt may already have deleted the widget.
+    # test_chat_thread crashed on Windows (0xC0000005) inside such an
+    # allocation in 2 of 7 CI runs after this function arrived (ISS-026).
+    import weakref
+    ref = weakref.ref(browser)
+    browser.anchorClicked.connect(lambda url: open_link(url.toString(), ref()))
