@@ -101,7 +101,7 @@ class TakeoffBlock(QFrame):
         self.cad_note.setVisible(False)
 
     # -- content
-    def set_trade(self, industry: str, has_cad: bool, ai_read: bool):
+    def set_trade(self, industry: str, has_cad: bool, ai_read: bool, has_pdf: bool = False):
         if ai_read:                                    # ELV: its own PDF / picture reader
             self.title.setText(i18n.t("Is your {t} drawing a PDF or a picture?").format(t=industry))
             self.sub.setText(i18n.t("Prism can read the labels and symbols on it. It asks before "
@@ -116,6 +116,14 @@ class TakeoffBlock(QFrame):
             self.btn.setText(i18n.t("Measure the PDF"))
             kind = i18n.t("Your file is a DXF/DWG: Prism reads its drawing units and layers "
                           "itself. Only a PDF tender needs the scale and colour steps.")
+        if has_pdf:                                    # the PDF is added: say what happens with it
+            self.title.setText(i18n.t("Your PDF is ready for the {t} tool").format(t=industry))
+            self.sub.setText(i18n.t(
+                "Prism will measure it, not read it as a sample BOQ: you set the scale, map the "
+                "line colours, then extract.") if not ai_read else i18n.t(
+                "Prism will read its labels and symbols. It asks before anything is sent to AI."))
+            self.btn.setText(i18n.t("Open the {t} tool").format(t=industry) if not ai_read
+                             else i18n.t("Open the {t} reader").format(t=industry))
         self.cad_note.setText(kind)
         self.cad_note.setVisible(False)
         if has_cad:                                    # one sentence, in the card, not a second block

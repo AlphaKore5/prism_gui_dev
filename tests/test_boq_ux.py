@@ -568,6 +568,69 @@ class ContinueWhereYouLeftOff(unittest.TestCase):
             self.assertTrue(r.get("addon") == "boq" or isinstance(r.get("boq"), dict))
 
 
+_TENDER = REAL + "201_wo_ai.pdf"
+
+
+@unittest.skipUnless(os.path.exists(_TENDER), "client sample not on this machine")
+class AChosenTradeDecidesWhatAPdfIs(unittest.TestCase):
+    """The engine files a text-heavy tender PDF as a sample BOQ. The person's choice decides."""
+
+    def test_hvac_chosen_then_pdf_added_is_the_drawing_and_the_button_opens_the_tool(self):
+        d = _dialog()
+        d._pick_job(I.HVAC)
+        d._absorb([_TENDER])
+        self.assertEqual(d.cad_path, _TENDER)
+        self.assertEqual(d.templates, [])
+        self.assertEqual(d._input_kind, route.SCAN)
+        self.assertEqual(d.drawing_card.title.text() if hasattr(d.drawing_card, "title") else "Drawing added", "Drawing added")
+        self.assertEqual(d.run_btn.text(), "Open the HVAC tool")
+        self.assertIn("Your PDF is ready for the HVAC tool", d.takeoff_block.title.text())
+        with mock.patch.object(d, "_open_route_tool") as opened:
+            d._primary()
+        opened.assert_called_once()
+
+    def test_the_tool_is_opened_with_the_file_preselected(self):
+        d = _dialog()
+        d._pick_job(I.HVAC)
+        d._absorb([_TENDER])
+        seen = {}
+
+        class Fake:
+            result = None
+
+            def __init__(self, industry, parent=None, cfg=None, path=""):
+                seen["path"] = path
+
+            def exec(self):
+                return QDialog.Rejected
+        with mock.patch.object(D, "IndustryTakeoffDialog", Fake):
+            d._open_route_tool()
+        self.assertEqual(seen["path"], _TENDER)
+
+    def test_pdf_added_first_then_hvac_picked_moves_it_from_sample_to_drawing(self):
+        d = _dialog()
+        d._absorb([_TENDER])                         # General: the existing rule, said in the hint
+        self.assertEqual([os.path.basename(a["path"]) for a in d.templates], ["201_wo_ai.pdf"])
+        self.assertEqual(d.cad_path, "")
+        d._pick_job(I.HVAC)
+        self.assertEqual(d.cad_path, _TENDER)
+        self.assertEqual(d.templates, [])
+        self.assertEqual(d.run_btn.text(), "Open the HVAC tool")
+
+    def test_general_keeps_the_existing_classification(self):
+        d = _dialog()
+        d._absorb([_TENDER])
+        self.assertEqual(len(d.templates), 1)
+        self.assertEqual(d.cad_path, "")
+
+    def test_elv_chosen_pdf_is_the_drawing_with_its_own_reader_button(self):
+        d = _dialog()
+        d._pick_job(I.ELV)
+        d._absorb([_TENDER])
+        self.assertEqual(d.cad_path, _TENDER)
+        self.assertEqual(d.run_btn.text(), "Open the ELV reader")
+
+
 class LayerHints(unittest.TestCase):
     def test_hints_come_from_the_name_only(self):
         from addons.boq.takeoff_block import layer_hint

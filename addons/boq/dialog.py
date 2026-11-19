@@ -1520,8 +1520,9 @@ class BoqDialog(PrismDialog):
         if self._step == self.S_HAVE:
             ok = bool(self.ask.text() or self.q or self.cad_path)
             if self._route_tool_pending():
-                return (i18n.t("Open the HVAC tool") if self.industry_combo.currentText() == industries.HVAC
-                        else i18n.t("Read the drawing"), not busy, "")
+                trade = self.industry_combo.currentText()
+                return (i18n.t("Open the HVAC tool") if trade == industries.HVAC
+                        else i18n.t("Open the {t} reader").format(t=trade), not busy, "")
             return (i18n.t("Next: count it"), ok and not busy,
                     "" if ok else i18n.t(
                         "Say what the {noun} is for, or attach a drawing.").format(noun=noun))
@@ -1724,6 +1725,12 @@ class BoqDialog(PrismDialog):
         if not atts:
             return
         cad, templates, images, notes = self.boq.classify_inputs(atts)
+        if self.mode == "boq" and industries.has_takeoff(self.industry_combo.currentText()):
+            # HVAC / ELV was chosen: a PDF here IS the drawing for that trade's own tool. The
+            # engine files a text-heavy tender PDF as a sample BOQ; the person's choice decides.
+            as_drawing = [a for a in templates if a["path"].lower().endswith(".pdf")]
+            templates = [a for a in templates if a not in as_drawing]
+            cad = as_drawing + cad
         if self.mode == "boq" and (self._input_kind == route.SCAN
                                    or (not self._input_kind and not cad and not self.cad_path)):
             # A picture added with no CAD file is the drawing itself (a photo or
@@ -1840,10 +1847,26 @@ class BoqDialog(PrismDialog):
         self.takeoff_btn.setVisible(industries.has_takeoff(industry) and not scan)
         self.takeoff_btn.setText(i18n.t("{industry} PDF takeoff…").format(industry=industry))
         self._sync_takeoff_block()
+        self._reroute_pdf_for_trade(industry)
         if hasattr(self, "route_btn"):
             self.route_btn.setText(self._route_button_text())
             self.route_btn.setVisible(scan and industry != industries.GENERAL
                                       and bool(self.cad_path))
+
+    def _reroute_pdf_for_trade(self, industry: str):
+        """HVAC or ELV picked AFTER a PDF was added: that PDF was filed as a sample BOQ
+        (General's rule); with a trade chosen it is the drawing for the trade's tool."""
+        if (self.mode != "boq" or not industries.has_takeoff(industry) or self.cad_path
+                or not hasattr(self, "templates") or not hasattr(self, "drawing_card")):
+            return
+        pdfs = [a for a in self.templates if a["path"].lower().endswith(".pdf")]
+        if not pdfs:
+            return
+        self.templates = [a for a in self.templates if a not in pdfs]
+        self._update_template_hint()
+        self._absorb_files([pdfs[-1]["path"]])
+        self._sync_chips()
+        self._refresh_primary()
 
     def _sync_takeoff_block(self):
         """Show the trade's tool block for HVAC and ELV (always, with or without a file);
@@ -1855,7 +1878,9 @@ class BoqDialog(PrismDialog):
         cad = bool(self.cad_path) and os.path.splitext(self.cad_path)[1].lower() in (".dwg", ".dxf")
         self.takeoff_block.setVisible(on)
         if on:
-            self.takeoff_block.set_trade(industry, cad, industries.has_ai_read_modes(industry))
+            pdf = (bool(self.cad_path) and not cad
+                   and os.path.splitext(self.cad_path)[1].lower() == ".pdf")
+            self.takeoff_block.set_trade(industry, cad, industries.has_ai_read_modes(industry), pdf)
             self.takeoff_block.unit_slot.addWidget(self.unit_edit)
             if cad:
                 self._peek_cad()
