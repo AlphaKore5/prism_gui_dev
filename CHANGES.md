@@ -10,6 +10,17 @@ Tests: **1966 passing** (6 skipped, 8 Sep 2026 after Round 16 landed on main —
 
 ---
 
+# 1.8.5 — 1.8.4 with its Windows test fixes (DEV build, 19 Nov 2026)
+
+**Dev channel only. Windows and Linux.** 1.8.4 was never published: its Windows test job failed on 2 tests, which blocked the
+release by design. Everything in 1.8.4 below is in this build.
+
+- **Real Windows bug fixed:** the ODA installer download deleted a wrong-type file while it was still open, which Windows
+  refuses (`WinError 32`); it now closes the file first. The download is behind the "Install it from Prism" switch, which is OFF.
+- **Test only:** the Linux-paths test now sets `USERPROFILE` as well as `HOME` (Windows reads `USERPROFILE`).
+
+---
+
 # 1.8.4 — Chat, plain plan screen, BOQ by industry, licence and component fixes (DEV build, 19 Nov 2026)
 
 **Dev channel only. Windows and Linux (macOS deferred). Windows on ARM runs this x64 build under emulation; an ARM CI job tests it.**

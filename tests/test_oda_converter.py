@@ -39,7 +39,7 @@ class _Env(unittest.TestCase):
         self.root = tempfile.mkdtemp(prefix="prism-s25-")
         self._saved = {k: os.environ.get(k) for k in
                        (boq.ENV_CONVERTER, "PROGRAMFILES", "PROGRAMFILES(X86)",
-                        "PROGRAMW6432", "LOCALAPPDATA", "HOME")}
+                        "PROGRAMW6432", "LOCALAPPDATA", "HOME", "USERPROFILE")}
         os.environ.pop(boq.ENV_CONVERTER, None)
         # The shipped default is OFF (ODA's terms are unconfirmed); the install flow is tested as if on.
         p = mock.patch.object(CS, "INSTALL_FROM_PRISM", True)
@@ -89,6 +89,7 @@ class Detection(_Env):
 
     def test_linux_deb_paths_and_appimage_in_downloads(self):
         os.environ["HOME"] = self.root
+        os.environ["USERPROFILE"] = self.root          # Windows' expanduser("~") reads this, not HOME
         app = _exe(self.root, "Downloads", "ODAFileConverter_QT6_lnxX64_11dll.AppImage")
         with mock.patch.object(boq.platform, "system", return_value="Linux"):
             found = boq._installed_converter_paths()

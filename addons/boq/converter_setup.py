@@ -151,9 +151,10 @@ class DownloadWorker(_Worker):
         magic = {".msi": _MSI_MAGIC, ".deb": _DEB_MAGIC}.get(os.path.splitext(path)[1].lower())
         if magic:
             with open(path, "rb") as f:
-                if f.read(len(magic)) != magic:
-                    os.remove(path)
-                    raise RuntimeError("The downloaded file is not an installer.")
+                head = f.read(len(magic))
+            if head != magic:                  # removed after the handle is closed: Windows refuses to delete an open file
+                os.remove(path)
+                raise RuntimeError("The downloaded file is not an installer.")
         return path
 
 
