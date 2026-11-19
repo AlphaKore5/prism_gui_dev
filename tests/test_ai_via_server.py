@@ -469,6 +469,42 @@ class Screens:
             assert edit.placeholderText() not in ("gsk_…", "sk-or-…"), "a provider key field is still on the page"
             assert REAL_GROQ not in edit.text() and REAL_OR not in edit.text()
 
+    def test_settings_agents_has_no_pickers_only_what_runs_each_step(self, ai):
+        """Owner, 19 Nov 2026: fix the Settings agents section now. In server
+        mode it showed seven 'skip this category' dropdowns under 'Pick one
+        per category' — but server_effective() runs every step on Prism's
+        own tools whatever they said. A read-only list of what runs each
+        step replaces them."""
+        from PySide6.QtWidgets import QComboBox, QLabel
+        p = self._settings()
+        assert p.findChildren(QComboBox) == [] or not any(
+            cb.isVisibleTo(p) and any("skip this category" in cb.itemText(i)
+                                      for i in range(cb.count()))
+            for cb in p.findChildren(QComboBox)), "step pickers are still on the page"
+        labels = " | ".join(l.text() for l in p.findChildren(QLabel))
+        assert "skip this category" not in labels
+        assert "Pick one per category" not in labels
+        assert labels.count("Prism AI") >= 5, labels
+        for site in ("ChatGPT", "Perplexity", "Gemini", "Runway"):
+            assert site not in labels, site
+
+    def test_settings_connections_has_no_chrome_login_leftovers(self, ai):
+        """Server mode: no website logins, so no Chrome version pin, no
+        'copy my Chrome logins', no 'Your logins copied in: NOT YET'."""
+        import licensing
+        from PySide6.QtWidgets import QLabel, QPushButton
+        from widgets import settings_panel as SP
+        with mock.patch.object(SP.licensing, "state", lambda: licensing.LicenseState(
+                status=licensing.NONE)):
+            p = SP.SettingsPanel(_cfg())
+            p.show_section("status")
+        texts = " | ".join([l.text() for l in p.findChildren(QLabel)]
+                           + [b.text() for b in p.findChildren(QPushButton)])
+        for gone in ("Chrome version", "Copy my Chrome logins", "logins copied",
+                     "Browser automation"):
+            assert gone not in texts, gone
+        assert "Team folder" in texts
+
     def test_settings_shows_the_real_balance_line(self, ai):
         import ai_server
         ai_server.refresh_async(force=True)

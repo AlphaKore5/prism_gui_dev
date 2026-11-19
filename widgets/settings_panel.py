@@ -1274,6 +1274,15 @@ class SettingsPanel(QDialog):
             # AI runs through Prism's server: no provider key is asked for or
             # kept here, and a key saved by an older Prism is left untouched.
             col.addWidget(self._ai_plan_card())
+            # No pickers either (owner, 19 Nov 2026). server_effective() runs
+            # every step on Prism's own tools whatever the saved picks say, so
+            # seven "skip this category" dropdowns told the customer the
+            # opposite of what happens. Show what runs each step instead.
+            col.addWidget(self._server_steps_card())
+            from prospector import gateway
+            if not gateway.pooled():
+                col.addWidget(self._verifier_card())
+            return
         else:
             key_edit = QLineEdit(self.cfg.get("api_key", ""))
             key_edit.setEchoMode(QLineEdit.Password)
@@ -1506,6 +1515,41 @@ class SettingsPanel(QDialog):
                                if box.isChecked()]
         self._after_save(i18n.t("Saved."))
 
+    def _server_steps_card(self) -> Card:
+        """Server mode: each kind of step and what runs it, read-only. Every
+        name goes through ai_server.display_agent ("Prism AI · writer")."""
+        import ai_server
+        categories = CB.agents.CATEGORIES
+        effective = CB.agents.server_effective(self.cfg.get("agents") or {})
+        card = Card("soft")
+        col = card.body((theme.CARD_PAD, theme.SPACE_3,
+                         theme.CARD_PAD, theme.SPACE_2), spacing=0)
+        col.addWidget(C.kicker(i18n.t("What does each step")))
+        col.addWidget(C.label(i18n.t(
+            "Every kind of step runs on Prism AI, included in your plan. "
+            "There is nothing to pick and nothing to sign in to."),
+            level="META", wrap=True))
+        for stage in CB.agents.PIPELINE_ORDER:
+            if stage == "summary" or stage not in categories:
+                continue
+            meta = categories[stage]
+            tool = effective.get(stage) or ""
+            col.addWidget(C.hairline())
+            row = QHBoxLayout()
+            row.setContentsMargins(0, theme.SPACE_3, 0, theme.SPACE_3)
+            row.setSpacing(theme.SPACE_3)
+            stack = QVBoxLayout()
+            stack.setSpacing(2)
+            stack.addWidget(C.label(i18n.t(meta.get("label", stage.title())),
+                                    level="CARD_TITLE"))
+            if meta.get("desc"):
+                stack.addWidget(C.label(i18n.t(meta["desc"]), level="META", wrap=True))
+            row.addLayout(stack, stretch=1)
+            row.addWidget(Pill(ai_server.display_agent(tool, stage) if tool
+                               else ai_server.PRISM_AI, "tag"), alignment=Qt.AlignTop)
+            col.addLayout(row)
+        return card
+
     def _agents_list_card(self, picked, categories, premium) -> Card:
         card = Card("soft")
         col = card.body((theme.CARD_PAD, theme.SPACE_2,
@@ -1650,8 +1694,29 @@ class SettingsPanel(QDialog):
         left once the Groq key and the login-site grid moved to Agents (they
         were never really "connections" so much as "your AI setup," which is
         one nav destination, not two)."""
-        chrome = (self.cfg.get("chrome_version") or "").strip()
         offline = workspace.unreachable(self.cfg)
+        if CB.ai_client.active():
+            # AI through Prism's server: no website logins, so no Chrome pin,
+            # no copied logins, no "browser automation" (owner, 19 Nov 2026).
+            # The background browser only draws reels, motion and PDFs.
+            col.addWidget(self._facts([
+                (i18n.t("Team folder"),
+                 Pill(i18n.t("Unreachable") if offline else i18n.t("Reachable"),
+                      "err" if offline else "ok")),
+            ]))
+            if offline:
+                col.addWidget(self._note(offline))
+            col.addWidget(self._head(
+                i18n.t("Browser used for drawing"),
+                i18n.t("Prism uses a Chrome-style browser in the background to "
+                       "draw reels, motion graphics and PDFs. It is never used "
+                       "for AI and you never sign in to anything in it. "
+                       "Components installs or repairs it.")))
+            col.addWidget(self._buttons([
+                C.button(i18n.t("Close Prism's browser"), "secondary",
+                         on_click=self._close_browser)]))
+            return
+        chrome = (self.cfg.get("chrome_version") or "").strip()
         ok, why = self._safe(CB.automation_available) or (False, "")
 
         col.addWidget(self._facts([
