@@ -16,7 +16,7 @@ import os
 
 from PySide6.QtCore import Qt, Signal, QSize
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
+    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QSizePolicy, QLabel,
     QFileDialog, QMenu, QFrame,
 )
 
@@ -46,9 +46,13 @@ class AskPanel(QWidget):
     files_added = Signal(list)      # list of absolute paths
     file_removed = Signal(str)      # the absolute path taken back out
 
-    def __init__(self, placeholder: str, parent=None):
+    def __init__(self, placeholder: str, parent=None, compact: bool = False):
         super().__init__(parent)
         self._paths: list[str] = []
+        # Set by the owner so the file chooser starts where this person last picked.
+        self.cfg: dict | None = None
+        self.pick_kind = "attach"
+        self.pick_filters = "All files (*)"
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -57,24 +61,33 @@ class AskPanel(QWidget):
         self.edit = C.PlainPasteTextEdit()
         self.edit.setPlaceholderText(placeholder)
         self.edit.setFixedHeight(92)
-        root.addWidget(self.edit)
-
-        row = QHBoxLayout()
         self.mic_btn = small_button("Speak", "mic", "Say it instead of typing")
         self.mic_btn.clicked.connect(self.speak_clicked.emit)
-        row.addWidget(self.mic_btn)
-
         add_btn = small_button("Add file", "paperclip",
                                "Attach a drawing, a list, a brochure — anything")
         add_btn.clicked.connect(self._pick_file)
-        row.addWidget(add_btn)
-
         self.fav_btn = small_button("Favourites", "folder",
                                     "Your starred files and folders")
         self.fav_btn.clicked.connect(self._show_favourites)
-        row.addWidget(self.fav_btn)
-        row.addStretch(1)
-        root.addLayout(row)
+        if compact:
+            # The preview's shape: the box, with Speak and Add file beside it.
+            top = QHBoxLayout()
+            top.setSpacing(8)
+            top.addWidget(self.edit, stretch=1)
+            side = QVBoxLayout()
+            side.setSpacing(4)
+            side.addWidget(self.mic_btn)
+            side.addWidget(add_btn)
+            top.addLayout(side)
+            root.addLayout(top)
+        else:
+            root.addWidget(self.edit)
+            row = QHBoxLayout()
+            row.addWidget(self.mic_btn)
+            row.addWidget(add_btn)
+            row.addWidget(self.fav_btn)
+            row.addStretch(1)
+            root.addLayout(row)
 
         # Attachments as real rows, not "📎 name   📎 name" in one label.
         # The emoji prefix was the last one left in the widget package: it
@@ -88,6 +101,7 @@ class AskPanel(QWidget):
         self._chip_layout.setContentsMargins(0, 0, 0, 0)
         self._chip_layout.setSpacing(theme.SPACE_1 + 2)
         self.chips.setVisible(False)
+        self.chips.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
         root.addWidget(self.chips)
 
     # ── text ────────────────────────────────────────────────────────────
@@ -106,7 +120,8 @@ class AskPanel(QWidget):
 
     # ── files ───────────────────────────────────────────────────────────
     def _pick_file(self):
-        paths, _ = QFileDialog.getOpenFileNames(self, i18n.t("Attach files"))
+        from widgets import file_pick
+        paths = file_pick.open_files(self, "Attach files", self.pick_kind, self.pick_filters, self.cfg)
         if paths:
             self.add_paths(paths)
 
@@ -217,14 +232,15 @@ class MoreOptions(QFrame):
     default, one click to open, and the button says plainly that it is
     optional."""
 
-    def __init__(self, label: str = "More options", parent=None):
+    def __init__(self, label: str = "More options", parent=None, optional_suffix: bool = True):
         super().__init__(parent)
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(6)
 
         self.toggle = QPushButton(
-            "  " + i18n.t("{label}  (optional)").format(label=i18n.t(label)))
+            "  " + (i18n.t("{label}  (optional)").format(label=i18n.t(label))
+                    if optional_suffix else i18n.t(label)))
         self.toggle.setObjectName("smallBtn")
         self.toggle.setCursor(Qt.PointingHandCursor)
         self.toggle.setCheckable(True)

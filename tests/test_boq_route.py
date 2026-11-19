@@ -51,9 +51,18 @@ class Roads(unittest.TestCase):
         self.assertEqual(keys(route.CAD, I.GENERAL),
                          ["read", "measure", "check", "write", "prices", "files"])
 
-    def test_hvac_pdf_reads_ducts_then_tags_then_you_check(self):
+    def test_hvac_pdf_follows_hitarths_tool_open_scale_step1_step2_then_you_check(self):
+        # hvac_takeoff/README.md: Open PDF, set the scale, Step 1 map the colours, Step 2 extract.
         self.assertEqual(keys(route.SCAN, I.HVAC, "t.pdf"),
-                         ["read", "measure", "tags", "check", "write", "prices", "files"])
+                         ["read", "scale", "layers", "measure", "check", "write", "prices", "files"])
+
+    def test_a_cad_road_has_no_invented_trade_steps(self):
+        # core.boq.measure() is one routine; only HVAC adds rules (named so), ELV is the plain one.
+        for ind in (I.GENERAL, I.ELV):
+            m = [s for s in route.stages(route.CAD, ind) if s.key == "measure"][0]
+            self.assertEqual(m.label, "Measure")
+        h = [s for s in route.stages(route.CAD, I.HVAC) if s.key == "measure"][0]
+        self.assertIn("HVAC", h.label)
 
     def test_a_drawing_never_goes_to_ai_in_the_measuring_steps_of_a_cad_file(self):
         for ind in I.NAMES:
@@ -65,7 +74,9 @@ class Roads(unittest.TestCase):
         for inp in route.INPUTS:
             for ind in I.NAMES:
                 by = {s.key: s for s in route.stages(inp, ind, "x.pdf")}
-                self.assertEqual(by["write"].where, route.AI)
+                # General from a PDF has one AI step that reads AND writes ("With the drawing")
+                ai = by.get("write") or by["drawing"]
+                self.assertEqual(ai.where, route.AI)
                 self.assertEqual(by["check"].where, route.YOU)
 
     def test_describe_says_the_quantities_are_estimates(self):
@@ -75,7 +86,7 @@ class Roads(unittest.TestCase):
 
     def test_ai_reading_of_a_scan_is_labelled_a_reading_not_a_measurement(self):
         for ind in (I.GENERAL, I.ELV):
-            tags = [s for s in route.stages(route.SCAN, ind, "a.png") if s.key == "tags"][0]
+            tags = [s for s in route.stages(route.SCAN, ind, "a.png") if s.key in ("tags", "drawing")][0]
             self.assertIn("not a measurement", tags.detail.lower())
             self.assertIn(tags.where, (route.AI, route.LOCAL_AI))
 

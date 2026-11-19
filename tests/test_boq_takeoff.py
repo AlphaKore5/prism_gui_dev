@@ -372,10 +372,13 @@ class MeasuringAScaleOverridesTheDropdownAndCountsAsConfirmation(unittest.TestCa
         d.pdf_path = "/x/fake.pdf"
         fake = mock.Mock()
         fake.pt_per_ft = 12.5
+        fake.page_index = 1           # the view now also says which page it was measured on
+        fake.closest_label = None
         with mock.patch.object(T, "_ScaleMeasureDialog", return_value=fake):
             fake.exec.return_value = QDialog.Accepted
             d._open_measure_dialog()
         self.assertEqual(d._pt_per_ft(), 12.5)
+        self.assertEqual(d._scale_page, 1)             # remembered for the next time it opens
         self.assertTrue(d.scale_confirm_cb.isChecked())
         self.assertTrue(d.measured_scale_label.isVisibleTo(d))
 
@@ -403,7 +406,7 @@ class MeasuringAScaleOverridesTheDropdownAndCountsAsConfirmation(unittest.TestCa
         d = _dialog_with_one_layer("supply")
         d._measured_pt_per_ft = 12.5
         d.measured_scale_label.setVisible(True)
-        with mock.patch.object(T, "QFileDialog") as fd, \
+        with mock.patch("widgets.file_pick.QFileDialog") as fd, \
                 mock.patch.object(T.industries, "scan_layers", return_value=[]):
             fd.getOpenFileName.return_value = ("/x/new.pdf", "")
             d._pick_pdf()

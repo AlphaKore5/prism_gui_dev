@@ -24,7 +24,7 @@ from decimal import Decimal, InvalidOperation
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import (
-    QAbstractItemView, QCheckBox, QDoubleSpinBox, QFileDialog, QFrame, QHBoxLayout,
+    QAbstractItemView, QCheckBox, QDoubleSpinBox, QFrame, QHBoxLayout,
     QHeaderView, QLabel, QLineEdit, QScrollArea, QTableWidget, QTableWidgetItem,
     QVBoxLayout, QWidget,
 )
@@ -484,11 +484,8 @@ class PricingTable(QWidget):
             self._show_row(r)
 
     def _pick_rates(self):
-        import paths
-        start = rate_list_path(self.cfg) or paths.picker_start_dir()
-        path, _ = QFileDialog.getOpenFileName(
-            self, i18n.t("Your rate list"), start,
-            i18n.t("Price lists (*.csv *.xlsx *.xlsm *.pdf *.docx *.txt);;All files (*)"))
+        from widgets import file_pick
+        path = file_pick.open_file(self, "Your rate list", "boq-rates", file_pick.PRICES, self.cfg)
         if path:
             self.load_rates(path)
 
@@ -650,10 +647,8 @@ class PricingTable(QWidget):
                    "docx": i18n.t("Word document (*.docx)"),
                    "csv": i18n.t("CSV (*.csv)"),
                    "pdf": i18n.t("PDF (*.pdf)")}[kind]
-        suggested = os.path.join(os.path.expanduser("~/Downloads"),
-                                 f"Priced_BOQ.{kind}")
-        path, _ = QFileDialog.getSaveFileName(
-            self, i18n.t("Save the priced BOQ"), suggested, filters)
+        from widgets import file_pick
+        path = file_pick.save_file(self, "Save the priced BOQ", "boq-save", f"Priced_BOQ.{kind}", filters, self.cfg)
         if not path:
             return
         if not path.lower().endswith(f".{kind}"):

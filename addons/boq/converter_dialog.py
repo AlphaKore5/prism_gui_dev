@@ -6,7 +6,8 @@ import platform
 
 from PySide6.QtCore import Qt, QTimer, QUrl
 from PySide6.QtGui import QDesktopServices
-from PySide6.QtWidgets import (QCheckBox, QFileDialog, QHBoxLayout, QLabel,
+from widgets import file_pick
+from PySide6.QtWidgets import (QCheckBox, QHBoxLayout, QLabel,
                                QProgressBar)
 
 import i18n
@@ -130,8 +131,7 @@ class ConverterDialog(PrismDialog):
 
     def _choose(self):
         exe = "ODAFileConverter.exe" if platform.system() == "Windows" else "ODAFileConverter"
-        path, _ = QFileDialog.getOpenFileName(
-            self, i18n.t("Choose the converter file"), os.path.expanduser("~"), exe + ";;*")
+        path = file_pick.open_file(self, "Choose the converter file", "converter", exe + ";;*", self.cfg)
         if not path:
             return
         if CS.remember(self.cfg, path):

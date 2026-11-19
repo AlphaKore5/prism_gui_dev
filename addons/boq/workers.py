@@ -185,3 +185,112 @@ class OpenRouterWriteWorker(_Worker):
             self.done.emit(text)
         except Exception as e:                           # noqa: BLE001
             self.failed.emit(str(e))
+
+
+class CreditEstimateWorker(_Worker):
+    """Ask Prism's server what the AI steps of this job would typically cost
+    (never charges). `wanted` is {key: (role, approx_in_chars, images)}; the
+    answer is {key: typical_mc}. A step the server cannot price is left out, so
+    the screen says nothing about it instead of inventing a number."""
+
+    done = Signal(dict)
+
+    def __init__(self, wanted: dict):
+        super().__init__()
+        self.wanted = dict(wanted)
+
+    def run(self):
+        out = {}
+        for key, (role, chars, images) in self.wanted.items():
+            try:
+                got = CB.ai_client.estimate(role, approx_in_chars=int(chars), images=int(images),
+                                            addon="boq", feature="estimate")
+                mc = int((got or {}).get("typical_mc") or 0)
+                if mc > 0:
+                    out[key] = mc
+            except Exception:                            # noqa: BLE001
+                continue
+        self.done.emit(out)
+
+
+class CadPeekWorker(_Worker):
+    """Step 1, before counting: what is IN a DXF/DWG (drawing unit from the header, layers
+    with object counts, a small picture). Read-only: it never measures and does not
+    change how measuring works. Uses ezdxf and cad_render, which BOQ already uses."""
+
+    done = Signal(str, dict)          # path, info
+
+    def __init__(self, path: str, out_dir: str):
+        super().__init__()
+        self.path, self.out_dir = path, out_dir
+
+    def run(self):
+        import os
+        info = {}
+        try:
+            from collections import Counter
+            from addons.boq import cad_render
+            import ezdxf
+            if self.path.lower().endswith(".dwg"):
+                doc = cad_render.dwg_to_drawing(self.path)
+            else:
+                doc = ezdxf.readfile(self.path)
+            info["unit_code"] = int(doc.header.get("$INSUNITS", 0) or 0)
+            counts = Counter(e.dxf.layer for e in doc.modelspace())
+            info["layer_total"] = len(counts)
+            info["layers"] = counts.most_common(8)
+            try:
+                os.makedirs(self.out_dir, exist_ok=True)
+                info["png"] = cad_render.render_dxf_to_png(
+                    doc, os.path.join(self.out_dir, "peek.png"), dpi=50)
+            except Exception:                                    # noqa: BLE001
+                info["png"] = ""
+        except Exception as e:                                   # noqa: BLE001
+            info = {"error": str(e)[:200]}
+        self.done.emit(self.path, info)
+
+
+class PageScanWorker(_Worker):
+    """For the scale view: how many drawn objects each page of a PDF has (so the
+    page with the most lines is offered first) and the line ends and corners of one page
+    (so clicks can snap to them). Read-only; pdfplumber is the library the HVAC tool uses."""
+
+    done = Signal(dict)
+
+    def __init__(self, pdf_path: str, only_page=None, max_points: int = 60000):
+        super().__init__()
+        self.pdf_path, self.only_page, self.max_points = pdf_path, only_page, max_points
+
+    def run(self):
+        out = {"pages": [], "points": []}
+        try:
+            import pdfplumber
+            with pdfplumber.open(self.pdf_path) as pdf:
+                for i, page in enumerate(pdf.pages):
+                    want = self.only_page is None or i == self.only_page
+                    if self.only_page is not None and not want:
+                        continue
+                    n = len(page.lines) + len(page.rects) + len(page.curves)
+                    out["pages"].append({"index": i, "objects": n})
+                    if self.only_page is None:
+                        continue
+                    out["points"] = self._points(page)
+                if self.only_page is None and out["pages"]:
+                    best = max(out["pages"], key=lambda p: p["objects"])["index"]
+                    out["points"] = self._points(pdf.pages[best])
+                    out["best"] = best
+        except Exception:                                        # noqa: BLE001
+            pass
+        self.done.emit(out)
+
+    def _points(self, page) -> list:
+        k = 100.0 / 72.0
+        pts = []
+        for r in page.rects:
+            for x in (r["x0"], r["x1"]):
+                for y in (r["top"], r["bottom"]):
+                    pts.append((x * k, y * k))
+        for ln in list(page.lines) + list(page.curves):
+            for x, y in (ln.get("pts") or [(ln["x0"], ln["top"]), (ln["x1"], ln["bottom"])]):
+                pts.append((x * k, y * k))
+        return pts[: self.max_points]
