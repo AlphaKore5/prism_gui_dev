@@ -449,6 +449,9 @@ def main():
     scrubbed = paths.scrub_environment()
 
     app = QApplication(sys.argv)
+    # Cycles holding Qt widgets are freed on the GUI thread only (gui_gc.py).
+    import gui_gc
+    gui_gc.install(app)
     app.setApplicationName(app_meta.NAME)
     app.setApplicationDisplayName(app_meta.NAME)
     app.setApplicationVersion(app_meta.VERSION)

@@ -74,6 +74,18 @@ import warnings
 
 import pytest
 
+# As the app does (gui_gc.py): the cycle collector never runs on a worker
+# thread, where it can free a Qt widget off the GUI thread. Tests run on the
+# main thread, so each one is followed by a collection there instead.
+import gc as _gc
+_gc.disable()
+
+
+@pytest.fixture(autouse=True)
+def _collect_on_the_main_thread():
+    yield
+    _gc.collect()
+
 # devtools/suite_runner.py sets this per file: a hang outside any single test
 # (import, setUpClass, a thread that keeps the process from exiting) prints
 # every thread's stack and ends the process instead of sitting silently until
