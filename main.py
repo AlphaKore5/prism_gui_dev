@@ -287,6 +287,18 @@ def _selftest(app) -> int:
                            f"{'' if ok else ' — ' + why.split(chr(10))[0]}", ok))
     checks.append((f"Studio editor + Motion runtime files"
                    f"{'' if assets_ok else f' — {assets_err}'}", assets_ok))
+    # Video and audio play INSIDE Prism (owner, 19 Nov 2026): QtMultimedia
+    # and its FFmpeg backend must be in the build, or open_preview quietly
+    # falls back to "Open in another app" for every video. Required, not
+    # optional: a format list from the backend proves the plugin loaded.
+    try:
+        from PySide6.QtMultimedia import QMediaFormat, QMediaPlayer  # noqa: F401
+        _fmts = QMediaFormat().supportedFileFormats(QMediaFormat.ConversionMode.Decode)
+        media_ok, media_err = bool(_fmts), "" if _fmts else "no media backend plugin"
+    except Exception as e:                              # noqa: BLE001
+        media_ok, media_err = False, f"{type(e).__name__}: {e}"
+    checks.append((f"video and audio player (QtMultimedia)"
+                   f"{'' if media_ok else f' — {media_err}'}", media_ok))
     from main_window import MainWindow
     win = MainWindow()
     win.show()

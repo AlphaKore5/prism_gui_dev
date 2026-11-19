@@ -47,9 +47,10 @@ class Classifying(unittest.TestCase):
 # itself.
 #
 # The PRODUCT handles that: open_preview() wraps the construction in
-# `except ImportError` and shows "open in the default app" instead — which
-# is deliberate, because packaging/prism.spec excludes QtMultimedia from
-# shipped builds on purpose. These two tests construct PreviewDialog
+# `except ImportError` and shows "open in the default app" instead. Since
+# 19 Nov 2026 the shipped build INCLUDES QtMultimedia (video and audio play
+# inside Prism); the fallback stays for a machine whose audio stack cannot
+# load. These two tests construct PreviewDialog
 # DIRECTLY, so they bypass the very guard that makes it safe, and failed on
 # CI for a thing the product copes with.
 try:
@@ -57,8 +58,8 @@ try:
     _HAVE_MULTIMEDIA, _WHY_NOT = True, ""
 except Exception as _e:                             # noqa: BLE001
     _HAVE_MULTIMEDIA, _WHY_NOT = False, (
-        f"Qt multimedia will not load here ({_e}) — the shipped build "
-        "excludes it too, and open_preview() falls back rather than crashing")
+        f"Qt multimedia will not load here ({_e}) — open_preview() falls "
+        "back rather than crashing")
 
 
 class EveryViewerActuallyConstructs(unittest.TestCase):
@@ -274,7 +275,7 @@ class OpenPreviewDispatch(unittest.TestCase):
 
 
 class AViewerThatCannotLoadFallsBackInsteadOfCrashing(unittest.TestCase):
-    """The shipped app omits QtMultimedia, so video/audio may not construct.
+    """A machine whose audio stack cannot load: video/audio may not construct.
 
     Never covered: the class above builds PreviewDialog directly, which is
     the one path that has no guard. So the guard that every shipped build
@@ -295,6 +296,22 @@ class AViewerThatCannotLoadFallsBackInsteadOfCrashing(unittest.TestCase):
             fallback.return_value.exec.side_effect = lambda: shown.append(path)
             PD.open_preview(path)
         self.assertEqual(shown, [path])
+
+
+class TheBuildShipsThePlayer(unittest.TestCase):
+    """Owner, 19 Nov 2026: video and audio open inside Prism. The player
+    only exists in a build that keeps QtMultimedia, which prism.spec used to
+    exclude "to halve the download". main.py's selftest proves it loads in
+    the frozen app; this stops the exclusion coming back unnoticed."""
+
+    def test_prism_spec_keeps_qtmultimedia(self):
+        spec = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                 "packaging", "prism.spec"), encoding="utf-8").read()
+        excludes = spec[spec.index("excludes = ["):]
+        excludes = excludes[:excludes.index("]")]
+        code = "\n".join(l.split("#", 1)[0] for l in excludes.splitlines())
+        self.assertNotIn("QtMultimedia", code)
+        self.assertIn('"PySide6.QtMultimedia", "PySide6.QtMultimediaWidgets"', spec)
 
 
 if __name__ == "__main__":

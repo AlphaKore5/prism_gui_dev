@@ -349,6 +349,10 @@ hiddenimports = _engine_modules() + _addon_modules() + [
     "matplotlib", "matplotlib.backends.backend_agg",   # cad_render.py imports it lazily
     # Optional-at-runtime, imported inside functions.
     "pypdf", "docx", "openpyxl", "pyaudio",
+    # The video/audio player (dialogs/preview_dialog.py imports these inside
+    # the function that opens a video); naming them pulls in Qt's hook, which
+    # brings the multimedia plugins and the FFmpeg libraries.
+    "PySide6.QtMultimedia", "PySide6.QtMultimediaWidgets",
     # Mail-server discovery: core/inbox.py does a lazy `import dns.resolver`
     # inside mx_host(), which degrades SILENTLY to guessing when absent. That
     # is right on a customer machine and wrong in a build — and it was already
@@ -516,7 +520,10 @@ except ImportError:
 excludes = [
     "PySide6.QtQml", "PySide6.QtQuick", "PySide6.QtQuick3D", "PySide6.Qt3DCore",
     "PySide6.QtWebEngineCore", "PySide6.QtWebEngineWidgets", "PySide6.QtWebEngine",
-    "PySide6.QtMultimedia", "PySide6.QtMultimediaWidgets", "PySide6.QtCharts",
+    # QtMultimedia / QtMultimediaWidgets are NOT excluded any more (owner,
+    # 19 Nov 2026: video and audio open inside Prism, with "Open in default
+    # app" as the option). They bring Qt's FFmpeg backend (~58 MB unpacked).
+    "PySide6.QtCharts",
     "PySide6.QtDataVisualization", "PySide6.QtBluetooth", "PySide6.QtNfc",
     "PySide6.QtPositioning", "PySide6.QtSensors", "PySide6.QtSerialPort",
     "PySide6.QtTest", "PySide6.QtDesigner", "PySide6.QtHelp", "PySide6.QtSql",
