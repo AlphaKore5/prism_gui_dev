@@ -162,11 +162,28 @@ def _selftest(app) -> int:
                          # whole check exists to catch, and it shipped in every
                          # build until the first Windows CI run found it.
                          ("shapely", "measuring copper spacing and pitch"),
-                         ("gerbonara", "reading and writing Gerber files")):
+                         ("gerbonara", "reading and writing Gerber files"),
+                         # BOQ's HVAC PDF takeoff and the file viewer. Owner,
+                         # 19 Nov 2026: the gate did not check these three.
+                         ("pdfplumber", "reading lines and text in HVAC PDF drawings"),
+                         ("pypdfium2", "showing PDF pages (scale tool, file viewer)"),
+                         ("rapidocr", "reading text on scanned HVAC drawings")):
         try:
             importlib.import_module(module)
         except Exception as e:                          # noqa: BLE001
             missing_deps.append(f"{module} ({what}): {e}")
+    # rapidocr imports fine without its model files and then downloads them
+    # from the internet the first time OCR runs, on the customer's PC
+    # (prism.spec, 27 Oct 2026). The wheel ships them; prove the build kept them.
+    try:
+        import glob as _glob
+        import rapidocr as _ro
+        _onnx = _glob.glob(os.path.join(os.path.dirname(_ro.__file__), "models", "*.onnx"))
+        if len(_onnx) < 3:
+            missing_deps.append(
+                f"rapidocr models (offline OCR): {len(_onnx)} of 3 .onnx files bundled")
+    except Exception:                                   # noqa: BLE001
+        pass                                            # the import line above already says so
 
     # A real HTTPS handshake, not just an import — the SSL cert bug that
     # reached a client's Mac (urlopen: CERTIFICATE_VERIFY_FAILED) had every
