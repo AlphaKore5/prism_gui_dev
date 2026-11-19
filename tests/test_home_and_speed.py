@@ -179,11 +179,14 @@ class HomeSubmitIsOneTap(_Base):
         self.assertEqual(started, [1])
         self.assertFalse(self.win._start_when_planned)        # used up, never left armed
 
-    def test_make_a_plan_on_the_task_page_still_stops_for_review(self):
+    def test_every_way_in_starts_the_work_once_planned(self):
+        """Owner, 19 Nov 2026 (second word): the festival tip's Yes still
+        stopped at the plan. Every route through _route() - the Task page,
+        the festival tip, the Try chips, Commands - starts once planned."""
         started = self._plan_for_real(lambda: self.win._route("write a haiku"))
         self.assertEqual(_Plan.started, ["write a haiku"])
-        self.assertEqual(started, [])
-        self.assertEqual(self.win.input_panel._state, "planned")
+        self.assertEqual(started, [1])
+        self.assertFalse(self.win._start_when_planned)
 
     def test_a_failed_home_plan_does_not_start_the_next_plan_by_itself(self):
         self.win._start_when_planned = True

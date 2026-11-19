@@ -400,9 +400,9 @@ class MainWindow(QMainWindow):
         self._task_runs: list[dict] = []
         self._queue_stopped = False               # a licence refusal kills the rest
         self._auto_run = False                    # set once Start the work is pressed
-        # Home's Send: plan AND start, no stop at the plan (owner, 19 Nov
-        # 2026: "dont stop at plan just sent it directly"). Set only there;
-        # "Make a plan" on the Task page still stops for review.
+        # Plan AND start, no stop at the plan (owner, 19 Nov 2026: "dont
+        # stop at plan just sent it directly", then for every way in). Set by
+        # _route(); cleared on planning failure, cancel and reset.
         self._start_when_planned = False
         self._current_run_file = None
         self._turn_begun = False          # the composer already put this message on the thread
@@ -2461,6 +2461,10 @@ class MainWindow(QMainWindow):
         self._task_pos = 0
         self._task_runs = []
         self._queue_stopped = False
+        # Every way in (Task page, festival tip, Try chips, Commands, Home)
+        # plans AND starts; no stop at the plan (owner, 19 Nov 2026: "it
+        # should be directly making things"). Stop / Skip stay on the run.
+        self._start_when_planned = True
         self._plan_task(0)
 
     def _plan_task(self, index: int):
