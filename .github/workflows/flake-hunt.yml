@@ -15,8 +15,6 @@ jobs:
       matrix:
         include:
           - { ref: 8706f1a, label: "1.8.6 (before BOQ + viewer merges)" }
-          - { ref: 3e8834f, label: "boq-ux merged" }
-          - { ref: b5aa037, label: "boq-ux + file-viewer merged" }
           - { ref: 4447350, label: "latest" }
     steps:
       - uses: actions/checkout@v4
@@ -45,6 +43,7 @@ jobs:
           QT_QPA_PLATFORM: offscreen
           PYTHONUTF8: "1"
         run: |
+          set +e    # a crash must not end the loop
           crashes=0; fails=0; shown=0
           for i in $(seq 1 30); do
             python -X faulthandler -m pytest -q -p no:cacheprovider --timeout=120 --timeout-method=thread \
@@ -53,7 +52,7 @@ jobs:
             if [ $rc -eq 0 ]; then echo "run $i ok"
             elif grep -q "fatal exception\|Fatal Python error" out.txt; then
               crashes=$((crashes+1)); echo "run $i CRASH rc=$rc"
-              if [ $shown -lt 3 ]; then grep -A25 "fatal exception\|Fatal Python error" out.txt | grep -v site-packages; shown=$((shown+1)); fi
+              if [ $shown -lt 6 ]; then grep -A40 "fatal exception\|Fatal Python error" out.txt | grep -v site-packages; shown=$((shown+1)); fi
             else fails=$((fails+1)); echo "run $i FAIL rc=$rc"; tail -15 out.txt; fi
           done
           echo "RESULT ${{ matrix.ref }}: $crashes crashes, $fails failures in 30 runs"
