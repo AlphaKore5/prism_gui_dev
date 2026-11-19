@@ -64,12 +64,28 @@ def _kinds(panel) -> list[str]:
     return out
 
 
+_REAL_START = workers._Worker.start
+
+
+def _run_on_its_own_thread(self, *a, **k):
+    """A worker runs as the app runs it: on its own QThread. Wait for it, then
+    hand its queued signals (stage_event / done / failed) to the GUI thread.
+
+    It used to call self.run() on the GUI thread. On Windows that crashed this
+    file in 9-16 of 30 runs (access violation in the next QThread.__init__,
+    1.8.6 included); the app never runs a worker that way (ISS-026)."""
+    from PySide6.QtCore import QCoreApplication
+    _REAL_START(self, *a, **k)
+    self.wait(60000)
+    QCoreApplication.sendPostedEvents()
+
+
 @pytest.fixture(autouse=True)
 def inline_workers(monkeypatch, tmp_path_factory):
     import workspace
     runs = str(tmp_path_factory.mktemp("runs"))
     monkeypatch.setattr(workspace, "runs_dir", lambda *a, **k: runs)
-    monkeypatch.setattr(workers._Worker, "start", lambda self, *a, **k: self.run())
+    monkeypatch.setattr(workers._Worker, "start", _run_on_its_own_thread)
     monkeypatch.setattr(licensing, "has", lambda *a, **k: True)
     monkeypatch.setattr(licensing, "require", lambda *a, **k: True)
     monkeypatch.setattr(licensing, "report_usage", lambda *a, **k: None)
