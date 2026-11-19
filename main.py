@@ -176,9 +176,15 @@ def _selftest(app) -> int:
     # unless rthook_ssl_certs.py has patched it in. Catches a regression here
     # instead of on a user's machine a second time.
     try:
+        import urllib.error
         import urllib.request
         with urllib.request.urlopen("https://www.google.com", timeout=10) as r:
             tls_ok, tls_err = r.status == 200, ""
+    except urllib.error.HTTPError:
+        # Any HTTP status (the runner's IP got 429 from Google on 19 Nov 2026)
+        # means the TLS handshake and certificate check already succeeded;
+        # only a handshake/certificate failure should fail this check.
+        tls_ok, tls_err = True, ""
     except Exception as e:
         tls_ok, tls_err = False, str(e)
 
