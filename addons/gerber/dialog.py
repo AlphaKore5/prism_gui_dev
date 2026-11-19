@@ -16,8 +16,7 @@ from __future__ import annotations
 import os
 import time
 
-from PySide6.QtCore import Qt, QUrl
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QComboBox, QDialog, QFrame, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel,
     QPushButton, QPlainTextEdit, QMessageBox,
@@ -779,8 +778,7 @@ class GerberDialog(PrismDialog):
                             dirs_exist_ok=True)
         except Exception:                               # noqa: BLE001
             pass
-        QDesktopServices.openUrl(QUrl.fromLocalFile(
-            report.get("compare_html") or report["out_dir"]))
+        _paths.open_file(report["out_dir"], self)
 
     def _on_clean_failed(self, error: str):
         self._set_busy(False, "")

@@ -20,11 +20,11 @@ import os
 import re
 
 from PySide6.QtCore import (
-    QEasingCurve, QPoint, QPropertyAnimation, QRect, QRectF, QTimer, QUrl, Qt,
+    QEasingCurve, QPoint, QPropertyAnimation, QRect, QRectF, QTimer, Qt,
     Signal,
 )
 from PySide6.QtGui import (
-    QDesktopServices, QKeySequence, QLinearGradient, QPainter, QShortcut,
+    QKeySequence, QLinearGradient, QPainter, QShortcut,
 )
 from PySide6.QtWidgets import (
     QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QMenu, QPushButton,
@@ -1047,4 +1047,5 @@ def _clear(layout):
 
 
 def _open_file(path: str):
-    QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+    import paths
+    paths.open_file(path)

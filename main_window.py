@@ -1379,7 +1379,7 @@ class MainWindow(QMainWindow):
         self.input_panel.detach_requested.connect(self._detach)
         self.input_panel.detach_folder_requested.connect(self._detach_folder)
         self.input_panel.attachment_activated.connect(
-            lambda p: QDesktopServices.openUrl(QUrl.fromLocalFile(p)) if p else None)
+            lambda p: paths.open_file(p, self) if p else None)
         self.input_panel.queue_changed.connect(self._on_queue_changed)
 
         self.files_panel.mention_accepted.connect(self._accept_mention)

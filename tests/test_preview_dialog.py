@@ -237,43 +237,40 @@ class OpenPreviewDispatch(unittest.TestCase):
             PD.open_preview(self._tmp.name)
             m.assert_called_once()
 
-    def test_a_renderable_file_opens_the_preview_dialog(self):
+    # Images, documents, spreadsheets, PDFs and unknown types now open in the
+    # shared FileViewer (dialogs/file_viewer.py); PreviewDialog keeps only
+    # video/audio (needs QtMultimedia) and the Home demo. See test_file_viewer.
+    def _opens_in_the_file_viewer(self, name: str):
         from dialogs import preview_dialog as PD
-        path = os.path.join(self._tmp.name, "a.png")
+        from dialogs import file_viewer as FV
+        path = os.path.join(self._tmp.name, name)
         with open(path, "wb") as f:
             f.write(b"x")
-        with mock.patch.object(PD.PreviewDialog, "exec", return_value=0) as m:
+        with mock.patch.object(FV.FileViewer, "exec", return_value=0) as m, \
+                mock.patch.object(FV, "_ReadWorker"):
             PD.open_preview(path)
             m.assert_called_once()
 
-    def test_an_unrenderable_file_offers_the_default_app_instead(self):
+    def test_a_renderable_file_opens_the_file_viewer(self):
+        self._opens_in_the_file_viewer("a.png")
+
+    def test_an_unknown_file_opens_the_file_viewer_card_not_the_os(self):
+        self._opens_in_the_file_viewer("a.xyz")
+
+    def test_a_docx_uses_the_in_app_viewer(self):
+        self._opens_in_the_file_viewer("a.docx")
+
+    def test_a_pdf_uses_the_in_app_viewer(self):
+        self._opens_in_the_file_viewer("a.pdf")
+
+    def test_a_video_still_uses_the_player_when_multimedia_exists(self):
         from dialogs import preview_dialog as PD
-        path = os.path.join(self._tmp.name, "a.xyz")
+        path = os.path.join(self._tmp.name, "a.mp4")
         with open(path, "wb") as f:
             f.write(b"x")
-        with mock.patch.object(PD.UnsupportedPreviewDialog, "exec",
-                               return_value=0) as m:
+        with mock.patch.object(PD, "PreviewDialog") as player:
             PD.open_preview(path)
-            m.assert_called_once()
-
-    def test_a_docx_uses_the_in_app_preview(self):
-        from dialogs import preview_dialog as PD
-        path = os.path.join(self._tmp.name, "a.docx")
-        with open(path, "wb") as f:
-            f.write(b"not a real docx")
-        with mock.patch.object(PD.PreviewDialog, "exec", return_value=0) as m:
-            PD.open_preview(path)
-            m.assert_called_once()
-
-    def test_a_pdf_uses_the_in_app_text_preview_without_qtpdf(self):
-        """QtPdf is excluded from releases, but pypdf keeps PDFs readable."""
-        from dialogs import preview_dialog as PD
-        path = os.path.join(self._tmp.name, "a.pdf")
-        with open(path, "wb") as f:
-            f.write(b"x")
-        with mock.patch.object(PD.PreviewDialog, "exec", return_value=0) as m:
-            PD.open_preview(path)
-            m.assert_called_once()
+        player.return_value.exec.assert_called_once()
 
 
 class AViewerThatCannotLoadFallsBackInsteadOfCrashing(unittest.TestCase):
@@ -284,7 +281,7 @@ class AViewerThatCannotLoadFallsBackInsteadOfCrashing(unittest.TestCase):
     depends on was the untested one.
     """
 
-    def test_an_importerror_becomes_the_open_externally_dialog(self):
+    def test_an_importerror_becomes_the_file_viewer_card(self):
         import dialogs.preview_dialog as PD
         folder = tempfile.mkdtemp()
         path = os.path.join(folder, "a.mp4")
@@ -293,7 +290,8 @@ class AViewerThatCannotLoadFallsBackInsteadOfCrashing(unittest.TestCase):
         shown = []
         with mock.patch.object(PD, "PreviewDialog",
                                side_effect=ImportError("no libpulse")), \
-             mock.patch.object(PD, "UnsupportedPreviewDialog") as fallback:
+             mock.patch("dialogs.file_viewer.FileViewer") as fallback, \
+             mock.patch("dialogs.file_viewer._ReadWorker"):
             fallback.return_value.exec.side_effect = lambda: shown.append(path)
             PD.open_preview(path)
         self.assertEqual(shown, [path])

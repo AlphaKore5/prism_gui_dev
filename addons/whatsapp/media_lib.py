@@ -18,8 +18,8 @@ import re
 import tempfile
 from collections import OrderedDict
 
-from PySide6.QtCore import QSize, Qt, QTimer, QUrl, Signal
-from PySide6.QtGui import QDesktopServices, QIcon, QPainter, QPixmap
+from PySide6.QtCore import QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (QFileDialog, QFrame, QHBoxLayout, QLabel, QListView, QListWidget, QListWidgetItem, QVBoxLayout, QWidget)
 
 import i18n
@@ -182,7 +182,8 @@ def open_asset(owner, asset: dict, failed) -> None:
         path = os.path.join(folder, safe_name(asset.get("filename") or meta.get("filename"), kind_name(asset.get("kind")).lower()))
         with open(path, "wb") as fh:
             fh.write(data)
-        QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+        import paths
+        paths.open_file(path, owner)
     fetch(owner, asset["id"], got, failed=lambda m, _d: failed(m))
 
 

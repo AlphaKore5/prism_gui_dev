@@ -9,8 +9,6 @@ camera, charts, diagrams and UI mockups, not an HTML page filmed.
 from __future__ import annotations
 import json
 import os
-import subprocess
-import sys
 import time
 
 from PySide6.QtCore import QUrl, Signal
@@ -494,20 +492,12 @@ class MotionDialog(PrismDialog):
         path = self.artifact_path or self.out_path
         if not path:
             return
-        if sys.platform == "darwin":
-            subprocess.Popen(["open", path])
-        elif os.name == "nt":
-            os.startfile(path)  # noqa: F821
-        else:
-            subprocess.Popen(["xdg-open", path])
+        import paths
+        paths.open_file(path, self)
 
     def _reveal(self):
         path = self.artifact_path or self.out_path
         if not path:
             return
-        if sys.platform == "darwin":
-            subprocess.Popen(["open", "-R", path])
-        elif os.name == "nt":
-            subprocess.Popen(["explorer", "/select,", path])
-        else:
-            subprocess.Popen(["xdg-open", os.path.dirname(path)])
+        import paths
+        paths.reveal_result(path)

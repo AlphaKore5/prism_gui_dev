@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 import i18n
 import paths
 import theme
+import viewer
 from widgets import controls as C
 from widgets import icons
 
@@ -1064,7 +1065,7 @@ class _Markdown(QTextBrowser):
     def __init__(self, text: str, parent=None):
         super().__init__(parent)
         self.setFrameShape(QFrame.NoFrame)
-        self.setOpenExternalLinks(True)
+        viewer.route_links(self)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setStyleSheet("background: transparent; border: none;"

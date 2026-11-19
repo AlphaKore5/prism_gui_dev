@@ -18,8 +18,9 @@ def open_url(url: str) -> None:                 # a seam: tests never open a bro
     QDesktopServices.openUrl(QUrl(url))
 
 
-def open_folder(path: str) -> None:
-    QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+def open_folder(path: str) -> None:       # the installer's own folder: the OS file manager
+    import paths
+    paths.reveal_result(path)
 
 
 class ConverterDialog(PrismDialog):

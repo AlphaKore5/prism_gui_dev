@@ -188,7 +188,8 @@ class ArtifactsPanel(Page):
     def _open_folder(self):
         folder = CB.config.artifacts_root()
         os.makedirs(folder, exist_ok=True)
-        QDesktopServices.openUrl(QUrl.fromLocalFile(folder))
+        import paths
+        paths.open_file(folder, self)
 
     def build(self):
         # artifacts_root(), not ARTIFACTS_DIR: the folder that is actually

@@ -19,8 +19,7 @@ A file that cannot be stat'd shows no size rather than a guessed one.
 """
 from __future__ import annotations
 import os
-from PySide6.QtCore import Signal, Qt, QPropertyAnimation, QEasingCurve, QUrl
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtCore import Signal, Qt, QPropertyAnimation, QEasingCurve
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame,
     QGraphicsOpacityEffect, QSizePolicy,
@@ -334,14 +333,11 @@ class FilesPanel(QWidget):
 
     @staticmethod
     def _open(path: str):
-        """Preview / open, in whatever the machine uses for that file.
-
-        Deliberately the desktop's own handler rather than an in-app viewer:
-        the point of the row is to let somebody check they attached the right
-        drawing, and the application they already read drawings in does that
-        better than anything this panel could draw."""
+        """Show the attachment inside Prism's own viewer, so somebody can check
+        they attached the right file without another program opening."""
         if path and os.path.exists(path):
-            QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+            import paths
+            paths.open_file(path)
 
     # ── read-back, for tests and for the window ───────────────────────────
     def attached_labels(self) -> list[str]:

@@ -2194,7 +2194,7 @@ class SettingsPanel(QDialog):
             used=total // 1024, cap=cap // 1024)
 
     def _open_folder(self, path: str):
-        QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+        paths.open_file(path, self)
 
     def _open_artifacts_folder(self, path: str):
         """Unlike _open_folder's other callers, this one may not exist yet —

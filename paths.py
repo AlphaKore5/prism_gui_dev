@@ -186,26 +186,34 @@ def is_local_result(url: str) -> bool:
 
 
 def open_result(url: str) -> None:
-    """Open a stage result — a file with its default app, a URL in Chrome."""
+    """Show a stage result: a local file or folder inside Prism's own viewer
+    (viewer.py), a web address in the browser."""
     if not isinstance(url, (str, bytes, os.PathLike)) or not url:
         return
     url = str(url)
+    if is_local_result(url):
+        open_file(url)
+        return
     from PySide6.QtCore import QUrl
     from PySide6.QtGui import QDesktopServices
-    QDesktopServices.openUrl(
-        QUrl.fromLocalFile(url) if is_local_result(url) else QUrl(url))
+    QDesktopServices.openUrl(QUrl(url))
 
 
-def open_file(path: str) -> bool:
-    """Open a file or folder in the machine's own default app — Preview or
-    Photos for a picture, Excel for a sheet, Finder or Explorer for a folder.
+def open_file(path: str, parent=None) -> bool:
+    """Show a file or folder INSIDE Prism (viewer.open_file). This is what
+    every "Open" in the app calls; it never starts another program."""
+    import viewer
+    return viewer.open_file(path, parent)
 
-    Each platform's own opener, not Qt's QDesktopServices: on a packaged Mac
-    and Windows build the Qt route returned without doing anything for local
-    files (a picture in STEP's Files tab did nothing on click), while `open`
-    and `os.startfile` are what the OS itself uses and are what Reel's Play
-    already relies on. Returns False if nothing could be started; falls back
-    to Qt as a last resort."""
+
+def open_in_other_app(path: str) -> bool:
+    """The ONE place Prism hands a local file to the operating system: the
+    viewer's secondary "Open in another app" button. Each platform's own
+    opener, not Qt's QDesktopServices: on a packaged Mac and Windows build the
+    Qt route returned without doing anything for local files, while `open` and
+    `os.startfile` are what the OS itself uses. False if nothing could start.
+    tests/test_open_in_viewer.py fails if another local-file launch appears
+    anywhere else in the product."""
     if not isinstance(path, (str, bytes, os.PathLike)) or not path:
         return False
     path = os.path.normpath(str(path))
@@ -235,23 +243,29 @@ def open_file(path: str) -> bool:
 
 
 def reveal_result(path: str) -> None:
-    """Show the file in Finder/Explorer. Worth its own button because output
-    lands in ~/.prism/runs, and a dot-folder is invisible in Finder — a user
-    who is told the path still cannot get to it."""
+    """Show the file in Finder/Explorer ("Show in file manager"). Worth its
+    own button because output lands in ~/.prism/runs, and a dot-folder is
+    invisible in Finder. A folder is opened itself. Lives here beside
+    open_in_other_app: the only two places the OS file manager is started."""
     if not isinstance(path, (str, bytes, os.PathLike)) or not path:
         return
-    path = str(path)
+    path = os.path.normpath(str(path))
     import subprocess
-    folder = os.path.dirname(path)
+    is_dir = os.path.isdir(path)
+    folder = path if is_dir else os.path.dirname(path)
     try:
         if sys.platform == "darwin":
-            subprocess.Popen(["open", "-R", path])
+            subprocess.Popen(["open", path] if is_dir else ["open", "-R", path])
         elif os.name == "nt":
-            subprocess.Popen(["explorer", "/select,", os.path.normpath(path)])
+            subprocess.Popen(["explorer", path] if is_dir
+                             else ["explorer", "/select,", path])
         else:
-            subprocess.Popen(["xdg-open", folder])
-    except Exception:
-        open_result(folder)
+            env = os.environ.copy()
+            env.pop("LD_LIBRARY_PATH", None)
+            env.pop("LD_PRELOAD", None)
+            subprocess.Popen(["xdg-open", folder], env=env)
+    except Exception:                                   # noqa: BLE001
+        pass
 
 
 # Variables a snap's launcher exports for ITS app, that are poison to any
