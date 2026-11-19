@@ -4161,6 +4161,9 @@ class MainWindow(QMainWindow):
         self._show_screen("workbench")
         self._set_stage("run")
         self._run_finished = True
+        # A stored conversation: nothing is running. Without this, Skip and
+        # Stop kept whatever the last live run left on screen.
+        self.output_panel.set_running(False)
         self.input_panel.set_state("done")
         self.work_stack.setCurrentIndex(RUNNING)
 

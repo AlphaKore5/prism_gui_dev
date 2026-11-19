@@ -391,3 +391,15 @@ def test_start_bar_stays_off_a_finished_conversation(ai, win, no_chrome):
     win._on_run_failed("network down")              # a failed run: same page, same rule
     assert win.work_stack.currentIndex() == main_window.RUNNING
     assert win.agents_panel.cta.isHidden()
+
+
+def test_a_reopened_conversation_shows_no_run_controls(ai, win, no_chrome, tmp_path):
+    """19 Nov 2026: a finished conversation reopened from History showed
+    "Skip this step" and "Stop the run" — _open_thread never told the panel
+    nothing was running, so the buttons kept whatever state they had."""
+    win.output_panel.set_running(True)                 # what a previous run leaves behind
+    path, _rec = _old_record(tmp_path)
+    win._open_run_record(path)
+    assert win.output_panel.stop_btn.isHidden()
+    assert win.output_panel.skip_btn.isHidden()
+    assert win.output_panel.fallback_btn.isHidden()

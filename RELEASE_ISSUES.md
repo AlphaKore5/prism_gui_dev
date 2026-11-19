@@ -181,6 +181,13 @@ something you did not run.
   `HitarthTrivedi/prism_terminal`, not AlphaKore's (`alphakore`). `git push origin ai-via-server-int:ai-via-server` created a new
   public branch there with all the server-mode work. Deleted within about a minute; his `main` untouched. **Rule:** name the remote
   by URL before every push (`git remote -v`); in engine worktrees AlphaKore's remote is `alphakore`, in GUI worktrees `alphakore-dev`.
+- **Windows test_chat_thread crash, what is now known (19 Nov, flake-hunt branch):** 30 runs of the file per commit on
+  windows-latest: 1.8.6 (8706f1a) 9/30 crashed, latest 16/30. So it is OLD, not from the BOQ or viewer merges. Always while
+  constructing a QThread (AutomationWorker, once AttachWorker) after an earlier task ran in the same process. Still crashes with the
+  GC disabled and with every worker kept alive: NOT the GC, NOT freeing workers. The route_links weakref change (4447350) did not
+  fix it (retracted). In this file workers run inline on the GUI thread (start -> run), which the real app never does; whether the
+  real app is affected is UNPROVEN. Full page heap + cdb ran 12 times without a crash but the log did not show the tests ran, so
+  that proves nothing. Next: a cdb run whose test output is visible.
 - **Process (owner's suggestion):** run the workflow on the branch (`workflow_dispatch`, no tag) and tag only a green commit, so
   a red run never burns a version number.
 
