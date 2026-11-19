@@ -377,3 +377,17 @@ def test_nothing_touches_the_network_on_the_ui_thread(ai, win, no_chrome):
             mock.patch.object(workers._Worker, "start", lambda self, *a, **k: started.append(self)):
         _send(win, "tell me more")          # submit only; the worker is not started
         assert started and seen == []        # the UI thread did no I/O
+
+
+def test_start_bar_stays_off_a_finished_conversation(ai, win, no_chrome):
+    """19 Nov 2026, seen in a real server run: when a run finished,
+    set_run_enabled(True) showed the pinned "Start the work" bar under the
+    conversation. Pressing it re-runs the whole plan and spends the credits
+    again. The bar belongs to the plan page only."""
+    ai.text = "An answer."
+    _task(win)
+    assert win.work_stack.currentIndex() == main_window.RUNNING
+    assert win.agents_panel.cta.isHidden()
+    win._on_run_failed("network down")              # a failed run: same page, same rule
+    assert win.work_stack.currentIndex() == main_window.RUNNING
+    assert win.agents_panel.cta.isHidden()

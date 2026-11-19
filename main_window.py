@@ -1152,10 +1152,20 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.agents_panel.cta)
         # Only on the compose page: the running page has its own Stop control,
         # and a Start button under a run in progress invites starting it twice.
-        self.work_stack.currentChanged.connect(
-            lambda i: self.agents_panel.cta.setVisible(
-                i == COMPOSE and bool(self.agents_panel.selected_agents())))
+        self.work_stack.currentChanged.connect(self._sync_start_bar)
         return wrap
+
+    def _sync_start_bar(self, *_):
+        """The ONE rule for the pinned Start bar: on the plan page, with a
+        plan, and Start not switched off. agents_panel.set_run_enabled(True)
+        shows the bar by itself, and a run finishing calls it while the
+        conversation is on screen: the bar came back under a finished run,
+        where pressing it re-runs the whole plan (19 Nov 2026). So every
+        set_run_enabled(True) here is followed by this."""
+        self.agents_panel.cta.setVisible(
+            self.work_stack.currentIndex() == COMPOSE
+            and self.agents_panel.run_btn.isEnabled()
+            and bool(self.agents_panel.selected_agents()))
 
     def _workbench_header(self) -> QWidget:
         """"New task", and the 1 Describe → 2 Plan → 3 Run breadcrumb.
@@ -2882,6 +2892,7 @@ class MainWindow(QMainWindow):
             # remaining task too, so end the queue instead of grinding through.
             self._queue_stopped = True
             self.agents_panel.set_run_enabled(True)
+            self._sync_start_bar()
             QMessageBox.warning(self, "Licence", auth.message)
             self._finish_queue()
             return
@@ -3579,6 +3590,7 @@ class MainWindow(QMainWindow):
                        and self._active_run.stopping())
         self._active_run = None
         self.agents_panel.set_run_enabled(True)
+        self._sync_start_bar()
         self.input_panel.set_state("done")
         self._clear_active_run()
         self._set_stage("run")
@@ -4493,6 +4505,7 @@ class MainWindow(QMainWindow):
         awake.release()
         self._active_run = None
         self.agents_panel.set_run_enabled(True)
+        self._sync_start_bar()
         self.output_panel.set_running(False)
         self.input_panel.set_state("planned")
         self._set_stage("plan")
