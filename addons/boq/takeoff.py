@@ -16,11 +16,10 @@ second industry's own takeoff plugs into the SAME dialog once
 """
 from __future__ import annotations
 
-import math
 import os
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor, QImage, QPainter, QPen, QPixmap
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QComboBox, QDialog, QHBoxLayout, QLabel, QLineEdit, QListWidget,
     QListWidgetItem, QMessageBox, QScrollArea, QTableWidget, QTableWidgetItem,
@@ -39,141 +38,8 @@ from addons.boq.workers import HvacTakeoffWorker
 COL_TRUST, COL_KIND, COL_TEXT, COL_CONF = range(4)
 
 
-class _ClickableImageLabel(QLabel):
-    """A QLabel that reports where it was clicked, in its own pixel
-    coordinates -- the label is always sized exactly to its pixmap (see
-    _ScaleMeasureDialog._load_image), so no alignment offset to correct
-    for."""
-    clicked = Signal(float, float)
-
-    def mousePressEvent(self, event):
-        pos = event.position() if hasattr(event, "position") else event.pos()
-        self.clicked.emit(pos.x(), pos.y())
-        super().mousePressEvent(event)
-
-
-class _ScaleMeasureDialog(QDialog):
-    """Item 27 rule 5's own follow-up: the scale-confirmation checkbox
-    only ever asked "did you check it?" -- it could not fix a wrong
-    number. This lets a person click two points on the actual rendered
-    drawing, type the real-world distance between them (a labelled room
-    width, a door opening, a dimension line), and computes the drawing's
-    real points-per-foot scale from that -- instead of trusting whichever
-    standard scale label was picked from the dropdown."""
-
-    def __init__(self, pdf_path: str, page_index: int = 0, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle(i18n.t("Measure a known dimension"))
-        self.resize(760, 640)
-        self.pdf_path = pdf_path
-        self.page_index = page_index
-        self.dpi = 100.0
-        self._points: list[tuple[float, float]] = []
-        self.pt_per_ft: float | None = None
-
-        col = QVBoxLayout(self)
-        col.addWidget(C.label(i18n.t(
-            "Click two points on something you already know the real "
-            "length of — a labelled room width, a door opening, a "
-            "dimension line — then type that real length below. Click "
-            "again to restart."), level="SUPPORT", wrap=True))
-
-        self.scroll = QScrollArea()
-        self.scroll.setWidgetResizable(False)
-        self.image_label = _ClickableImageLabel()
-        self.image_label.clicked.connect(self._on_click)
-        self.scroll.setWidget(self.image_label)
-        col.addWidget(self.scroll, stretch=1)
-
-        self._load_error = None
-        self._load_image()
-
-        row = QHBoxLayout()
-        row.addWidget(QLabel(i18n.t("Real distance between the two points:")))
-        self.distance_edit = QLineEdit()
-        self.distance_edit.setPlaceholderText(i18n.t("feet, e.g. 6.0"))
-        self.distance_edit.textChanged.connect(self._recompute)
-        row.addWidget(self.distance_edit)
-        row.addWidget(QLabel(i18n.t("ft")))
-        row.addStretch(1)
-        col.addLayout(row)
-
-        self.result_label = QLabel("")
-        col.addWidget(self.result_label)
-
-        btn_row = QHBoxLayout()
-        btn_row.addStretch(1)
-        btn_row.addWidget(C.button(i18n.t("Cancel"), "secondary", on_click=self.reject))
-        self.use_btn = C.button(i18n.t("Use this scale"), "primary", on_click=self.accept)
-        self.use_btn.setEnabled(False)
-        btn_row.addWidget(self.use_btn)
-        col.addLayout(btn_row)
-
-    def _load_image(self):
-        try:
-            import pypdfium2 as pdfium
-            pdf = pdfium.PdfDocument(self.pdf_path)
-            page = pdf[self.page_index]
-            img = page.render(scale=self.dpi / 72).to_pil().convert("RGB")
-        except Exception as e:                              # noqa: BLE001
-            self._load_error = str(e)
-            self.image_label.setText(i18n.t(
-                "Couldn't render the drawing: {error}").format(error=e))
-            return
-        data = img.tobytes("raw", "RGB")
-        qimg = QImage(data, img.width, img.height, img.width * 3,
-                      QImage.Format_RGB888).copy()   # copy -- `data` goes out of scope
-        self.pixmap = QPixmap.fromImage(qimg)
-        self.image_label.setPixmap(self.pixmap)
-        self.image_label.setFixedSize(self.pixmap.size())
-
-    def _on_click(self, x: float, y: float):
-        if not hasattr(self, "pixmap"):
-            return
-        if len(self._points) >= 2:
-            self._points = []
-        self._points.append((x, y))
-        self._redraw_markers()
-        self._recompute()
-
-    def _redraw_markers(self):
-        pix = self.pixmap.copy()
-        painter = QPainter(pix)
-        pen = QPen(QColor(theme.ERR_INK))
-        pen.setWidth(3)
-        painter.setPen(pen)
-        for x, y in self._points:
-            painter.drawLine(int(x - 8), int(y), int(x + 8), int(y))
-            painter.drawLine(int(x), int(y - 8), int(x), int(y + 8))
-        if len(self._points) == 2:
-            painter.drawLine(int(self._points[0][0]), int(self._points[0][1]),
-                             int(self._points[1][0]), int(self._points[1][1]))
-        painter.end()
-        self.image_label.setPixmap(pix)
-
-    def _recompute(self):
-        self.pt_per_ft = None
-        self.use_btn.setEnabled(False)
-        self.result_label.setText("")
-        if len(self._points) != 2:
-            return
-        try:
-            real_ft = float(self.distance_edit.text())
-        except ValueError:
-            return
-        if real_ft <= 0:
-            return
-        # The dialog shows the page at self.dpi pixels per inch, so
-        # pixel-distance -> PDF points is just the inverse of that scale
-        # (72 pt/inch is the PDF unit definition, not a guess).
-        px_dist = math.hypot(self._points[0][0] - self._points[1][0],
-                             self._points[0][1] - self._points[1][1])
-        pdf_pt_dist = px_dist * 72.0 / self.dpi
-        self.pt_per_ft = pdf_pt_dist / real_ft
-        self.result_label.setText(i18n.t(
-            "Scale: {ppf:.2f} points per foot (equivalent to the dropdown's "
-            "SCALE field for this drawing).").format(ppf=self.pt_per_ft))
-        self.use_btn.setEnabled(True)
+# The scale view lives in scale_view.py; the old name stays so callers and tests keep working.
+from addons.boq.scale_view import ScaleMeasureDialog as _ScaleMeasureDialog          # noqa: E402
 
 
 class _LayerPreviewDialog(QDialog):
@@ -383,6 +249,7 @@ class IndustryTakeoffDialog(PrismDialog):
         self.result: dict | None = None
         self._role_combos: list[tuple[dict, QComboBox]] = []
         self._measured_pt_per_ft: float | None = None
+        self._scale_page: int | None = None        # the sheet the scale was measured on
 
         self.setWindowTitle(i18n.t("{industry} PDF takeoff").format(industry=industry))
         self.resize(780, 700)
@@ -533,6 +400,7 @@ class IndustryTakeoffDialog(PrismDialog):
 
     def _load_pdf(self, path: str):
         self.pdf_path = path
+        self._scale_page = None
         self.path_label.setText(os.path.basename(path))
         # A measured scale from the PREVIOUS pdf must never silently carry
         # over to a new one -- each drawing has its own scale.
@@ -675,12 +543,16 @@ class IndustryTakeoffDialog(PrismDialog):
         if not self.pdf_path:
             QMessageBox.information(self, "BOQ", i18n.t("Pick a PDF first."))
             return
-        dlg = _ScaleMeasureDialog(self.pdf_path, parent=self)
+        # Open on the sheet measured last time; first time, the page with the most drawn lines.
+        dlg = _ScaleMeasureDialog(self.pdf_path, self._scale_page, parent=self, industry=self.industry)
         if dlg.exec() == QDialog.Accepted and dlg.pt_per_ft:
+            self._scale_page = dlg.page_index
             self._measured_pt_per_ft = dlg.pt_per_ft
+            near = (i18n.t(" That is the standard scale {s}.").format(s=dlg.closest_label)
+                    if dlg.closest_label else "")
             self.measured_scale_label.setText(i18n.t(
-                "Using a measured scale: {ppf:.2f} points per foot (overrides "
-                "the dropdown above).").format(ppf=dlg.pt_per_ft))
+                "Using a measured scale: {ppf:.2f} points per foot, measured on page {p} "
+                "(overrides the dropdown above).").format(ppf=dlg.pt_per_ft, p=dlg.page_index + 1) + near)
             self.measured_scale_label.setVisible(True)
             # The whole point of measuring it is that it IS the
             # confirmation -- don't make the person tick a second box

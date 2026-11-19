@@ -248,3 +248,49 @@ class CadPeekWorker(_Worker):
         except Exception as e:                                   # noqa: BLE001
             info = {"error": str(e)[:200]}
         self.done.emit(self.path, info)
+
+
+class PageScanWorker(_Worker):
+    """For the scale view: how many drawn objects each page of a PDF has (so the
+    page with the most lines is offered first) and the line ends and corners of one page
+    (so clicks can snap to them). Read-only; pdfplumber is the library the HVAC tool uses."""
+
+    done = Signal(dict)
+
+    def __init__(self, pdf_path: str, only_page=None, max_points: int = 60000):
+        super().__init__()
+        self.pdf_path, self.only_page, self.max_points = pdf_path, only_page, max_points
+
+    def run(self):
+        out = {"pages": [], "points": []}
+        try:
+            import pdfplumber
+            with pdfplumber.open(self.pdf_path) as pdf:
+                for i, page in enumerate(pdf.pages):
+                    want = self.only_page is None or i == self.only_page
+                    if self.only_page is not None and not want:
+                        continue
+                    n = len(page.lines) + len(page.rects) + len(page.curves)
+                    out["pages"].append({"index": i, "objects": n})
+                    if self.only_page is None:
+                        continue
+                    out["points"] = self._points(page)
+                if self.only_page is None and out["pages"]:
+                    best = max(out["pages"], key=lambda p: p["objects"])["index"]
+                    out["points"] = self._points(pdf.pages[best])
+                    out["best"] = best
+        except Exception:                                        # noqa: BLE001
+            pass
+        self.done.emit(out)
+
+    def _points(self, page) -> list:
+        k = 100.0 / 72.0
+        pts = []
+        for r in page.rects:
+            for x in (r["x0"], r["x1"]):
+                for y in (r["top"], r["bottom"]):
+                    pts.append((x * k, y * k))
+        for ln in list(page.lines) + list(page.curves):
+            for x, y in (ln.get("pts") or [(ln["x0"], ln["top"]), (ln["x1"], ln["bottom"])]):
+                pts.append((x * k, y * k))
+        return pts[: self.max_points]

@@ -372,10 +372,13 @@ class MeasuringAScaleOverridesTheDropdownAndCountsAsConfirmation(unittest.TestCa
         d.pdf_path = "/x/fake.pdf"
         fake = mock.Mock()
         fake.pt_per_ft = 12.5
+        fake.page_index = 1           # the view now also says which page it was measured on
+        fake.closest_label = None
         with mock.patch.object(T, "_ScaleMeasureDialog", return_value=fake):
             fake.exec.return_value = QDialog.Accepted
             d._open_measure_dialog()
         self.assertEqual(d._pt_per_ft(), 12.5)
+        self.assertEqual(d._scale_page, 1)             # remembered for the next time it opens
         self.assertTrue(d.scale_confirm_cb.isChecked())
         self.assertTrue(d.measured_scale_label.isVisibleTo(d))
 
