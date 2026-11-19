@@ -113,3 +113,29 @@ def test_the_file_viewer_shows_a_markdown_table_as_a_table(tmp_path):
     views = dlg.findChildren(QTextBrowser)
     assert any(isinstance(f, QTextTable)
                for v in views for f in v.document().rootFrame().childFrames())
+
+
+def test_a_preview_line_has_no_markdown_symbols():
+    """The step card's one-line preview showed '# 5 Ways ...  **1. Prefabricate**'
+    (19 Nov 2026, real server answer)."""
+    from widgets.markdown import plain_preview
+    raw = ("# 5 Ways to Cut Commercial HVAC Duct Installation Time\n\n"
+           "**1. Prefabricate duct in the shop, not in the field** Have duct "
+           "fabricated as `pre-assembled` sections, see [SMACNA](https://x.org).\n"
+           "| Tip | Why |\n|---|---|\n| a | b |\n- item _one_")
+    out = plain_preview(raw)
+    assert out.startswith("5 Ways to Cut Commercial HVAC Duct Installation Time")
+    for sym in ("#", "**", "`", "](", "|", "---", "_one_"):
+        assert sym not in out, sym
+    assert "Prefabricate duct in the shop" in out and "SMACNA" in out and "item one" in out
+    assert "\n" not in out
+
+
+def test_a_finished_step_card_shows_its_preview_without_markdown():
+    from widgets.output_panel import StageCard
+    card = StageCard("research", "ChatGPT", 1)
+    answer = "# 5 Ways to Cut Duct Time\n\n**1. Prefabricate** in the shop."
+    card.set_done([answer], "", snippet=answer[:200])
+    shown = card.note.text()
+    assert shown.startswith("5 Ways to Cut Duct Time"), shown
+    assert "#" not in shown and "**" not in shown

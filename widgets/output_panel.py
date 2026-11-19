@@ -51,7 +51,7 @@ from widgets import chat_thread as T
 from widgets import controls as C
 from widgets.agents_panel import STAGE_COPY
 from widgets.controls import Card, StatusBadge
-from widgets.markdown import render_markdown
+from widgets.markdown import plain_preview, render_markdown
 
 
 def short_duration(seconds: float) -> str:
@@ -914,7 +914,7 @@ class StageCard(QWidget):
             self.copy_btn.setEnabled(True)
             # The engine hands over its own first-200-characters snippet; the
             # panel used to build a worse one of its own and then not show it.
-            preview = (snippet or texts[0] or "").strip().replace("\n", " ")
+            preview = plain_preview(snippet or texts[0] or "")
             if len(preview) > 260:
                 preview = preview[:259] + "…"
             if timed_out:

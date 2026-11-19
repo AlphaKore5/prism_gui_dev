@@ -188,3 +188,25 @@ def render_markdown(text: str) -> str:
 
     close_list()
     return "".join(out)
+
+
+def plain_preview(text: str) -> str:
+    """One line of plain words from Markdown, for a preview: a folded step
+    card showed '# 5 Ways ...  **1. Prefabricate**' with the symbols in it.
+    Headings, emphasis, code ticks, link brackets, table pipes and rules,
+    bullets and numbering marks go; the words stay. Plain text, not HTML."""
+    out = []
+    for line in (text or "").split("\n"):
+        line = line.strip()
+        if not line or _TABLE_SEP_RE.match(line) or _FENCE_RE.match(line):
+            continue
+        line = re.sub(r"^#{1,6}\s+", "", line)
+        line = re.sub(r"^[\*\-•]\s+", "", line)
+        line = re.sub(r"!?\[([^\]]+)\]\([^)]*\)", r"\1", line)
+        line = re.sub(r"(\*\*|__)(.+?)\1", r"\2", line)
+        line = re.sub(r"(?<![\w*])([*_])(?!\s)(.+?)(?<!\s)\1(?![\w*])", r"\2", line)
+        line = line.replace("`", "")
+        if "|" in line:
+            line = " ".join(c.strip() for c in line.strip("|").split("|") if c.strip())
+        out.append(line)
+    return " ".join(out).strip()
