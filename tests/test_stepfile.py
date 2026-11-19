@@ -1426,3 +1426,63 @@ class TheCatalogMissExplainerPromptCarriesNumbersOnly(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(HAVE, "cadquery not installed")
+class AHoleTagFromTheDrawingReachesTheBuild(unittest.TestCase):
+    """19 Nov 2026, real STEP window, Assem1.STEP: the plan said
+    enlarge_hole top H3 Ø13 -> Ø14 (H3 is the Ø13 hole on the flat-pattern
+    drawing and in the prompt, _flat_named_holes), but Build tagged holes
+    its own way (_named_holes, where H3 is a Ø3 vent hole), found no Ø13
+    hole at H3 and refused: "Nothing in the plan could be applied". A tag
+    that points at a hole of another size is from the other scheme; when
+    the part has exactly ONE hole of the asked size there is nothing to
+    guess. With several, it refuses and says which tag did not match."""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+
+    # The real model: the sample copy if this checkout has it, else the
+    # owner's client copy (PRISM_TEST_DATA, never committed: repos are public).
+    _ASSEM1 = next((p for p in (REAL, os.path.join(os.environ.get("PRISM_TEST_DATA", "/nonexistent"),
+                                                   "Assem1.STEP")) if os.path.exists(p)), "")
+
+    @unittest.skipUnless(_ASSEM1, "no copy of Assem1.STEP here (set PRISM_TEST_DATA)")
+    def test_the_real_plan_from_the_window_builds(self):
+        REAL = self._ASSEM1
+        out = os.path.join(self.dir, "assem1-h3.step")
+        plan = {"changes": [{"op": "enlarge_hole", "part": "top", "dia_mm": 13.0,
+                             "new_dia_mm": 14.0, "hole": "H3", "why": ""}], "advice": []}
+        done = SF.apply_plan(REAL, plan, out)
+        self.assertTrue(any("1 hole(s) enlarged" in l for l in done["log"]), done["log"])
+        top = {p["name"]: p for p in SF.analyse(out, mode="metal")["parts"]}["top"]
+        dias = {h["dia_mm"] for h in top["holes"]}
+        self.assertIn(14.0, dias)
+        self.assertNotIn(13.0, dias)
+
+    def _plate(self, holes):
+        import cadquery as cq
+        wp = cq.Workplane("XY").box(120, 60, 3)
+        for x, y, d in holes:
+            wp = wp.faces(">Z").workplane(centerOption="CenterOfBoundBox").center(x, y).hole(d)
+        path = os.path.join(self.dir, "plate.step")
+        cq.exporters.export(wp, path)
+        return path
+
+    def test_two_holes_of_the_asked_size_and_a_tag_that_does_not_match_refuses(self):
+        path = self._plate([(-40, 0, 6), (40, 0, 6), (0, 20, 3), (10, 20, 3)])
+        shape = SF.load_parts(path)[0][1]
+        wrong = next(h["tag"] for h in SF._named_holes(shape) if abs(h["dia_mm"] - 3) < 0.1)
+        with self.assertRaises(SF.StepError) as e:
+            SF.apply_plan(path, {"changes": [{"op": "enlarge_hole", "part": "all", "dia_mm": 6.0,
+                                              "new_dia_mm": 8.0, "hole": wrong, "why": ""}],
+                                 "advice": []}, os.path.join(self.dir, "x.step"))
+        self.assertIn(wrong, str(e.exception))          # the reason reaches the person
+
+    def test_a_group_tag_means_every_hole_of_that_size(self):
+        path = self._plate([(-50 + 10 * i, 15, 3) for i in range(8)] + [(0, -15, 10)])
+        out = os.path.join(self.dir, "group.step")
+        done = SF.apply_plan(path, {"changes": [{"op": "enlarge_hole", "part": "all", "dia_mm": 3.0,
+                                                 "new_dia_mm": 4.0, "hole": "G1", "why": ""}],
+                                    "advice": []}, out)
+        self.assertTrue(any("8 hole(s) enlarged" in l for l in done["log"]), done["log"])
