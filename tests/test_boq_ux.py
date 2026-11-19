@@ -475,6 +475,99 @@ class TradeBlockOnStepOne(unittest.TestCase):
         opened.assert_called_once()
 
 
+def _write_run(runs_dir, stamp, **fields):
+    os.makedirs(runs_dir, exist_ok=True)
+    path = os.path.join(runs_dir, f"run_{stamp}.json")
+    json.dump(fields, open(path, "w"))
+    os.utime(path, (stamp, stamp))
+    return path
+
+
+class ContinueWhereYouLeftOff(unittest.TestCase):
+    def setUp(self):
+        self.runs = CB.config.RUNS_DIR
+        shutil.rmtree(self.runs, ignore_errors=True)
+
+    def test_hidden_when_there_are_no_past_boqs(self):
+        d = _dialog()
+        self.assertFalse(d.continue_list.isVisibleTo(d.pages.widget(0)))
+        self.assertEqual(d.continue_list.rows, [])
+
+    def test_shows_only_boq_runs_newest_first_and_at_most_five(self):
+        for i in range(7):
+            _write_run(self.runs, 1_800_000_000 + i, addon="boq", request=f"job {i}", last_text="x")
+        _write_run(self.runs, 1_800_000_100, query="not a boq at all", responses={})      # newest, but not BOQ
+        d = _dialog()
+        cl = d.continue_list
+        self.assertTrue(cl.isVisibleTo(d.pages.widget(0)))
+        self.assertEqual(len(cl.rows), 5)
+        self.assertIn("job 6", cl.rows[0].text())
+        self.assertNotIn("not a boq", " ".join(r.text() for r in cl.rows))
+        self.assertIn("All your BOQs are in Artifacts", cl.link.text())
+
+    def test_each_row_has_title_job_kind_date_and_state(self):
+        _write_run(self.runs, 1_800_000_001, addon="boq", query="Bill of Quantities — Ducts for L2",
+                   request="Ducts for L2", last_text="done", industry={"name": "HVAC", "kind": "builtin"})
+        _write_run(self.runs, 1_800_000_002, addon="boq", request="Cabling", error="boom")
+        d = _dialog()
+        rows = [r.text() for r in d.continue_list.rows]
+        self.assertIn("Cabling", rows[0]); self.assertIn("did not finish", rows[0]); self.assertIn("BOQ", rows[0])
+        self.assertIn("Ducts for L2", rows[1]); self.assertIn("HVAC", rows[1]); self.assertIn("finished", rows[1])
+        self.assertNotIn("Bill of Quantities", rows[1])
+
+    def test_a_click_reopens_that_run_through_history(self):
+        p = _write_run(self.runs, 1_800_000_003, addon="boq", request="Ducts", last_text="## BOQ",
+                       responses={"format": "## BOQ"})
+        d = _dialog()
+        with mock.patch.object(d, "_resume_from_history") as resume:
+            d.continue_list.rows[0].click()
+        self.assertEqual(resume.call_args[0][0]["_path"], p)
+        self.assertFalse(d.continue_list.isVisibleTo(d.pages.widget(0)))
+
+    def test_an_old_record_without_a_tag_or_result_still_lists_and_starts_from_its_request(self):
+        _write_run(self.runs, 1_800_000_004, query="Bill of Quantities — old one", boq={"quantities_csv": ""})
+        d = _dialog()
+        self.assertEqual(len(d.continue_list.rows), 1)
+        self.assertIn("no result saved", d.continue_list.rows[0].text())
+        d.continue_list.rows[0].click()
+        self.assertEqual(d.ask.text(), "")           # no request text saved: nothing invented
+
+    def test_it_goes_away_once_the_person_starts(self):
+        _write_run(self.runs, 1_800_000_005, addon="boq", request="x", last_text="y")
+        d = _dialog()
+        self.assertTrue(d.continue_list.isVisibleTo(d.pages.widget(0)))
+        d.ask.set_text("A hotel")
+        self.assertFalse(d.continue_list.isVisibleTo(d.pages.widget(0)))
+
+    def test_the_artifacts_link_closes_the_dialog_and_asks_the_window_for_artifacts(self):
+        _write_run(self.runs, 1_800_000_006, addon="boq", request="x", last_text="y")
+        d = _dialog()
+        parent = mock.Mock()
+        with mock.patch.object(type(d), "parent", return_value=parent), mock.patch.object(d, "reject") as rej:
+            d.continue_list.link.click()
+        rej.assert_called_once()
+        parent._show_screen.assert_called_once_with("artifacts")
+
+    def test_the_entry_state_with_runs_still_fits_without_much_scroll(self):
+        for i in range(5):
+            _write_run(self.runs, 1_800_000_010 + i, addon="boq", request=f"job {i}", last_text="x")
+        d = _dialog()
+        self.assertFalse(d.example_row.isVisibleTo(d.pages.widget(0)))     # made room
+        self.assertLessEqual(_scroll_range(d), 110)
+
+    _REAL_RUNS = os.path.join(os.path.dirname(ROOT), "ui-port", "ai-test-home", ".prism", "runs")
+
+    @unittest.skipUnless(os.path.isdir(_REAL_RUNS), "real run copy not on this machine")
+    def test_the_real_copied_run_files_list_only_boq_runs(self):
+        with mock.patch.object(CB.config, "RUNS_DIR", self._REAL_RUNS):
+            d = _dialog()
+        rows = d.continue_list.rows
+        self.assertGreaterEqual(len(rows), 1)
+        self.assertLessEqual(len(rows), 5)
+        for r in d.continue_list._records:
+            self.assertTrue(r.get("addon") == "boq" or isinstance(r.get("boq"), dict))
+
+
 class LayerHints(unittest.TestCase):
     def test_hints_come_from_the_name_only(self):
         from addons.boq.takeoff_block import layer_hint

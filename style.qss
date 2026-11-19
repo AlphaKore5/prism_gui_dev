@@ -2657,3 +2657,8 @@ QPushButton#linkBtn {
 }
 QPushButton#linkBtn:hover { color: #111110; }
 #stepQ { font-family: "Geist"; font-size: 18px; font-weight: 400; color: #111110; }
+
+/* BOQ step 1: "Continue where you left off" rows (quiet, one line each) */
+QPushButton#contRow { text-align: left; background: transparent; border: none;
+    border-bottom: 1px solid #E4E3DE; padding: 4px 2px; font-size: 12px; color: #111110; min-height: 18px; }
+QPushButton#contRow:hover { background: #EEEDEA; }

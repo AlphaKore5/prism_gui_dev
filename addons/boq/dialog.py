@@ -40,6 +40,7 @@ from addons.boq import industries
 from addons.boq import route
 from addons.boq import custom_industries as CI
 from addons.boq.takeoff_block import TakeoffBlock
+from addons.boq.continue_list import ContinueList
 from addons.boq.workers import CadPeekWorker
 from addons.boq import credits as credit_words
 import friendly
@@ -919,6 +920,14 @@ class BoqDialog(PrismDialog):
         self.derive_cb.setChecked(True)
         self.more.add(self.derive_cb)
         root.addWidget(self.more)
+        # The preview's "Continue where you left off": past BOQs, entry state only.
+        self.continue_list = ContinueList()
+        self.continue_list.chosen.connect(self._continue_run)
+        self.continue_list.artifacts.connect(self._open_artifacts)
+        if self.mode == "boq":
+            root.addWidget(self.continue_list)
+            self.continue_list.refresh()
+            self._sync_continue()
 
         # Progress and status sit under the tabs, outside the pages, so
         # "reading your drawing..." is seen whichever step you are on.
@@ -1087,7 +1096,8 @@ class BoqDialog(PrismDialog):
         self._step = 0
         self.ask.edit.textChanged.connect(self._refresh_primary)
         self.ask.edit.textChanged.connect(
-            lambda: self.example_row.setVisible(not self.ask.text() and not self.cad_path))
+            lambda: (self.example_row.setVisible(not self.ask.text() and not self.cad_path),
+                     self._sync_continue()))
         self.ask.files_added.connect(self._refresh_primary)
         self.ask.file_removed.connect(self._refresh_primary)
         self.ask.file_removed.connect(lambda *_: self._sync_chips())
@@ -1243,6 +1253,7 @@ class BoqDialog(PrismDialog):
             return
         self._input_kind = kind
         self.example_row.setVisible(not self.ask.text() and not self.cad_path)
+        self._sync_continue()
         self._refresh_cards()
         self._on_industry_changed(self.industry_combo.currentText())
         self._replay_pipe()
@@ -1757,6 +1768,30 @@ class BoqDialog(PrismDialog):
                 self.pdf_drawing_hint.setVisible(not (self.mode == "boq" and self.industry_combo.currentText() != industries.GENERAL))
                 if self.mode == "boq":
                     self._pipe_scan_waiting()
+
+    def _sync_continue(self):
+        """Shown only at the very start: nothing typed, no file, nothing measured or made."""
+        if not hasattr(self, "continue_list") or self.mode != "boq":
+            return
+        entry = (not self.ask.text() and not self.cad_path and self.q is None
+                 and not getattr(self, "_boq_run_path", ""))
+        self.continue_list.setVisible(entry and bool(self.continue_list.rows))
+        if hasattr(self, "example_row") and entry and self.continue_list.rows:
+            self.example_row.setVisible(False)       # keep step 1 on one screen
+
+    def _continue_run(self, record: dict):
+        if record.get("last_text"):
+            self._resume_from_history(record)
+        else:                                        # older record with no saved result: start from its request
+            self.ask.set_text(record.get("request") or "")
+            self._boq_run_path = record.get("_path", "")
+        self.continue_list.setVisible(False)
+
+    def _open_artifacts(self):
+        parent = self.parent()
+        self.reject()
+        if parent is not None and hasattr(parent, "_show_screen"):
+            parent._show_screen("artifacts")
 
     def _sync_chips(self):
         """BOQ: the drawing already has its own card, so the attachment list under the

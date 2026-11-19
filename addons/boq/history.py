@@ -50,6 +50,37 @@ def list_boq_runs() -> list[dict]:
     return out
 
 
+def _is_boq_record(record: dict) -> bool:
+    """The `addon` tag History filters on, or the `boq` block every BOQ record carries.
+    Older records on real machines have the block but no tag."""
+    return record.get("addon") == "boq" or isinstance(record.get("boq"), dict)
+
+
+def recent_boq_runs(limit: int = 5, scan: int = 80) -> list[dict]:
+    """The last few BOQ runs, newest first, for the dialog's "Continue where you left off".
+    Same stored records as list_boq_runs(), but it stops once it has `limit` instead of
+    reading every file; each dict is the record plus "_path"."""
+    paths = glob.glob(os.path.join(CB.config.RUNS_DIR, "run_*.json"))
+    try:
+        paths.sort(key=os.path.getmtime, reverse=True)
+    except OSError:
+        pass
+    out = []
+    for path in paths[:scan]:
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                record = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if not isinstance(record, dict) or not _is_boq_record(record):
+            continue
+        record["_path"] = path
+        out.append(record)
+        if len(out) >= limit:
+            break
+    return out
+
+
 # item 73 (12 Nov 2026): "start the BOQ count from 0... so i can see how
 # i am spending on each of the BOQ" -- the owner's own test runs from
 # today (a pharma client, an ELV client, the locker, the trolley catalogue...)
