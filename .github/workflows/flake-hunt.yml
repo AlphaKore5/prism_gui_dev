@@ -1,0 +1,59 @@
+# Temporary: measures how often tests/test_chat_thread.py crashes on Windows
+# (0xC0000005, ISS-026) at several commits, to find the change that caused it.
+# Lives only on the flake-hunt/* branch; delete the branch when done.
+name: Flake hunt
+on:
+  push:
+    branches: ["flake-hunt/**"]
+jobs:
+  hunt:
+    name: ${{ matrix.label }}
+    runs-on: windows-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { ref: 8706f1a, label: "1.8.6 (before BOQ + viewer merges)" }
+          - { ref: 3e8834f, label: "boq-ux merged" }
+          - { ref: b5aa037, label: "boq-ux + file-viewer merged" }
+          - { ref: 4447350, label: "latest" }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+      - name: Check out the commit under test
+        shell: bash
+        run: |
+          git checkout -q ${{ matrix.ref }}
+          git submodule update -q --init --recursive
+          git log --oneline -1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        shell: bash
+        run: |
+          python -m pip install -q --upgrade pip
+          pip install -q -r requirements.txt
+          pip install -q pytest pytest-timeout
+      - name: Run test_chat_thread.py 30 times
+        shell: bash
+        env:
+          QT_QPA_PLATFORM: offscreen
+          PYTHONUTF8: "1"
+        run: |
+          crashes=0; fails=0; shown=0
+          for i in $(seq 1 30); do
+            python -X faulthandler -m pytest -q -p no:cacheprovider --timeout=120 --timeout-method=thread \
+              tests/test_chat_thread.py > out.txt 2>&1
+            rc=$?
+            if [ $rc -eq 0 ]; then echo "run $i ok"
+            elif grep -q "fatal exception\|Fatal Python error" out.txt; then
+              crashes=$((crashes+1)); echo "run $i CRASH rc=$rc"
+              if [ $shown -lt 3 ]; then grep -A25 "fatal exception\|Fatal Python error" out.txt | grep -v site-packages; shown=$((shown+1)); fi
+            else fails=$((fails+1)); echo "run $i FAIL rc=$rc"; tail -15 out.txt; fi
+          done
+          echo "RESULT ${{ matrix.ref }}: $crashes crashes, $fails failures in 30 runs"
