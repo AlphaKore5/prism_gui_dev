@@ -25,6 +25,7 @@ import identity
 import paths
 import roles as R
 import theme
+import viewer
 import workspace
 from dialogs.base import PrismDialog
 from widgets import controls as C
@@ -224,7 +225,7 @@ class HistoryDialog(PrismDialog):
         right_box.setSpacing(7)
         right_box.addWidget(kicker("What happened", muted=True))
         self.view = QTextBrowser()
-        self.view.setOpenExternalLinks(True)
+        viewer.route_links(self.view)
         right_box.addWidget(self.view, stretch=1)
         self._current_reel = ""
         self.edit_reel_btn = C.button(

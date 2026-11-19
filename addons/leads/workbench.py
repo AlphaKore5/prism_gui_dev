@@ -3348,9 +3348,8 @@ class LeadsWorkbench(QWidget):
             i18n.t("Leads sheet + hot list saved to {f}").format(f=folder)
             if folder else i18n.t("Sheets written."))
         if folder and (self._announce_export or not self._opened_autosave):
-            from PySide6.QtCore import QUrl
-            from PySide6.QtGui import QDesktopServices
-            QDesktopServices.openUrl(QUrl.fromLocalFile(folder))
+            import paths
+            paths.open_file(folder, self)
             self._opened_autosave = True
         if self._announce_export:
             QMessageBox.information(

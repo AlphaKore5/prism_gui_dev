@@ -1,4 +1,8 @@
-"""STEP's pictures must open from a click on Mac and Windows, not only Linux.
+"""The OS launcher (paths.open_in_other_app, behind the viewer's "Open in
+another app" button) must work on Mac and Windows, not only Linux; STEP's
+picture clicks now show the picture in Prism's viewer (see test_file_viewer).
+
+Original report: STEP's pictures must open from a click on Mac and Windows.
 
 Reported 2026-10-17: clicking a picture in STEP's Files tab did nothing on a
 Mac or a Windows machine. The cause was routing every open through Qt's
@@ -47,14 +51,14 @@ class EachPlatformUsesItsOwnOpener(unittest.TestCase):
     def test_a_mac_uses_open(self):
         with mock.patch.object(paths.sys, "platform", "darwin"), \
                 mock.patch("subprocess.Popen") as popen:
-            self.assertTrue(paths.open_file(self.path))
+            self.assertTrue(paths.open_in_other_app(self.path))
         self.assertEqual(popen.call_args[0][0], ["open", os.path.normpath(self.path)])
 
     def test_windows_uses_startfile(self):
         with mock.patch.object(paths.sys, "platform", "win32"), \
                 mock.patch.object(paths.os, "name", "nt"), \
                 mock.patch.object(paths.os, "startfile", create=True) as start:
-            self.assertTrue(paths.open_file(self.path))
+            self.assertTrue(paths.open_in_other_app(self.path))
         start.assert_called_once_with(os.path.normpath(self.path))
 
     def test_linux_uses_xdg_open_without_the_editors_library_path(self):
@@ -62,13 +66,13 @@ class EachPlatformUsesItsOwnOpener(unittest.TestCase):
                 mock.patch.object(paths.os, "name", "posix"), \
                 mock.patch.dict(os.environ, {"LD_LIBRARY_PATH": "/snap/x"}), \
                 mock.patch("subprocess.Popen") as popen:
-            self.assertTrue(paths.open_file(self.path))
+            self.assertTrue(paths.open_in_other_app(self.path))
         self.assertEqual(popen.call_args[0][0][0], "xdg-open")
         self.assertNotIn("LD_LIBRARY_PATH", popen.call_args[1]["env"])
 
     def test_a_missing_file_opens_nothing(self):
         with mock.patch("subprocess.Popen") as popen:
-            self.assertFalse(paths.open_file("/nowhere/none.png"))
+            self.assertFalse(paths.open_in_other_app("/nowhere/none.png"))
         popen.assert_not_called()
 
     def test_if_the_opener_fails_qt_is_the_last_resort(self):
@@ -84,7 +88,7 @@ class EachPlatformUsesItsOwnOpener(unittest.TestCase):
                                   create=True), \
                 mock.patch("PySide6.QtGui.QDesktopServices.openUrl",
                            return_value=True) as qt:
-            self.assertTrue(paths.open_file(self.path))
+            self.assertTrue(paths.open_in_other_app(self.path))
         qt.assert_called_once()
 
 

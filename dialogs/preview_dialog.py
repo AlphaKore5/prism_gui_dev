@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
 )
 
 import i18n
+import paths
 import theme
 from dialogs.base import PrismDialog
 from widgets import controls as C
@@ -108,15 +109,16 @@ def open_preview(path: str, parent=None, demo_mode: bool = False):
         FolderPreviewDialog(path, parent).exec()
         return
     kind = _classify(path)
-    if kind == "other":
-        UnsupportedPreviewDialog(path, parent).exec()
-        return
-    try:
-        dlg = PreviewDialog(path, kind, parent, demo_mode=demo_mode)
-    except ImportError:
-        UnsupportedPreviewDialog(path, parent).exec()
-        return
-    dlg.exec()
+    if kind in ("video", "audio") or demo_mode:
+        # Only these need QtMultimedia, which the shipped build leaves out;
+        # without it the file viewer says so and offers "Open in another app".
+        try:
+            PreviewDialog(path, kind, parent, demo_mode=demo_mode).exec()
+            return
+        except ImportError:
+            pass
+    from dialogs.file_viewer import FileViewer
+    FileViewer(path, parent).exec()
 
 
 # The dialog-header glyph registry (widgets/icons.py) only has "image",
@@ -191,7 +193,7 @@ class PreviewDialog(PrismDialog):
         _trigger_edit_reel(self.path, self)
 
     def _open_externally(self):
-        QDesktopServices.openUrl(QUrl.fromLocalFile(self.path))
+        paths.open_in_other_app(self.path)
 
     # -- image --------------------------------------------------------------
     def _build_image(self):
@@ -436,7 +438,7 @@ class UnsupportedPreviewDialog(PrismDialog):
             on_click=self._open_externally))
 
     def _open_externally(self):
-        QDesktopServices.openUrl(QUrl.fromLocalFile(self.path))
+        paths.open_in_other_app(self.path)
         self.accept()
 
 
@@ -470,7 +472,7 @@ class FolderPreviewDialog(PrismDialog):
         self.body.addStretch(1)
 
         self.footer.add_utility(self.button(
-            i18n.t("Open the folder"), on_click=self._open_externally))
+            i18n.t("Show in file manager"), on_click=self._open_externally))
         self.footer.set_primary(self.button(
             i18n.t("Close"), "primary", on_click=self.accept))
 
@@ -523,4 +525,4 @@ class FolderPreviewDialog(PrismDialog):
         _trigger_edit_reel(p, self)
 
     def _open_externally(self):
-        QDesktopServices.openUrl(QUrl.fromLocalFile(self.path))
+        paths.reveal_result(self.path)

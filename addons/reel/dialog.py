@@ -12,8 +12,6 @@ and the saved spec re-renders identically forever.
 from __future__ import annotations
 import json
 import os
-import subprocess
-import sys
 import time
 
 from PySide6.QtCore import Qt, QUrl, Signal
@@ -938,34 +936,12 @@ class ReelDialog(PrismDialog):
         path = self.artifact_path or self.out_path
         if not path:
             return
-        if sys.platform == "darwin":
-            subprocess.Popen(["open", path])
-        elif os.name == "nt":
-            os.startfile(path)  # noqa: F821
-        else:
-            env = os.environ.copy()
-            # Prism is often launched from VS Code's Snap. Its private glibc
-            # path leaks through LD_LIBRARY_PATH and makes the system VLC load
-            # /snap/core20/libpthread against the host libc, then abort with
-            # __libc_pthread_init. Desktop apps must start in the host's own
-            # library environment, not the parent editor's runtime.
-            env.pop("LD_LIBRARY_PATH", None)
-            env.pop("LD_PRELOAD", None)
-            subprocess.Popen(["xdg-open", path], env=env)
+        import paths
+        paths.open_file(path, self)
 
     def _reveal(self):
-        # The artifact copy first: it sits in Desktop/Prism Artifacts, a
-        # folder the owner can find again without Prism open, unlike
-        # ~/.prism/runs.
         path = self.artifact_path or self.out_path
         if not path:
             return
-        if sys.platform == "darwin":
-            subprocess.Popen(["open", "-R", path])
-        elif os.name == "nt":
-            subprocess.Popen(["explorer", "/select,", path])
-        else:
-            env = os.environ.copy()
-            env.pop("LD_LIBRARY_PATH", None)
-            env.pop("LD_PRELOAD", None)
-            subprocess.Popen(["xdg-open", os.path.dirname(path)], env=env)
+        import paths
+        paths.reveal_result(path)

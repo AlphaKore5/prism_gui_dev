@@ -24,6 +24,7 @@ from PySide6.QtGui import QFont, QFontMetrics
 
 import i18n
 import theme
+import viewer
 from widgets import controls as C
 from widgets import icons
 
@@ -38,7 +39,7 @@ class _Auto(QTextBrowser):
         self.setFrameShape(QFrame.NoFrame)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.setOpenExternalLinks(True)
+        viewer.route_links(self)
         self.document().documentLayout().documentSizeChanged.connect(
             lambda _s: self._fit())
 

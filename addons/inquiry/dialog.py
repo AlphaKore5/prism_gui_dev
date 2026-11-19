@@ -33,8 +33,6 @@ import contextlib
 import csv
 import os
 import re
-import subprocess
-import sys
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -1110,7 +1108,7 @@ class _StoredItem:
 
 
 def open_in_file_manager(path: str) -> None:
-    """Reveal a folder or file in Finder/Explorer.
+    """Show a folder or file inside Prism (its own viewer, not the OS).
 
     Worth having: the register and the inquiry folders are the product as far
     as the customer is concerned, and "where did it put it?" is the first
@@ -1118,15 +1116,8 @@ def open_in_file_manager(path: str) -> None:
     """
     if not path or not os.path.exists(path):
         return
-    try:
-        if sys.platform == "darwin":
-            subprocess.Popen(["open", path])
-        elif sys.platform.startswith("win"):
-            os.startfile(path)             # noqa: S606  (Windows-only API)
-        else:
-            subprocess.Popen(["xdg-open", path])
-    except Exception:
-        pass
+    import paths
+    paths.open_file(path)
 
 
 class InquiryDialog(PipelineActions, PipelineScreen, QWidget):

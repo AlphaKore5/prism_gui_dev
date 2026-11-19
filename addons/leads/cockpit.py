@@ -3366,9 +3366,7 @@ class _ListsTab(QWidget):
         return f
 
     def _open(self, path: str) -> None:
-        from PySide6.QtCore import QUrl
-        from PySide6.QtGui import QDesktopServices
-        QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+        paths.open_file(path, self)
 
     def _open_folder(self) -> None:
         try:

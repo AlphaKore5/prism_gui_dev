@@ -14,6 +14,7 @@ import os
 import i18n
 import ai_server
 import paths
+import viewer
 import theme
 from dialogs.base import PrismDialog
 from widgets import controls as C
@@ -87,7 +88,7 @@ class StageResultDialog(PrismDialog):
         self.reader = body
         body.setObjectName("answerReader")
         body.setReadOnly(True)
-        body.setOpenExternalLinks(True)
+        viewer.route_links(body)
         body.setFrameShape(QFrame.NoFrame)
         body.setStyleSheet(
             f"QTextBrowser#answerReader {{ background: transparent; border: none;"

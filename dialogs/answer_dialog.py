@@ -46,6 +46,7 @@ from PySide6.QtWidgets import (
 
 import i18n
 import theme
+import viewer
 from dialogs.base import PrismDialog
 from widgets.markdown import render_markdown
 
@@ -69,7 +70,7 @@ class AnswerDialog(PrismDialog):
         self.setMinimumSize(480, 360)
 
         self.view = QTextBrowser()
-        self.view.setOpenExternalLinks(True)
+        viewer.route_links(self.view)
         self.view.setStyleSheet(theme.type_css("BODY", theme.TEXT))
         self._render_thread()
         self.body.addWidget(self.view, stretch=1)
