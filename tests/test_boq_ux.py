@@ -369,8 +369,13 @@ class HitarthsHvacToolKeepsEveryStep(unittest.TestCase):
             self.assertFalse(getattr(t, name).isHidden(), name)
 
 
-import pwd
-REAL = os.path.join(pwd.getpwuid(os.getuid()).pw_dir, "prism-test-data", "client") + os.sep
+def _real_home():
+    try:
+        import pwd                                  # Unix only; tests may have a sandboxed HOME
+        return pwd.getpwuid(os.getuid()).pw_dir
+    except ImportError:
+        return os.path.expanduser("~")
+REAL = os.path.join(_real_home(), "prism-test-data", "client") + os.sep
 
 
 def _peek(d, path):

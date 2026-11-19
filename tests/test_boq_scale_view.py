@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import math
 import os
-import pwd
 import sys
 import tempfile
 import unittest
@@ -26,7 +25,13 @@ theme.load_fonts()
 from addons.boq import scale_view as SV, industries as I     # noqa: E402
 from addons.boq.workers import PageScanWorker                # noqa: E402
 
-REAL = os.path.join(pwd.getpwuid(os.getuid()).pw_dir, "prism-test-data", "client") + os.sep
+def _real_home():
+    try:
+        import pwd                                  # Unix only; tests may have a sandboxed HOME
+        return pwd.getpwuid(os.getuid()).pw_dir
+    except ImportError:
+        return os.path.expanduser("~")
+REAL = os.path.join(_real_home(), "prism-test-data", "client") + os.sep
 
 
 def _plan_pdf(pages_with_lines=(1,), n_pages=2) -> str:

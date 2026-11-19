@@ -10,7 +10,9 @@ Tests: **1966 passing** (6 skipped, 8 Sep 2026 after Round 16 landed on main —
 
 ---
 
-# 1.8.7 — BOQ steps match the preview; every file opens inside Prism (DEV build, 19 Nov 2026)
+# 1.8.8 — BOQ steps match the preview; every file opens inside Prism (DEV build, 19 Nov 2026)
+
+1.8.7 was never published: two new tests imported `pwd`, which Windows does not have.
 
 **Dev channel only.** Hitarth's measuring logic is unchanged; only what the person sees and where files open.
 
