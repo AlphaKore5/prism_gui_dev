@@ -533,6 +533,24 @@ class ChoosingAStrongerModelThanHaiku(unittest.TestCase):
                          ["PP for cost, ABS for a balance."])
         self.assertEqual(dlg._stage_agents_map[key], "Claude Sonnet 5.5")
 
+    def test_with_ai_through_prisms_server_ask_and_edit_need_no_key(self):
+        """19 Nov 2026, real STEP window in server mode (licence only, no
+        keys, as every customer runs it): Ask said "Claude Haiku 5.5 needs an
+        OpenRouter key — add one in Settings → Agents" and stopped. The
+        engine already sends these calls to Prism's server and ignores the
+        key; only the dialog's own check was in the way."""
+        for action in ("ask", "edit"):
+            dlg = _dialog(cfg={"step_out_dir": tempfile.mkdtemp()})   # no key
+            dlg._on_files_added(["/nowhere/a.step"])
+            dlg._action_buttons[action].setChecked(True)
+            dlg.ask.set_text("which material?")
+            with mock.patch.object(CB.ai_client, "active", return_value=True), \
+                    mock.patch.object(SD, "StepMeasureWorker") as worker, \
+                    mock.patch.object(CB.config, "save"):
+                dlg._generate()
+            self.assertNotIn("OpenRouter key", dlg.status.text(), action)
+            worker.assert_called_once()
+
     def test_without_an_openrouter_key_neither_model_can_be_asked(self):
         dlg = _dialog(cfg={"step_out_dir": tempfile.mkdtemp()})   # no key
         dlg._on_files_added(["/nowhere/a.step"])
