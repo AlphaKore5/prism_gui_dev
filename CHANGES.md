@@ -10,6 +10,18 @@ Tests: **1966 passing** (6 skipped, 8 Sep 2026 after Round 16 landed on main —
 
 ---
 
+# 1.8.7 — BOQ steps match the preview; every file opens inside Prism (DEV build, 19 Nov 2026)
+
+**Dev channel only.** Hitarth's measuring logic is unchanged; only what the person sees and where files open.
+
+- BOQ step 1: industry cards (General, Electrical/ELV, HVAC, add your own); HVAC/ELV tool block always visible; with a DXF/DWG the drawing unit, top layers and a plan picture show before counting; "Continue where you left off" lists the last 5 BOQs.
+- HVAC/ELV: an attached PDF is the drawing (not a sample template); "Open the HVAC tool" opens it with the file chosen.
+- Scale view: choose the page, big zoomable view, snapping, undo, ft/m/mm, nearest standard scale. Hitarth's scale maths untouched.
+- File pickers start in the last-used folder, else the real Downloads/Documents (dev builds used to start in the empty dev home).
+- Every file opens in a Prism viewer (CSV, Excel, Word, PDF, Markdown, text, pictures, DXF). "Open in another app" is a small secondary button. Video/audio still need another app on the shipped build.
+
+---
+
 # 1.8.6 — No key or agent setup in server mode (DEV build, 19 Nov 2026)
 
 **Dev channel only. Windows and Linux.** 1.8.5 was never published either: its Windows tests had one failure left (a test that
