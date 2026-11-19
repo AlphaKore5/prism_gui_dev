@@ -47,7 +47,9 @@ jobs:
             for i in $(seq 1 30); do
               python -X faulthandler -m pytest -q -p no:cacheprovider --timeout=120 --timeout-method=thread tests/$f.py > out.txt 2>&1
               rc=$?
-              if [ $rc -ne 0 ]; then bad=$((bad+1)); echo "$f run $i: rc=$rc"; grep -m1 -E "fatal exception|FAILED|Error" out.txt; fi
+              if [ $rc -ne 0 ]; then bad=$((bad+1)); echo "$f run $i: rc=$rc"
+                if [ $bad -le 4 ]; then grep -B1 -A45 -E "fatal exception|Fatal Python" out.txt | grep -vE "site-packages|hostedtoolcache|^\s*$" | head -45; fi
+              fi
             done
             echo "RESULT ${{ matrix.ref }} $f: $bad bad runs in 30"
           done
