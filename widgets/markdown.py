@@ -22,17 +22,61 @@ _BULLET_RE = re.compile(r"^(\s*)[\*\-•]\s+(.*)$")
 _NUM_RE = re.compile(r"^(\s*)(\d+)[.)]\s+(.*)$")
 _LABEL_RE = re.compile(r"^[A-Z0-9][A-Z0-9 &/,()#\-]{1,44}:?$")
 _FENCE_RE = re.compile(r"^\s*```")
+# A table's second line: cells of dashes, optional colons, optional outer pipes.
+_TABLE_SEP_RE = re.compile(r"^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?\s*$")
+# [text](url) after escaping; the url stops at whitespace or ")".
+_LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)\s]+)\)")
+# Only these become clickable; viewer.open_link routes them (web to the
+# browser, file to Prism's viewer). Anything else stays plain text.
+_LINK_SCHEMES = ("http://", "https://", "mailto:", "file://")
 
 
 def _inline(text: str) -> str:
     """Escape, then apply the inline markdown these outputs actually use."""
     s = html.escape(text)
+    s = _LINK_RE.sub(_link, s)
     s = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", s)
     s = re.sub(r"__(.+?)__", r"<b>\1</b>", s)
     s = re.sub(r"`([^`]+?)`",
                rf"<span style='font-family:{_MONO};"
                rf"color:{theme.ACCENT_RAMP[800]}'>\1</span>", s)
     return s
+
+
+def _link(m: re.Match) -> str:
+    """One escaped [text](url). The url is already escaped (so a quote is
+    &quot; and cannot end the attribute); a scheme not in the list is left
+    as the original text."""
+    label, url = m.group(1), m.group(2)
+    if not url.lower().startswith(_LINK_SCHEMES):
+        return m.group(0)
+    return f'<a href="{url}">{label}</a>'
+
+
+def _cells(line: str) -> list[str]:
+    row = line.strip()
+    if row.startswith("|"):
+        row = row[1:]
+    if row.endswith("|"):
+        row = row[:-1]
+    return [c.strip() for c in row.split("|")]
+
+
+def _table(head: list[str], rows: list[list[str]]) -> str:
+    """A Markdown table as a Qt rich-text table: header bold on a tint, thin
+    rules, every cell escaped through _inline."""
+    width = max([len(head)] + [len(r) for r in rows])
+    pad = lambda r: r + [""] * (width - len(r))          # noqa: E731
+    out = ["<table border='1' cellspacing='0' cellpadding='6' "
+           "style='border-collapse:collapse;border-color:#d4d4d8;margin:6px 0'>"]
+    out.append("<tr>" + "".join(
+        f"<th bgcolor='#efeff1' align='left' style='color:#1d1f20'>{_inline(c)}</th>"
+        for c in pad(head)) + "</tr>")
+    for r in rows:
+        out.append("<tr>" + "".join(
+            f"<td style='color:#424244'>{_inline(c)}</td>" for c in pad(r)) + "</tr>")
+    out.append("</table>")
+    return "".join(out)
 
 
 def _label(text: str) -> str:
@@ -85,6 +129,18 @@ def render_markdown(text: str) -> str:
         if not raw.strip():
             close_list()
             i += 1
+            continue
+
+        if ("|" in raw and i + 1 < len(lines)
+                and _TABLE_SEP_RE.match(lines[i + 1]) and "|" in lines[i + 1] + raw):
+            close_list()                                # | a | b | over |---|---|
+            head = _cells(raw)
+            i += 2
+            rows: list[list[str]] = []
+            while i < len(lines) and "|" in lines[i] and lines[i].strip():
+                rows.append(_cells(lines[i]))
+                i += 1
+            out.append(_table(head, rows))
             continue
 
         h = _H_RE.match(raw)
