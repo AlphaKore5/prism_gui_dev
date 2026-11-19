@@ -2334,14 +2334,14 @@ class MainWindow(QMainWindow):
     # ── voice: record → interpret → resolve mentions ─────────────────────────
     def _toggle_mic(self):
         if self._record_worker is None:
-            if CB.ai_client.is_server_key(self.cfg.get("api_key")):
-                QMessageBox.information(self, "Voice", CB.voice.VOICE_UNAVAILABLE)
-                self.input_panel.set_recording(False)
-                return
-            if not self.cfg.get("api_key"):
-                QMessageBox.warning(self, "Voice", "Set your Groq API key in Setup first.")
-                self.input_panel.set_recording(False)
-                return
+            # AI through Prism's server (or no key): Whisper runs on this
+            # computer (owner, 19 Nov 2026). The first Speak without the model
+            # offers the one download instead of refusing.
+            if (CB.ai_client.is_server_key(self.cfg.get("api_key"))
+                    or not self.cfg.get("api_key")):
+                if not CB.voice.local_ready() and not self._offer_components("voice"):
+                    self.input_panel.set_recording(False)
+                    return
             problem = deps.voice_problem(self.cfg)
             if problem:
                 QMessageBox.warning(self, "Voice", problem)

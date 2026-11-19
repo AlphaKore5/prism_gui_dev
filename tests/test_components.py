@@ -126,8 +126,11 @@ class TestRegistry(unittest.TestCase):
                          deps.consent_line(c.key)):
                 for bad in ("pip ", "apt ", "sudo", "brew "):
                     self.assertNotIn(bad, text, c.key)
+        # "whisper" added 19 Nov 2026 (owner: local Whisper for Speak, the
+        # model downloaded inside Prism after install). Every installer kind
+        # has its own consent_line and its own branch in deps.install.
         self.assertEqual({c.install for c in deps.COMPONENTS},
-                         {"", "chromium", "ffmpeg"})
+                         {"", "chromium", "ffmpeg", "whisper"})
 
     def test_the_consent_line_names_what_and_how_big(self):
         line = deps.consent_line("chromium")
@@ -400,10 +403,36 @@ def SP_LABEL():
 
 
 class TestVoice(unittest.TestCase):
-    def test_server_plan_says_so_plainly(self):
+    def test_server_mode_without_the_speech_model_points_to_components(self):
+        """19 Nov 2026: Speak runs Whisper on this computer in server mode
+        (was "not part of your plan"). Without the model it says where to
+        get it, never a command."""
         import core_bridge as CB
-        said = deps.voice_problem({"api_key": CB.ai_client.AI_KEY})
-        self.assertIn("plan", said)
+        with mock.patch.object(deps, "detect", lambda k: deps.Status(deps.READY, "")), \
+                mock.patch.object(CB.voice, "local_ready", return_value=False):
+            said = deps.voice_problem({"api_key": CB.ai_client.AI_KEY})
+        self.assertIn("Components", said)
+        for bad in ("pip", "apt", "sudo", "brew"):
+            self.assertNotIn(bad, said)
+
+    def test_server_mode_with_the_speech_model_is_ready(self):
+        import core_bridge as CB
+        with mock.patch.object(deps, "detect", lambda k: deps.Status(deps.READY, "")), \
+                mock.patch.object(CB.voice, "local_ready", return_value=True):
+            self.assertEqual(deps.voice_problem({"api_key": CB.ai_client.AI_KEY}), "")
+
+    def test_speech_is_an_installable_component_with_a_plain_consent_line(self):
+        import core_bridge as CB
+        c = deps.BY_KEY["speech"]
+        self.assertEqual(c.install, "whisper")
+        self.assertIn("speech", deps.FEATURES["voice"])
+        line = deps.consent_line("speech")
+        self.assertIn("huggingface.co", line)
+        self.assertIn(CB.voice.local_model_dir(), line)
+        with mock.patch.object(CB.voice, "local_ready", return_value=False):
+            self.assertEqual(deps.detect("speech").state, deps.MISSING)
+        with mock.patch.object(CB.voice, "local_ready", return_value=True):
+            self.assertEqual(deps.detect("speech").state, deps.READY)
 
     def test_missing_library_never_shows_a_command(self):
         with mock.patch.object(deps, "detect",

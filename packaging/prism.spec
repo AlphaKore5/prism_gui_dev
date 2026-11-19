@@ -266,6 +266,20 @@ _cv_binaries = [b for b in _cv_binaries
 _extra_binaries = list(_cv_binaries)
 hiddenimports_cv2 = list(_cv_hidden)
 
+# Speak's Whisper on this computer (owner, 19 Nov 2026): faster-whisper and
+# CTranslate2's compiled library, plus faster-whisper's own voice-activity
+# model (assets/silero_vad_v6.onnx). The Whisper MODEL itself is not bundled:
+# the person downloads it once from Settings > Components (core.voice).
+try:
+    _fw_datas, _fw_binaries, _fw_hidden = _collect_all("faster_whisper")
+    _ct_datas, _ct_binaries, _ct_hidden = _collect_all("ctranslate2")
+    datas += _fw_datas + _ct_datas
+    _extra_binaries += _fw_binaries + _ct_binaries
+    hiddenimports_cv2 += _fw_hidden + _ct_hidden + ["tokenizers"]
+    print("[prism] faster-whisper bundled - Speak runs Whisper on this computer")
+except Exception:                                       # not installed: source-only
+    print("[prism] faster-whisper not installed - Speak will say it is missing")
+
 # The FFmpeg executable, which lives inside the imageio_ffmpeg package as a
 # data file rather than as Python. include_py_files is off, so this picks up
 # the binary and nothing else.

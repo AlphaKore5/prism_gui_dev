@@ -186,6 +186,9 @@ dnspython
 # falls back to the OS reader on a Mac and says what is missing elsewhere),
 # bundled in every build so a Windows customer never meets that fallback.
 rapidocr-onnxruntime
+# Speak: Whisper runs on this computer (core/voice.py). The model (~145 MB) is
+# downloaded inside Prism from Settings > Components, never bundled.
+faster-whisper>=1.0
 
 # rapidocr-onnxruntime asks only for opencv-python>=4.5, so a build floats to
 # whatever is newest. 5.0.0.93 and then 4.14.0.94 (2026-10) both failed to load

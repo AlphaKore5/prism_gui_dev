@@ -84,6 +84,14 @@ COMPONENTS = (
         "Lets you say your request instead of typing it.",
         ("voice",), 0, "", "PyAudio / PortAudio, MIT.", ("pyaudio",)),
     Component(
+        "speech", "Speech to text (Whisper)",
+        "Turns what you say into text on this computer, so Speak works "
+        "without sending your voice anywhere. English, Hindi, Gujarati and "
+        "more. Downloaded once, after Prism is installed.",
+        ("voice",), 145, "whisper",
+        "OpenAI Whisper model (MIT), run by faster-whisper (MIT), from "
+        "Hugging Face.", ("faster_whisper", "ctranslate2")),
+    Component(
         "drawings", "Drawing viewer (DXF and DWG)",
         "Draws a CAD drawing as a picture so it can be shown to the AI.",
         ("drawing_picture",), 0, "", "ezdxf, MIT; matplotlib, BSD.",
@@ -137,7 +145,7 @@ FEATURES = {
     "reel": ("ffmpeg", "pictures"),
     "pdf_export": ("chromium",),
     "page_image": ("chromium",),
-    "voice": ("voice",),
+    "voice": ("voice", "speech"),
 }
 
 
@@ -308,6 +316,11 @@ def detect(key: str) -> Status:
         return Status(MISSING, "Missing from this copy of Prism.")
     if key == "voice":
         return Status(READY, "Ready. Prism also needs a microphone.")
+    if key == "speech":
+        import core_bridge as CB
+        return (Status(READY, "Ready. Your voice is turned into text on this computer.")
+                if CB.voice.local_ready()
+                else Status(MISSING, "Not downloaded yet (about 145 MB, once)."))
     return Status(READY, "Ready.")
 
 
@@ -351,6 +364,12 @@ def consent_line(key: str) -> str:
         return (f"Prism will download FFmpeg, about {c.size_mb} MB, from "
                 "pypi.org (the Python package site) and check its checksum "
                 "before using it.")
+    if key == "speech":
+        import core_bridge as CB
+        return (f"Prism will download the Whisper speech model, about {c.size_mb} "
+                "MB, from huggingface.co and keep it only for you, in "
+                f"{CB.voice.local_model_dir()}. After that, what you say into "
+                "Speak is turned into text on this computer and never sent anywhere.")
     return ""
 
 
@@ -359,16 +378,17 @@ def consent_line(key: str) -> str:
 def voice_problem(cfg: dict | None = None) -> str:
     """"" when Speak can start, else one plain sentence (never a command)."""
     cfg = cfg or {}
-    try:
-        import core_bridge as CB
-        if CB.ai_client.is_server_key(cfg.get("api_key")):
-            return CB.voice.VOICE_UNAVAILABLE
-    except Exception:                                   # noqa: BLE001
-        pass
     if detect("voice").state != READY:
         return ("Speaking your request isn't set up in this copy of Prism, "
                 "so please type it instead. Settings > Components shows "
                 "what is missing.")
+    try:
+        import core_bridge as CB
+        local = CB.ai_client.is_server_key(cfg.get("api_key")) or not cfg.get("api_key")
+        if local and not CB.voice.local_ready():
+            return CB.voice.LOCAL_NOT_INSTALLED
+    except Exception:                                   # noqa: BLE001
+        pass
     return ""
 
 
@@ -391,7 +411,7 @@ def voice_error(raw: str) -> str:
                               "device unavailable")):
         return ("No microphone found. Plug one in or switch it on, then press "
                 "Speak again.")
-    if "isn't part of your prism plan" in low:
+    if "isn't part of your prism plan" in low or "speech to text isn't on this computer" in low:
         return raw
     if any(s in low for s in ("connection", "timed out", "resolve", "network")):
         return ("Prism couldn't reach the speech service. Check your internet "
@@ -495,6 +515,19 @@ def install(key: str, consent: bool, on_progress=lambda d, t: None,
     c = BY_KEY.get(key)
     if c is None or not c.install:
         raise DepsError(plain_install_reason(c) if c else "Unknown part.")
+    if key == "speech":
+        import core_bridge as CB
+        try:
+            finished = CB.voice.download_local_model(on_progress, cancelled)
+        except Exception as e:                          # noqa: BLE001
+            raise DepsError("The download didn't finish. Check your internet "
+                            "connection and press Install to try again.") from e
+        if not finished:
+            return "cancelled"
+        if detect("speech").state != READY:
+            raise DepsError("The speech model was downloaded but Prism can't "
+                            "load it. Press Repair to try again.")
+        return "ok"
     if key == "ffmpeg":
         import core_bridge as CB
         try:

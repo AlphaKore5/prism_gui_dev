@@ -317,10 +317,19 @@ class Sites:
         self._only(ai, "classify", "core", "dictation")
 
     def test_dictation_audio_is_not_sent_anywhere(self, ai):
+        """Server mode: Whisper on this computer. Without the model it says
+        where to get it; with it, the audio is transcribed here and nothing
+        (no AI call, no HTTP post) carries it away."""
         from core import voice
-        with pytest.raises(RuntimeError) as e:
-            voice.transcribe(b"RIFF", _cfg())
-        assert "plan" in str(e.value)
+        with mock.patch.object(voice, "local_ready", return_value=False):
+            with pytest.raises(RuntimeError) as e:
+                voice.transcribe(b"RIFF", _cfg())
+        assert "Components" in str(e.value)
+        with mock.patch.object(voice, "local_ready", return_value=True), \
+                mock.patch.object(voice, "_local_transcribe", return_value=("hello", "en")), \
+                mock.patch.object(voice.requests, "post") as post:
+            assert voice.transcribe(b"RIFF", _cfg()) == ("hello", "en")
+        post.assert_not_called()
         assert not ai.calls
 
     def test_boq_prism_agents_use_their_own_roles(self, ai):

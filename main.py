@@ -167,7 +167,11 @@ def _selftest(app) -> int:
                          # 19 Nov 2026: the gate did not check these three.
                          ("pdfplumber", "reading lines and text in HVAC PDF drawings"),
                          ("pypdfium2", "showing PDF pages (scale tool, file viewer)"),
-                         ("rapidocr", "reading text on scanned HVAC drawings")):
+                         ("rapidocr", "reading text on scanned HVAC drawings"),
+                         # Speak runs Whisper here; the model is downloaded
+                         # later, the engine and its silence filter ship.
+                         ("faster_whisper", "turning speech into text on this computer"),
+                         ("ctranslate2", "running the Whisper speech model")):
         try:
             importlib.import_module(module)
         except Exception as e:                          # noqa: BLE001
@@ -184,6 +188,12 @@ def _selftest(app) -> int:
                 f"rapidocr models (offline OCR): {len(_onnx)} of 3 .onnx files bundled")
     except Exception:                                   # noqa: BLE001
         pass                                            # the import line above already says so
+    try:
+        import faster_whisper as _fw
+        if not _glob.glob(os.path.join(os.path.dirname(_fw.__file__), "assets", "*.onnx")):
+            missing_deps.append("faster_whisper silence filter (assets/*.onnx) not bundled")
+    except Exception:                                   # noqa: BLE001
+        pass
 
     # A real HTTPS handshake, not just an import — the SSL cert bug that
     # reached a client's Mac (urlopen: CERTIFICATE_VERIFY_FAILED) had every
