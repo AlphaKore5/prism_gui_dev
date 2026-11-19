@@ -74,6 +74,18 @@ import warnings
 
 import pytest
 
+# devtools/suite_runner.py sets this per file: a hang outside any single test
+# (import, setUpClass, a thread that keeps the process from exiting) prints
+# every thread's stack and ends the process instead of sitting silently until
+# the runner kills it. The per-test timeout cannot see those hangs.
+# The stack goes to its own file: by now pytest owns stderr, and a process
+# ended by the watchdog never hands its captured output back.
+if os.environ.get("PRISM_FILE_WATCHDOG", "").isdigit() and os.environ.get("PRISM_FILE_WATCHDOG_LOG"):
+    import faulthandler
+    _WATCHDOG_LOG = open(os.environ["PRISM_FILE_WATCHDOG_LOG"], "w", encoding="utf-8")
+    faulthandler.dump_traceback_later(int(os.environ["PRISM_FILE_WATCHDOG"]), exit=True,
+                                      file=_WATCHDOG_LOG)
+
 # Qt needs a display and CI runners have none. Set BEFORE any test module is
 # imported — conftest.py is the one file pytest guarantees it loads first, so
 # this is the only place that works for the whole suite at once.

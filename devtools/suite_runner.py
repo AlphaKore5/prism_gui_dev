@@ -57,9 +57,18 @@ def load_known(path: Path = KNOWN) -> set[str]:
     return out
 
 
-def _env() -> dict:
+def _env(file_timeout: int = 0, hang_log: Path | None = None) -> dict:
     env = dict(os.environ, QT_QPA_PLATFORM=os.environ.get("QT_QPA_PLATFORM", "offscreen"),
                PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
+    if file_timeout > 120:
+        # tests/conftest.py arms faulthandler with this: one minute before the
+        # runner would kill the file silently, the process prints every
+        # thread's stack and exits. It covers what the per-test timeout cannot:
+        # importing the file, setUpClass, and the process's own exit (a thread
+        # left running). 1.8.8 hung twice in test_leads_filter_panel.py that way.
+        env["PRISM_FILE_WATCHDOG"] = str(file_timeout - 60)
+        if hang_log is not None:
+            env["PRISM_FILE_WATCHDOG_LOG"] = str(hang_log)
     for k in ("GTK_PATH", "GIO_MODULE_DIR", "GTK_EXE_PREFIX", "GTK_IM_MODULE_FILE",
               "GSETTINGS_SCHEMA_DIR", "GTK_MODULES", "LOCPATH"):
         env.pop(k, None)
@@ -88,7 +97,7 @@ def _fault_excerpt(text: str, size: int = 2500) -> str:
                 block.append(line)
         out += block[-16:]
         return "\n".join(out)[-size * 2:]
-    for marker in ("Fatal Python error", "Windows fatal exception"):
+    for marker in ("Fatal Python error", "Windows fatal exception", "Timeout ("):
         i = text.find(marker)
         if i != -1:
             return text[max(0, i - 300):i + size]
@@ -100,8 +109,10 @@ def run_file(test_file: Path, out_dir: Path, per_test_timeout: int, file_timeout
     is [(key, status, message)] and died is a string if the process produced no
     report."""
     xml = out_dir / f"{test_file.stem}.xml"
-    if xml.exists():
-        xml.unlink()
+    hang_log = out_dir / f"{test_file.stem}.hang.txt"
+    for old in (xml, hang_log):
+        if old.exists():
+            old.unlink()
     cmd = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
            f"--junitxml={xml}", str(test_file)]
     if per_test_timeout:
@@ -112,12 +123,18 @@ def run_file(test_file: Path, out_dir: Path, per_test_timeout: int, file_timeout
         # process, which is what names the hung test.
         cmd[3:3] = [f"--timeout={per_test_timeout}", "--timeout-method=thread"]
     try:
-        p = subprocess.run(cmd, cwd=ROOT, env=_env(), capture_output=True, text=True,
+        p = subprocess.run(cmd, cwd=ROOT, env=_env(file_timeout, hang_log), capture_output=True, text=True,
                            encoding="utf-8", errors="replace", timeout=file_timeout)
         rc, tail = p.returncode, _fault_excerpt(p.stdout + p.stderr)
     except subprocess.TimeoutExpired as e:
         out = e.stdout.decode("utf-8", "replace") if isinstance(e.stdout, bytes) else (e.stdout or "")
         return [], f"timed out after {file_timeout}s", _fault_excerpt(out)
+    hang = hang_log.read_text(encoding="utf-8", errors="replace") if hang_log.exists() else ""
+    if hang.strip():
+        # The watchdog fired: the file hung outside any single test. Even if
+        # every test passed (it hung on the way out), that is a failure.
+        return [], (f"hung for {file_timeout - 60}s outside any test (import, class setup "
+                    f"or exit); every thread's stack follows"), _fault_excerpt(hang, 4000)
     if not xml.exists():
         return [], f"the process died before reporting (exit {rc})", tail
     cases = []
@@ -137,7 +154,7 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("files", nargs="*")
     ap.add_argument("--timeout", type=int, default=0, help="per-test timeout (pytest-timeout)")
-    ap.add_argument("--file-timeout", type=int, default=1500)
+    ap.add_argument("--file-timeout", type=int, default=900)   # slowest healthy file: 363 s
     args = ap.parse_args(argv)
 
     files = [Path(f) for f in args.files] or sorted((ROOT / "tests").glob("test_*.py"))

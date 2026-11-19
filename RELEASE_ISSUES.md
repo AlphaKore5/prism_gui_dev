@@ -165,6 +165,12 @@ something you did not run.
 - **Runner fix:** `devtools/suite_runner.py` uses `--timeout-method=thread` (a hung test is killed after 300 s with every thread's
   stack) and prints the crash/timeout dump around the failing frame instead of the output's last lines. Verified with a
   deliberately hanging and a deliberately segfaulting test: both now name the test and line. The next recurrence is diagnosable.
+- **1.8.8 tag run (attempt 2, 13:07):** `Tests · Linux` hung AGAIN on `test_leads_filter_panel.py` (after `test_leads_evidence.py`,
+  12:53:50, 14 min, cancelled). The new per-test limit did not fire, so the hang is OUTSIDE a test (import, class setup, or a
+  thread keeping the process from exiting). Attempt 1 of that run died on an Ubuntu mirror outage (apt, not our code).
+  **Runner fix 2:** `tests/conftest.py` arms `faulthandler.dump_traceback_later` (set by the runner, file timeout minus 60 s) and
+  writes every thread's stack to its own file; the runner reports it even when all tests passed. File timeout 1500 s -> 900 s
+  (slowest healthy file 363 s). Verified with probes that hang at import and at exit: both now name the file and line.
 - **Process (owner's suggestion):** run the workflow on the branch (`workflow_dispatch`, no tag) and tag only a green commit, so
   a red run never burns a version number.
 
