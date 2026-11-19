@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import time
 import uuid
@@ -125,6 +126,17 @@ ACTION_SHORT = {
             "a copy of the model and re-measures it. The original is never "
             "touched.",
 }
+
+_QUESTION_START = re.compile(
+    r"^\s*(what|which|why|how|when|where|who|is|are|does|do|did|can|could|"
+    r"should|would|will)\b", re.I)
+
+
+def _looks_like_question(text: str) -> bool:
+    """"what material is this?" vs "change the hole to 12 mm"."""
+    text = (text or "").strip()
+    return text.endswith("?") or bool(_QUESTION_START.match(text))
+
 
 class _InlineAnswer:
     """What the follow-up and build logic talks to. It used to be the answer
@@ -2425,9 +2437,26 @@ class StepDialog(PrismDialog):
         if popup is not None:
             popup.set_busy(False)
         if not plan["changes"]:
-            # Nothing to change — most often the question was a question.
-            # Stay on the answer; the Plan tab holds the explanation for
-            # anyone who wants it, but it does not take over the screen.
+            if not _looks_like_question(question):
+                # A real change request Prism cannot carry out (a hole made
+                # SMALLER, say: a cut cannot add material). The plan's advice
+                # says why and what to do instead; send the person there.
+                # It used to say "that reads as a question" (19 Nov 2026).
+                self._show_tab(2)
+                self._stay_on_plan = True        # _finish would go back to Chat
+                self._notes.append(f"{report['file']}: no change Prism can make — "
+                                   "the Plan tab says why")
+                note = i18n.t(
+                    "Prism can't make this change itself — the Plan tab says "
+                    "why and what to do instead.")
+                self.status.setText(note)
+                self.canvas.toast(note, [], seconds=12)
+                if popup is None:
+                    self._next()
+                return
+            # Nothing to change and it was a question. Stay on the answer;
+            # the Plan tab holds the explanation for anyone who wants it,
+            # but it does not take over the screen.
             self._show_tab(1)
             self._notes.append(f"{report['file']}: nothing to change — a "
                                "question is answered with Ask")

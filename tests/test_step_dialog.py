@@ -1303,6 +1303,24 @@ class AskAndEditAreTwoThingsAndEachSaysWhoAnswered(unittest.TestCase):
         self.assertEqual(dlg.out_tabs.current(), 1)
         self.assertIn("question", dlg.status.text())
 
+    def test_a_change_prism_cannot_make_says_so_and_shows_why(self):
+        """19 Nov 2026, real window: "Change the single 13 mm hole on the top
+        part to 12 mm." got "Nothing was changed — that reads as a question".
+        It was not a question: holes can only be enlarged, and the plan said
+        so. The person is sent to that reason, not told they asked one."""
+        dlg = _dialog()
+        m = _fake_measured(dlg)
+        dlg._current = m
+        dlg.ask.set_text("Change the single 13 mm hole on the top part to 12 mm.")
+        dlg._action_buttons["edit"].setChecked(True)
+        dlg._show_tab(1)
+        reason = '{"changes": [], "advice": ["A hole can only be enlarged here; change it in your CAD."]}'
+        with mock.patch.object(CB.config, "save_run"):
+            dlg._on_planned({"plan": [reason]}, {}, agent="Prism AI")
+        self.assertEqual(dlg.out_tabs.current(), 2)
+        self.assertNotIn("question", dlg.status.text())
+        self.assertIn("Plan tab", dlg.status.text())
+
     def test_making_a_change_after_follow_ups_plans_from_the_whole_conversation(self):
         dlg, m, key = self._asked()
         m["path"] = "/nowhere/block.step"
