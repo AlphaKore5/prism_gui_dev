@@ -1,5 +1,5 @@
-# Temporary: Windows crash rate of test_chat_thread / test_usage_panel before
-# and after gui_gc (cycle collector on the GUI thread only). Branch flake-hunt/* only.
+# Temporary: Windows crash rate of tests/test_chat_thread.py with _Worker.start
+# patched once per file (ISS-026). Branch flake-hunt/* only.
 name: Flake hunt
 on:
   push:
@@ -13,7 +13,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { ref: 57a115b, label: "workers on real threads" }
+          - { ref: df6b2ca, label: "patched once per file" }
     steps:
       - uses: actions/checkout@v4
         with:
@@ -35,24 +35,17 @@ jobs:
           python -m pip install -q --upgrade pip
           pip install -q -r requirements.txt
           pip install -q pytest pytest-timeout
-      - name: Catch a crash dump and read it with the debugger
-        shell: pwsh
+      - name: 30 runs
+        shell: bash
         env:
           QT_QPA_PLATFORM: offscreen
           PYTHONUTF8: "1"
         run: |
-          Invoke-WebRequest -Uri "https://live.sysinternals.com/procdump64.exe" -OutFile procdump64.exe
-          $pd = (Resolve-Path .\procdump64.exe).Path
-          $dbg = "C:\Program Files (x86)\Windows Kits\10\Debuggers\x64"
-          $py = (Get-Command python).Source
-          New-Item -ItemType Directory -Force dumps | Out-Null
-          for ($i = 1; $i -le 12; $i++) {
-            & $pd -accepteula -ma -e -x dumps $py -X faulthandler -m pytest -q -p no:cacheprovider tests/test_chat_thread.py *> out.txt
-            $d = Get-ChildItem dumps -Filter *.dmp -ErrorAction SilentlyContinue | Select-Object -First 1
-            if ($d) { Write-Host "run ${i}: dump captured $($d.Name)"; break } else { Write-Host "run ${i}: no crash" }
-          }
-          $d = Get-ChildItem dumps -Filter *.dmp | Select-Object -First 1
-          if (-not $d) { Write-Host "NO DUMP"; exit 0 }
-          & "$dbg\cdb.exe" -z $d.FullName -y "srv*C:\symbols*https://msdl.microsoft.com/download/symbols" -c ".ecxr; .echo === STACK ===; kn 50; .echo === ANALYZE ===; !analyze -v; q" *> dbg.txt
-          Get-Content dbg.txt | Select-String -Pattern "=== STACK ===" -Context 0,60 | ForEach-Object { $_.Context.PostContext } | Write-Host
-          Get-Content dbg.txt | Select-String -Pattern "FAILURE_BUCKET_ID|SYMBOL_NAME|MODULE_NAME|EXCEPTION_CODE_STR|FAULTING_IP|STACK_TEXT" -Context 0,2 | Write-Host
+          set +e
+          bad=0
+          for i in $(seq 1 30); do
+            python -X faulthandler -m pytest -q -p no:cacheprovider --timeout=120 --timeout-method=thread tests/test_chat_thread.py > out.txt 2>&1
+            rc=$?
+            if [ $rc -ne 0 ]; then bad=$((bad+1)); echo "run $i: rc=$rc"; grep -B1 -A20 -m1 -E "fatal exception|FAILED" out.txt | grep -v site-packages | head -20; fi
+          done
+          echo "RESULT ${{ matrix.ref }} test_chat_thread: $bad bad runs in 30"
