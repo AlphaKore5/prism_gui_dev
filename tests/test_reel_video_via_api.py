@@ -113,7 +113,15 @@ def test_a_reel_that_also_asks_for_a_poster_keeps_both(ai, no_ai_browser):
     ("an animated explainer about GST", True), ("youtube shorts script and video", True),
     ("design a poster", False), ("write a blog post about reels", True),
     ("image for my reel", False), ("write a report on crane hire", False),
-    ("send an email to the customer", False)])
+    ("send an email to the customer", False),
+    # 19 Nov 2026: bare "commercial" made every commercial-building question a
+    # video pipeline (~1,600 credits). Engineering customers say it constantly.
+    ("Give me 5 practical tips to cut HVAC duct installation time on a commercial site.", False),
+    ("BOQ for a commercial building, ground plus four floors", False),
+    ("quote for commercial kitchen exhaust ducting", False),
+    ("make a TV commercial for our cranes", True),
+    ("a 30 second commercial for our HVAC service", True),
+    ("script a commercial for Diwali", True)])
 def test_what_counts_as_a_video_request(q, expected):
     from core import router
     assert router.is_video_request(q) is expected
