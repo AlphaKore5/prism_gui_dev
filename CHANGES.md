@@ -10,6 +10,27 @@ Tests: **1966 passing** (6 skipped, 8 Sep 2026 after Round 16 landed on main —
 
 ---
 
+# 1.8.9 — Straight to work, Settings without keys, video/voice inside Prism, Hindi (DEV build, 20 Nov 2026)
+
+**Dev channel only. Windows and Linux** (no macOS build: CI's macOS job is off). 1.8.8 was never published; everything in it is here too.
+
+- Every way into a task (Home's Send, the Task page, the festival tip, Try chips, Commands) plans it and starts the work; no stop at the plan. Stop and Skip stay on the run.
+- Chat: "Start the work" no longer reappears under a finished conversation (pressing it re-ran and re-charged); a reopened conversation shows no Skip/Stop; answers use their 640 px column; step previews are plain text; Markdown tables and links render in answers, History, completion, follow-up and the file viewer.
+- A request about a "commercial site/building" is no longer planned as a video (~1,600 credits).
+- Settings in server mode: Agents lists what runs each step (Prism AI · writer …) instead of seven "skip this category" pickers; Connections dropped the Chrome login/version leftovers.
+- Video and audio play inside Prism (QtMultimedia now in the build), "Open in default app" kept as the outside option.
+- Speak works in server mode: Whisper runs on this computer after a one-time ~145 MB download from Settings > Components; the audio never leaves the PC. English is good; Hindi comes out in Latin letters with errors on this model (a larger one may be needed).
+- Hindi for the whole app: 6,476 of 6,478 strings (was 291), machine-generated through Prism's server and checked for placeholders; a native speaker should review the main screens.
+- STEP: model names shown as "Haiku 5.5" / "Sonnet 5.5" and "Prism AI" (owner); Build reaches the hole the drawing tagged (a correct plan was refused); a change Prism cannot make says so and opens the reason.
+- File viewer: Excel formulas Prism wrote (priced BOQ) show their computed numbers; the priced BOQ Excel's grand total now equals the amount in words (SGST = GST − CGST; it was one paisa short).
+- An empty AI answer is asked once more of Sonnet (a reel's design step came back empty twice); the studio's error names the real reason instead of "No JSON found".
+- Build self-check now requires pdfplumber, pypdfium2, rapidocr (+ its model files), faster-whisper and the video player; CI's Linux build installs libpulse0 for it.
+- Python's cycle collector runs on the GUI thread only (gui_gc.py).
+
+**Known, not fixed:** on the Windows test runner `tests/test_chat_thread.py` still crashes in about half of runs (passes on its retry). Native frame: `pyside6!SignalManager::retrieveMetaObject` while a task worker is created. Not seen in the real app; not ruled out either. See RELEASE_ISSUES.md ISS-026.
+
+---
+
 # 1.8.8 — BOQ steps match the preview; every file opens inside Prism (DEV build, 19 Nov 2026)
 
 1.8.7 was never published: two new tests imported `pwd`, which Windows does not have.
