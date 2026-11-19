@@ -188,6 +188,13 @@ something you did not run.
   fix it (retracted). In this file workers run inline on the GUI thread (start -> run), which the real app never does; whether the
   real app is affected is UNPROVEN. Full page heap + cdb ran 12 times without a crash but the log did not show the tests ran, so
   that proves nothing. Next: a cdb run whose test output is visible.
+- **I reported two customer bugs that were only in my test scripts (19 Nov, evening):** my STEP and Email drivers built
+  `cfg` by hand. The real app loads it with `config.load()`, which in server mode gives `api_key` and `openrouter_api_key` the
+  stand-in `ai_client.AI_KEY` ("prism-ai") so every "is a key set?" check passes. So "STEP Ask/Edit blocked for every customer"
+  and "every inbox unsorted" were FALSE; I committed fixes for them and then reverted both (b6a2010, engine 1d6934b). Verified
+  after the revert with app-loaded settings: 10 real mails sorted correctly through the server, 3.4 credits. **Rule:** a
+  driver that tests a screen takes its cfg from `CB.config.load()` (or the main window), never a hand-built dict; and before
+  calling something "broken for every customer", reproduce it through the app's own path.
 - **Process (owner's suggestion):** run the workflow on the branch (`workflow_dispatch`, no tag) and tag only a green commit, so
   a red run never burns a version number.
 
