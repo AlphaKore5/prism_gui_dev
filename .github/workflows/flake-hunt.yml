@@ -35,21 +35,23 @@ jobs:
           python -m pip install -q --upgrade pip
           pip install -q -r requirements.txt
           pip install -q pytest pytest-timeout
-      - name: 30 runs of each file
-        shell: bash
+      - name: Catch a crash dump and read it with the debugger
+        shell: pwsh
         env:
           QT_QPA_PLATFORM: offscreen
           PYTHONUTF8: "1"
         run: |
-          set +e
-          for f in test_chat_thread; do
-            bad=0
-            for i in $(seq 1 30); do
-              python -X faulthandler -m pytest -q -p no:cacheprovider --timeout=120 --timeout-method=thread tests/$f.py > out.txt 2>&1
-              rc=$?
-              if [ $rc -ne 0 ]; then bad=$((bad+1)); echo "$f run $i: rc=$rc"
-                if [ $bad -le 4 ]; then grep -B1 -A45 -E "fatal exception|Fatal Python" out.txt | grep -vE "site-packages|hostedtoolcache|^\s*$" | head -45; fi
-              fi
-            done
-            echo "RESULT ${{ matrix.ref }} $f: $bad bad runs in 30"
-          done
+          choco install procdump -y --no-progress | Out-Null
+          $dbg = "C:\Program Files (x86)\Windows Kits\10\Debuggers\x64"
+          $py = (Get-Command python).Source
+          New-Item -ItemType Directory -Force dumps | Out-Null
+          for ($i = 1; $i -le 12; $i++) {
+            & procdump -accepteula -ma -e -x dumps $py -X faulthandler -m pytest -q -p no:cacheprovider tests/test_chat_thread.py *> out.txt
+            $d = Get-ChildItem dumps -Filter *.dmp -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($d) { Write-Host "run ${i}: dump captured $($d.Name)"; break } else { Write-Host "run ${i}: no crash" }
+          }
+          $d = Get-ChildItem dumps -Filter *.dmp | Select-Object -First 1
+          if (-not $d) { Write-Host "NO DUMP"; exit 0 }
+          & "$dbg\cdb.exe" -z $d.FullName -y "srv*C:\symbols*https://msdl.microsoft.com/download/symbols" -c ".ecxr; .echo === STACK ===; kn 50; .echo === ANALYZE ===; !analyze -v; q" *> dbg.txt
+          Get-Content dbg.txt | Select-String -Pattern "=== STACK ===" -Context 0,60 | ForEach-Object { $_.Context.PostContext } | Write-Host
+          Get-Content dbg.txt | Select-String -Pattern "FAILURE_BUCKET_ID|SYMBOL_NAME|MODULE_NAME|EXCEPTION_CODE_STR|FAULTING_IP|STACK_TEXT" -Context 0,2 | Write-Host
