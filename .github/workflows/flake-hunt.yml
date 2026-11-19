@@ -1,5 +1,5 @@
-# Temporary: measures how often tests/test_chat_thread.py crashes on Windows
-# (0xC0000005, ISS-026) at several commits, to find the change that caused it.
+# Temporary: why tests/test_chat_thread.py crashes on Windows (0xC0000005, ISS-026).
+# Three variants of the same file, 30 runs each, on the latest commit.
 # Lives only on the flake-hunt/* branch; delete the branch when done.
 name: Flake hunt
 on:
@@ -7,15 +7,13 @@ on:
     branches: ["flake-hunt/**"]
 jobs:
   hunt:
-    name: ${{ matrix.label }}
+    name: ${{ matrix.arm }}
     runs-on: windows-latest
-    timeout-minutes: 40
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - { ref: 8706f1a, label: "1.8.6 (before BOQ + viewer merges)" }
-          - { ref: 4447350, label: "latest" }
+        arm: [nogc, keep, collect]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -24,7 +22,7 @@ jobs:
       - name: Check out the commit under test
         shell: bash
         run: |
-          git checkout -q ${{ matrix.ref }}
+          git checkout -q 4447350
           git submodule update -q --init --recursive
           git log --oneline -1
       - uses: actions/setup-python@v5
@@ -37,22 +35,47 @@ jobs:
           python -m pip install -q --upgrade pip
           pip install -q -r requirements.txt
           pip install -q pytest pytest-timeout
+      - name: Write the probe plugin
+        shell: bash
+        run: |
+          mkdir -p ../probe
+          cat > ../probe/flakeplug.py <<'PY'
+          import gc, os, sys
+          ARM = os.environ["ARM"]
+          KEEP = []
+          def pytest_configure(config):
+              if ARM == "nogc":
+                  gc.disable()
+              if ARM == "keep":
+                  import workers
+                  orig = workers.AutomationWorker.__init__
+                  def init(self, *a, **k):
+                      orig(self, *a, **k)
+                      KEEP.append(self)
+                  workers.AutomationWorker.__init__ = init
+          def pytest_runtest_teardown(item, nextitem):
+              if ARM == "collect":
+                  sys.stderr.write(f"\n[collect after {item.name}]\n"); sys.stderr.flush()
+                  gc.collect()
+          PY
       - name: Run test_chat_thread.py 30 times
         shell: bash
         env:
           QT_QPA_PLATFORM: offscreen
           PYTHONUTF8: "1"
+          ARM: ${{ matrix.arm }}
         run: |
-          set +e    # a crash must not end the loop
-          crashes=0; fails=0; shown=0
+          set +e
+          export PYTHONPATH="$(cd ../probe && pwd)"
+          crashes=0; shown=0
           for i in $(seq 1 30); do
-            python -X faulthandler -m pytest -q -p no:cacheprovider --timeout=120 --timeout-method=thread \
+            python -X faulthandler -m pytest -q -s -p no:cacheprovider -p flakeplug --timeout=120 --timeout-method=thread \
               tests/test_chat_thread.py > out.txt 2>&1
             rc=$?
             if [ $rc -eq 0 ]; then echo "run $i ok"
-            elif grep -q "fatal exception\|Fatal Python error" out.txt; then
-              crashes=$((crashes+1)); echo "run $i CRASH rc=$rc"
-              if [ $shown -lt 6 ]; then grep -A40 "fatal exception\|Fatal Python error" out.txt | grep -v site-packages; shown=$((shown+1)); fi
-            else fails=$((fails+1)); echo "run $i FAIL rc=$rc"; tail -15 out.txt; fi
+            else
+              crashes=$((crashes+1)); echo "run $i BAD rc=$rc"
+              if [ $shown -lt 4 ]; then grep -B2 -A30 "fatal exception\|Fatal Python error" out.txt | grep -v site-packages | head -40; grep "collect after" out.txt | tail -2; shown=$((shown+1)); fi
+            fi
           done
-          echo "RESULT ${{ matrix.ref }}: $crashes crashes, $fails failures in 30 runs"
+          echo "RESULT ${{ matrix.arm }}: $crashes bad runs in 30"
