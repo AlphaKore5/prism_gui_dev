@@ -259,7 +259,10 @@ def _kind_of(title: str) -> str:
     title = title or ""
     for kind, prefixes in _RUN_PREFIXES:
         for prefix in prefixes:
-            if title.startswith(prefix):
+            # rstrip: the title is stored stripped, so "Bill of Quantities — "
+            # with nothing after it arrived as "...—" and matched nothing
+            # (a real BOQ run vanished from Recent runs, 20 Nov 2026).
+            if title.startswith(prefix) or title == prefix.rstrip():
                 return kind
     return ""
 

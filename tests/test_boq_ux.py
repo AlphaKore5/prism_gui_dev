@@ -646,3 +646,24 @@ class LayerHints(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ARunWithNoTypedRequestStillShowsUp(unittest.TestCase):
+    """20 Nov 2026, the owner's real BOQ run: no request typed (the new steps
+    do not need one), saved as "Bill of Quantities — " with nothing after the
+    dash, read back stripped, and the BOQ screen's Recent runs did not show it."""
+
+    def test_the_label_falls_back_to_the_job_type(self):
+        d = _dialog()
+        d.request = ""
+        d._industry = I.HVAC
+        self.assertEqual(d._run_label("Bill of Quantities"), "Bill of Quantities — HVAC drawing")
+        d._industry = I.GENERAL
+        self.assertTrue(d._run_label("Bill of Quantities").endswith("— attached drawing"))
+        d.request = "Ducting for level 2"
+        self.assertEqual(d._run_label("Bill of Quantities"), "Bill of Quantities — Ducting for level 2")
+
+    def test_an_already_saved_bare_title_is_still_a_boq_run(self):
+        from widgets import panel_base as PB
+        self.assertEqual(PB._kind_of("Bill of Quantities —"), PB._kind_of("BOQ — x"))
+        self.assertTrue(PB._kind_of("Bill of Quantities —"))

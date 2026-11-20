@@ -1964,7 +1964,7 @@ class BoqDialog(PrismDialog):
         with open(self.csv_path, "w", encoding="utf-8") as f:
             f.write(text)
         try:
-            task_label = getattr(self, "_task_name", "") or f"{self._doc} — {getattr(self, 'request', '')}"
+            task_label = getattr(self, "_task_name", "") or self._run_label(self._doc)
             CB.config.save_artifact(self.csv_path, "external_measurements.txt",
                                     kind="boq", task=task_label)
         except Exception:                               # noqa: BLE001
@@ -2041,7 +2041,7 @@ class BoqDialog(PrismDialog):
         # so the quantities CSV and the written-up deck land in the same
         # Artifacts subfolder rather than two differently-named ones.
         try:
-            task_label = getattr(self, "_task_name", "") or f"{self._doc} — {self.request}"
+            task_label = getattr(self, "_task_name", "") or self._run_label(self._doc)
             CB.config.save_artifact(
                 self.csv_path, os.path.basename(self.cad_path), kind="boq",
                 task=task_label)
@@ -2197,7 +2197,7 @@ class BoqDialog(PrismDialog):
         # agree, or the same drawing produces two different documents.
         self.interpreter = "ChatGPT" if self.images else None
         self.request = request or f"Produce a {self._doc} from the attached drawing."
-        self._task_name = f"{self._doc} — {self.request}"
+        self._task_name = self._run_label(self._doc)
         self._artifacts_dir = CB.config.begin_run(self._task_name, title=self._task_name)
 
         # Start the clock for this run's timing report.
@@ -2414,6 +2414,19 @@ class BoqDialog(PrismDialog):
             self._deliverable_path = saved
             return
 
+    def _run_label(self, head: str) -> str:
+        """"<document> — <what this job is>" for History, Artifacts and the
+        BOQ screen's Recent runs. The new steps need no typed request, and an
+        empty one saved "Bill of Quantities — " with nothing after it; the
+        list then failed to recognise it and the run vanished (20 Nov 2026).
+        Falls back to the job type, then to "attached drawing"."""
+        what = (getattr(self, "request", "") or "").strip()
+        if not what:
+            kind = getattr(self, "_industry", "") or ""
+            what = (f"{kind} drawing" if kind and kind != industries.GENERAL
+                    else i18n.t("attached drawing"))
+        return f"{head} — {what}"
+
     def _industry_record(self) -> dict:
         """What was chosen, for the saved record: a built-in, Other, or the user's own."""
         return CI.describe(self._custom, CI.OTHER if self._other else self._industry)
@@ -2616,7 +2629,7 @@ class BoqDialog(PrismDialog):
         if self.mode == "boq" and texts:
             self.price_box.setVisible(True)
             self._refresh_primary()
-        task_label = getattr(self, "_task_name", "") or f"{self._noun} — {self.request}"
+        task_label = getattr(self, "_task_name", "") or self._run_label(self._noun)
         # item 30d: "addon" is what lets History's own list (addons/boq/
         # history.py) find BOQ's runs without guessing from the title
         # text; "request"/"last_text"/"deliverable_path" are what a
@@ -3472,7 +3485,7 @@ class BoqDialog(PrismDialog):
         # creates the first record instead of updating one.
         run_path = getattr(self, "_boq_run_path", "")
         request = getattr(self, "request", "")
-        task_label = getattr(self, "_task_name", "") or f"{self._noun} — {request}"
+        task_label = getattr(self, "_task_name", "") or self._run_label(self._noun)
         self._boq_run_path = CB.config.save_run({
             "addon": "boq", "query": task_label, "request": request,
             "responses": self._all_responses, "links": self._links,
