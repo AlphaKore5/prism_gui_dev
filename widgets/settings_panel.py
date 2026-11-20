@@ -1014,6 +1014,35 @@ class SettingsPanel(QDialog):
 
 
 
+    def _pulse_card(self, col):
+        """The one switch for Pulse (pulse.py). On by default; takes effect at
+        once, no restart: pulse.configure() re-reads the setting."""
+        import pulse
+        card = Card()
+        body = card.body((theme.CARD_PAD, theme.CARD_PAD, theme.CARD_PAD, theme.CARD_PAD), theme.SPACE_2)
+        body.addWidget(C.kicker(i18n.t("Help improve Prism")))
+        box = QCheckBox(i18n.t("Send Prism's error reports"))
+        box.setChecked(bool(self.cfg.get("pulse_enabled", True)))
+        self.pulse_box = box
+
+        def changed(on: bool):
+            self.cfg["pulse_enabled"] = bool(on)
+            try:
+                CB.config.save(self.cfg)
+            except Exception:                              # noqa: BLE001
+                pass
+            pulse.configure(self.cfg)
+
+        box.clicked.connect(changed)
+        body.addWidget(box)
+        body.addWidget(C.label(
+            i18n.t("Prism tells us when something breaks, so we can fix it without you having to "
+                   "report it. It sends the kind of error and which part of Prism failed, how long "
+                   "Prism took to open, which screens were slow, and whether a run finished. "
+                   "It never sends your prompts, answers, files, names or keys."),
+            level="META", wrap=True))
+        col.addWidget(card)
+
     def _dev_import_card(self, col):
         import dev_import
         boxes = {}
@@ -2197,6 +2226,9 @@ class SettingsPanel(QDialog):
             (i18n.t("Logs"), self._path(logs or "—")),
             (i18n.t("Log files on disk"), self._safe(self._log_size) or "—"),
         ]))
+
+        # ── Pulse: Prism's own error reports ──────────────────────────────
+        self._pulse_card(col)
 
         # ── where Prism saves the files it makes ──────────────────────────
         col.addWidget(self._head(
