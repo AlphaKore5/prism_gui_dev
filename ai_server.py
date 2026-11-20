@@ -216,6 +216,12 @@ def begin_run(run_id: str) -> None:
         _run.update({"id": run_id, "mc": None, "at": 0.0})
 
 
+def last_run_id() -> str:
+    """The id the gateway tagged the most recent run's calls with ("" if none)."""
+    with _lock:
+        return _run["id"]
+
+
 def end_run() -> None:
     """The run finished: stop tagging, take one last cost reading."""
     if not active():

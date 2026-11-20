@@ -144,6 +144,24 @@ class Widget(Base):
         b.up_btn.click()
         self.assertEqual([], self.queued())
 
+    def test_run_id_is_the_one_the_ai_gateway_recorded(self):
+        import ai_server
+        with mock.patch.dict(ai_server._run), mock.patch.object(ai_server, "active", lambda: True), \
+             mock.patch.object(ai_server, "_ai", lambda: mock.Mock()):
+            ai_server.begin_run("r0123456789abcdef")
+        rid = pulse.new_run_id()
+        self.assertEqual("r0123456789abcdef", rid)
+        pulse.run("ok", addon="task", run_id=rid)
+        FeedbackBar("task", rid).up_btn.click()
+        ev = self.queued()
+        self.assertEqual(["r0123456789abcdef"] * 2, [e["run_id"] for e in ev])
+
+    def test_a_fresh_id_only_when_the_gateway_tagged_nothing(self):
+        import ai_server
+        with mock.patch.dict(ai_server._run, {"id": ""}):
+            rid = pulse.new_run_id()
+        self.assertRegex(rid, r"^[A-Za-z0-9_-]{1,40}$")
+
     def test_run_event_carries_the_run_id(self):
         pulse.run("ok", addon="task", run_id="abc")
         self.assertEqual("abc", self.queued()[0]["run_id"])

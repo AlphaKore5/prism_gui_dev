@@ -180,6 +180,15 @@ def run(result: str, *, addon: str = "", title: str = "", ms: int | None = None,
 
 
 def new_run_id() -> str:
+    """The AI gateway's id for the run just finished, so feedback joins to the
+    model used; a fresh one only when the gateway tagged nothing."""
+    try:
+        import ai_server
+        rid = ai_server.last_run_id()
+        if rid:
+            return rid
+    except Exception:                                    # noqa: BLE001
+        pass
     return uuid.uuid4().hex
 
 
