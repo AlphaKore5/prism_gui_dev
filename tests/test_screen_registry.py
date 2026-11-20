@@ -74,7 +74,15 @@ class TheTableIsSelfConsistent(unittest.TestCase):
         with open(os.path.join(ROOT, "main_window.py"),
                   encoding="utf-8") as f:
             source = f.read()
-        calls = re.findall(r"self\.screens\.addWidget\(", source)
+        # Add-on pages are added through MainWindow._addon_page (so a build
+        # without an add-on still holds its slot). That helper's own
+        # addWidget is the mechanism, not a page: count each call to the
+        # helper instead. Changed with the shell/add-on split (gate G0).
+        helper = re.search(r"    def _addon_page\(.*?(?=\n    def )", source, re.S)
+        self.assertIsNotNone(helper, "MainWindow._addon_page is gone")
+        body = source.replace(helper.group(0), "")
+        calls = (re.findall(r"self\.screens\.addWidget\(", body)
+                 + re.findall(r"self\._addon_page\(", body))
         self.assertEqual(
             len(calls), len(main_window.SCREENS),
             "main_window.py adds %d pages to the body stack but SCREENS "

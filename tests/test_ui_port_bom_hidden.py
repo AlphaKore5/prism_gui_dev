@@ -162,7 +162,7 @@ class AskingAnywayOpensNothing(GateTest):
         win._show_screen("home")
         with mock.patch.object(main_window.MainWindow, "_authorized_then",
                                lambda self, f, a, then: then()), \
-             mock.patch.object(main_window, "BoqDialog") as dialog:
+             mock.patch("addons.boq.dialog.BoqDialog") as dialog:
             win._handle_command("bom")
             win._show_screen("bom")
         self.assertEqual(win.screens.currentIndex(), main_window.HOME)

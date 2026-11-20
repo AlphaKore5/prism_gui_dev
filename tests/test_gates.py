@@ -228,7 +228,7 @@ class WindowGates(GateTest):
         import main_window
         self.grant(["core"])            # no boq
         win = self._window()
-        with mock.patch.object(main_window, "BoqDialog") as dialog:
+        with mock.patch("addons.boq.dialog.BoqDialog") as dialog:
             win._open_boq()
         dialog.assert_not_called()
         self.assertEqual(self.paywalled, ["boq"])
@@ -259,7 +259,7 @@ class WindowGates(GateTest):
                 self._instant_authorize(
                     allowed=False,
                     message="Prism couldn't reach the licence server.")), \
-             mock.patch.object(main_window, "BoqDialog") as dialog, \
+             mock.patch("addons.boq.dialog.BoqDialog") as dialog, \
              mock.patch.object(main_window.QMessageBox, "warning") as warned:
             win._open_boq()
         dialog.assert_not_called()
@@ -269,7 +269,7 @@ class WindowGates(GateTest):
         import main_window
         self.grant(["core"])
         win = self._window()
-        with mock.patch.object(main_window, "EmailComposeDialog") as dialog:
+        with mock.patch("addons.email.dialog.EmailComposeDialog") as dialog:
             win._open_email()
         dialog.assert_not_called()
         self.assertEqual(self.paywalled, ["email"])

@@ -94,7 +94,7 @@ class MainWindowActuallyWiresIt(GateTest):
         self.grant(tuple(plans.FEATURES))
         win = self._window()
         win.cfg = {"email": {"address": "sales@acme.co.in", "password": "p"}}
-        with mock.patch.object(main_window, "EmailSetupDialog") as dialog:
+        with mock.patch("addons.email.dialog.EmailSetupDialog") as dialog:
             dialog.return_value.exec.return_value = 0
             win._open_email_setup()
         self.assertTrue(

@@ -82,11 +82,11 @@ class AnUnlicensedAddOnDoesNotOpen(GateTest):
                 win = self._window()
                 with mock.patch.object(main_window.MainWindow,
                                        "_show_screen") as shown, \
-                     mock.patch.object(main_window, "ReelDialog") as reel, \
-                     mock.patch.object(main_window, "MotionDialog") as motion, \
-                     mock.patch.object(main_window, "BoqDialog") as boq, \
-                     mock.patch.object(main_window, "GerberDialog") as gerber, \
-                     mock.patch.object(main_window, "WhatsAppDialog") as whatsapp:
+                     mock.patch("addons.reel.dialog.ReelDialog") as reel, \
+                     mock.patch("addons.motion.dialog.MotionDialog") as motion, \
+                     mock.patch("addons.boq.dialog.BoqDialog") as boq, \
+                     mock.patch("addons.gerber.dialog.GerberDialog") as gerber, \
+                     mock.patch("addons.whatsapp.dialog.WhatsAppDialog") as whatsapp:
                     win._handle_command(key)
 
                 self.assertIn(

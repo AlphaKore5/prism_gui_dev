@@ -1627,7 +1627,7 @@ class TheWindowRoutesIt(GateTest):
         win = self._window()
         with mock.patch.object(CB, "step_available",
                                return_value=(False, "no cadquery")), \
-                mock.patch.object(main_window, "StepDialog") as dlg, \
+                mock.patch("addons.step.dialog.StepDialog") as dlg, \
                 mock.patch.object(main_window.QMessageBox, "information") as box:
             win.step_panel.opened.emit()
         dlg.assert_not_called()

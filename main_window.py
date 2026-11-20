@@ -41,24 +41,29 @@ import theme
 import updater
 import workspace
 from addons import registry
+
+
+def _addon_class(key: str, dotted: str):
+    """A class that lives inside add-on `key`, or None when this build does
+    not contain that add-on.
+
+    The shell used to import every add-on's panel and dialog by name at the
+    top of this file, so a build without (say) BOQ could not even start.
+    Everything here now goes through the registry, which only ever lists the
+    add-ons the build contains (see docs/architecture, flavours). Resolved
+    when asked, never at import time.
+    """
+    if registry.by_key(key) is None:
+        return None
+    return registry.resolve(dotted)
 from widgets import icons
 from widgets.sidebar import Sidebar
 from widgets.controls import PrismStatusBar
 from widgets.home_panel import HomePanel
-from addons.inquiry.panel import InquiryPanel
-from addons.inquiry.dialog import InquiryDialog
 from widgets.artifacts_panel import ArtifactsPanel
 from widgets.settings_panel import SettingsPanel
 from widgets.wizard_panel import WizardPanel
 from widgets.tour import TourOverlay
-from addons.bom.panel import BomPanel
-from addons.boq.panel import BoqPanel
-from addons.email.panel import EmailPanel
-from addons.gerber.panel import GerberPanel
-from addons.step.panel import StepPanel
-from addons.leads.panel import LeadsPanel
-from addons.leads.dialog import LeadsDialog
-from addons.whatsapp.panel import WhatsAppPanel
 from widgets.guide_panel import GuidePanel
 from widgets.history_panel import HistoryPanel
 from widgets.support_panel import SupportPanel
@@ -75,13 +80,6 @@ from workers import (RouteWorker, AutomationWorker, RecordWorker,
                      FFmpegWorker, QuietUpdateWorker, UpdateWorker, FollowupRouteWorker,
                      ReelWorker)
 from wakeword import WakeWordListener
-from addons.email.dialog import EmailComposeDialog, EmailSetupDialog
-from addons.boq.dialog import BoqDialog
-from addons.gerber.dialog import GerberDialog
-from addons.step.dialog import StepDialog
-from addons.reel.dialog import ReelDialog
-from addons.motion.dialog import MotionDialog
-from addons.whatsapp.dialog import WhatsAppDialog
 from dialogs.completion_dialog import CompletionDialog
 from dialogs.history_dialog import HistoryDialog
 
@@ -620,22 +618,18 @@ class MainWindow(QMainWindow):
         self.home_panel = HomePanel(self.cfg)
         self.screens.addWidget(self.home_panel)          # HOME
         self.screens.addWidget(self._workbench_screen())  # WORKBENCH
-        self.inquiry_panel = InquiryPanel(self.cfg)
-        self.screens.addWidget(self.inquiry_panel)        # INQUIRY
+        self.inquiry_panel = self._addon_page("inquiry", "addons.inquiry.panel:InquiryPanel")        # INQUIRY
         self.settings_panel = SettingsPanel(self.cfg, self)
         self.screens.addWidget(self.settings_panel)       # SETTINGS
         self.guide_panel = GuidePanel(self.cfg)
         self.screens.addWidget(self.guide_panel)          # GUIDE
         self.history_panel = HistoryPanel(self.cfg)
         self.screens.addWidget(self.history_panel)        # HISTORY
-        self.boq_panel = BoqPanel(self.cfg)
-        self.screens.addWidget(self.boq_panel)            # BOQ
-        self.email_panel = EmailPanel(self.cfg)
-        self.screens.addWidget(self.email_panel)          # EMAIL
+        self.boq_panel = self._addon_page("boq", "addons.boq.panel:BoqPanel")   # BOQ
+        self.email_panel = self._addon_page("email", "addons.email.panel:EmailPanel")   # EMAIL
         self.support_panel = SupportPanel(self.cfg)
         self.screens.addWidget(self.support_panel)        # SUPPORT
-        self.gerber_panel = GerberPanel(self.cfg)
-        self.screens.addWidget(self.gerber_panel)          # GERBER
+        self.gerber_panel = self._addon_page("gerber", "addons.gerber.panel:GerberPanel")   # GERBER
         self.wizard_panel = WizardPanel(self.cfg)
         self.screens.addWidget(self.wizard_panel)          # WIZARD
         self.artifacts_panel = ArtifactsPanel(self.cfg)
@@ -645,16 +639,12 @@ class MainWindow(QMainWindow):
         # constructed fresh and .exec()'d as a modal every time it opened;
         # now it is built once, like every other screen, and .enter() is
         # what refreshes it on each visit — see _open_inquiry_dialog.
-        self.inquiry_work_panel = InquiryDialog(self.cfg, self)
-        self.screens.addWidget(self.inquiry_work_panel)     # INQUIRY_WORK
-        self.bom_panel = BomPanel(self.cfg)
-        self.screens.addWidget(self.bom_panel)              # BOM
-        self.step_panel = StepPanel(self.cfg)
-        self.screens.addWidget(self.step_panel)             # STEP
-        self.leads_panel = LeadsPanel(self.cfg)
-        self.screens.addWidget(self.leads_panel)            # LEADS
-        self.whatsapp_panel = WhatsAppPanel(self.cfg)
-        self.screens.addWidget(self.whatsapp_panel)         # WHATSAPP (last: no renumber)
+        self.inquiry_work_panel = self._addon_page(
+            "inquiry", "addons.inquiry.dialog:InquiryDialog", self)   # INQUIRY_WORK
+        self.bom_panel = self._addon_page("bom", "addons.bom.panel:BomPanel")   # BOM
+        self.step_panel = self._addon_page("step", "addons.step.panel:StepPanel")   # STEP
+        self.leads_panel = self._addon_page("leads", "addons.leads.panel:LeadsPanel")   # LEADS
+        self.whatsapp_panel = self._addon_page("whatsapp", "addons.whatsapp.panel:WhatsAppPanel")   # WHATSAPP (last: no renumber)
         # STEP's workbench page: an empty host now, filled the first time STEP
         # is opened (building it imports the CAD engine, which most sessions
         # never need).
@@ -685,15 +675,17 @@ class MainWindow(QMainWindow):
         # panel used by every recovery route, mounted in the popover on demand.
         self.home_panel.lumi_open_requested.connect(self._open_lumi)
         self.home_panel.lumi_close_requested.connect(self._close_lumi)
-        self.inquiry_panel.open_dialog.connect(self._open_inquiry_dialog)
-        self.inquiry_panel.check_requested.connect(
-            lambda: self._open_inquiry_dialog(auto_check=True))
-        self.inquiry_panel.set_up.connect(self._open_inquiry_setup)
+        if self.inquiry_panel is not None:
+            self.inquiry_panel.open_dialog.connect(self._open_inquiry_dialog)
+            self.inquiry_panel.check_requested.connect(
+                lambda: self._open_inquiry_dialog(auto_check=True))
+            self.inquiry_panel.set_up.connect(self._open_inquiry_setup)
         # Same attach path the sidebar's own favourites use (see
         # sidebar.favorite_chosen above) — a customer's attachment becomes
         # a real Prism attachment in one click, from inside the inquiry
         # screen or the quotation window it opens.
-        self.inquiry_work_panel.attach_to_prism.connect(self._attach_path)
+        if self.inquiry_work_panel is not None:
+            self.inquiry_work_panel.attach_to_prism.connect(self._attach_path)
         self.wizard_panel.finished.connect(self._on_wizard_finished)
         self.wizard_panel.guide_requested.connect(self._open_guide)
         self.settings_panel.login_tabs.connect(self._open_login_tabs)
@@ -717,17 +709,24 @@ class MainWindow(QMainWindow):
         # A recent-activity row on Home opens the run it names, through the
         # same handler History uses — same record, same viewer.
         self.home_panel.open_run_record.connect(self._open_run_record)
-        self.boq_panel.opened.connect(self._open_boq_dialog)
-        self.boq_panel.files_chosen.connect(self._open_boq_dialog)
-        self.bom_panel.opened.connect(self._open_bom_dialog)
-        self.step_panel.opened.connect(self._open_step_dialog)
+        if self.boq_panel is not None:
+            self.boq_panel.opened.connect(self._open_boq_dialog)
+            self.boq_panel.files_chosen.connect(self._open_boq_dialog)
+        if self.bom_panel is not None:
+            self.bom_panel.opened.connect(self._open_bom_dialog)
+        if self.step_panel is not None:
+            self.step_panel.opened.connect(self._open_step_dialog)
         self.step_work = None           # built on first visit — see _step_screen
-        self.gerber_panel.opened.connect(self._open_gerber_dialog)
-        self.email_panel.opened.connect(lambda: self._open_email_dialog("one"))
-        self.email_panel.open_compose.connect(self._open_email_dialog)
-        self.email_panel.change_account.connect(self._open_email_setup)
-        self.leads_panel.opened.connect(self._open_leads_dialog)
-        self.whatsapp_panel.opened.connect(self._open_whatsapp_dialog)
+        if self.gerber_panel is not None:
+            self.gerber_panel.opened.connect(self._open_gerber_dialog)
+        if self.email_panel is not None:
+            self.email_panel.opened.connect(lambda: self._open_email_dialog("one"))
+            self.email_panel.open_compose.connect(self._open_email_dialog)
+            self.email_panel.change_account.connect(self._open_email_setup)
+        if self.leads_panel is not None:
+            self.leads_panel.opened.connect(self._open_leads_dialog)
+        if self.whatsapp_panel is not None:
+            self.whatsapp_panel.opened.connect(self._open_whatsapp_dialog)
         # The screens that now offer a way onward. Same pattern as
         # settings_panel.navigate — the payload is a _handle_command key, so
         # every screen reaches every other through the one router rather than
@@ -737,9 +736,12 @@ class MainWindow(QMainWindow):
         for panel in (self.boq_panel, self.bom_panel, self.gerber_panel,
                       self.step_panel, self.email_panel, self.leads_panel,
                       self.whatsapp_panel):
+            if panel is None:
+                continue
             panel.navigate.connect(self._handle_command)
             panel.open_run.connect(self._open_run_record)
-        self.inquiry_work_panel.navigate.connect(self._handle_command)
+        if self.inquiry_work_panel is not None:
+            self.inquiry_work_panel.navigate.connect(self._handle_command)
         # "Open →" on an active-run card goes to the run itself, not a blank
         # bench — the run is already on the workbench's RUNNING page.
         self.home_panel.open_run.connect(lambda: self._show_screen("workbench"))
@@ -755,6 +757,28 @@ class MainWindow(QMainWindow):
     def _close_lumi(self):
         """Close the global floating Lumi assistant."""
         self.lumi_overlay.close()
+
+    def _addon_page(self, key: str, dotted: str, *extra):
+        """Build one add-on's screen and put it at its fixed place in the
+        stack, or put an empty page there when this build does not contain
+        the add-on. Screen numbers are positions (see SCREENS), so a missing
+        add-on must still occupy its slot or every later screen shifts.
+        Returns the panel, or None for the empty page."""
+        cls = _addon_class(key, dotted)
+        panel = cls(self.cfg, *extra) if cls is not None else None
+        self.screens.addWidget(panel if panel is not None else QWidget())
+        return panel
+
+    def _need_addon(self, key: str, dotted: str):
+        """The add-on class an opener needs, or None after telling the person
+        this build does not have it. Openers are normally unreachable for an
+        absent add-on (the rail and Home draw only what the registry lists);
+        this is the safety net for chat commands and stale shortcuts."""
+        cls = _addon_class(key, dotted)
+        if cls is None:
+            QMessageBox.information(
+                self, "Prism", i18n.t("That add-on isn't available in this version."))
+        return cls
 
     def _workbench_screen(self) -> QWidget:
         wrap = QWidget()
@@ -780,7 +804,7 @@ class MainWindow(QMainWindow):
         # it saves its own settings and reading bookmark, works the register
         # (new inquiries, sent quotes, logged replies), so both the in-memory
         # cfg and the launcher panel behind it are stale the moment you leave.
-        if self.screens.currentIndex() == INQUIRY_WORK:
+        if self.screens.currentIndex() == INQUIRY_WORK and self.inquiry_work_panel is not None:
             self.inquiry_work_panel.on_leave()
             self.cfg = CB.config.load()
             self.inquiry_panel.cfg = self.cfg
@@ -798,7 +822,7 @@ class MainWindow(QMainWindow):
         if index == HOME:
             self.home_panel.refresh()
             ai_server.warm_up()
-        elif index == INQUIRY:
+        elif index == INQUIRY and self.inquiry_panel is not None:
             self.inquiry_panel.refresh()
         elif index == SETTINGS:
             self.settings_panel.cfg = self.cfg
@@ -1663,7 +1687,9 @@ class MainWindow(QMainWindow):
                 return
             QMessageBox.information(self, i18n.t("Reel"), err)
             return
-        ReelDialog(self.cfg, [], self).exec()
+        cls = self._need_addon("reel", "addons.reel.dialog:ReelDialog")
+        if cls is not None:
+            cls(self.cfg, [], self).exec()
 
     def _open_motion(self):
         # Same licence feature as Reel/Studio — Motion is the same "media"
@@ -1682,7 +1708,9 @@ class MainWindow(QMainWindow):
                 return
             QMessageBox.information(self, "Motion Graphics", err)
             return
-        MotionDialog(self.cfg, [], self).exec()
+        cls = self._need_addon("motion", "addons.motion.dialog:MotionDialog")
+        if cls is not None:
+            cls(self.cfg, [], self).exec()
 
     def _open_whatsapp(self):
         # WhatsApp is a rail add-on now, like Gerber/BOM/STEP -- see
@@ -1693,7 +1721,9 @@ class MainWindow(QMainWindow):
                               lambda: self._show_screen("whatsapp"))
 
     def _open_whatsapp_dialog(self):
-        WhatsAppDialog(self.cfg, self).exec()
+        cls = self._need_addon("whatsapp", "addons.whatsapp.dialog:WhatsAppDialog")
+        if cls is not None:
+            cls(self.cfg, self).exec()
 
     def _offer_components(self, feature: str) -> bool:
         """The first press of a feature whose part is missing: one clear
@@ -1771,8 +1801,10 @@ class MainWindow(QMainWindow):
         the working screen in the middle has nothing to show.
         """
         from PySide6.QtWidgets import QDialog
-        from addons.inquiry.setup import InquirySetupDialog
-        dialog = InquirySetupDialog(self.cfg, self)
+        cls = self._need_addon("inquiry", "addons.inquiry.setup:InquirySetupDialog")
+        if cls is None:
+            return
+        dialog = cls(self.cfg, self)
         if dialog.exec() == QDialog.Accepted:
             self.cfg = dialog.cfg
             CB.config.save(self.cfg)
@@ -1793,6 +1825,9 @@ class MainWindow(QMainWindow):
         to do. Leaving it again (_show_screen) is what used to happen after
         .exec() returned: reload cfg, refresh the launcher behind it.
         """
+        if self.inquiry_work_panel is None:
+            self._need_addon("inquiry", "addons.inquiry.dialog:InquiryDialog")
+            return
         self.inquiry_work_panel.cfg = self.cfg
         self.inquiry_work_panel.enter(tab=int(tab or 0), auto_check=auto_check,
                                       view="auto")
@@ -1824,7 +1859,10 @@ class MainWindow(QMainWindow):
         # Paths dropped on (or chosen from) the BOQ front page arrive already
         # attached: the dialog's own `attachments` path (_absorb), the same
         # one Inquiry's hand-off uses.
-        dlg = BoqDialog(self.cfg, [{"path": p} for p in (paths or [])], self)
+        cls = self._need_addon("boq", "addons.boq.dialog:BoqDialog")
+        if cls is None:
+            return
+        dlg = cls(self.cfg, [{"path": p} for p in (paths or [])], self)
         dlg.exec()
         if getattr(dlg, "owns_followup", False):
             return
@@ -1860,7 +1898,10 @@ class MainWindow(QMainWindow):
             return
         # Same dialog as BOQ, in BOM mode — it measures the drawing identically
         # and writes a parts list instead of a quantities schedule.
-        dlg = BoqDialog(self.cfg, [], self, mode="bom")
+        cls = self._need_addon("bom", "addons.boq.dialog:BoqDialog")
+        if cls is None:
+            return
+        dlg = cls(self.cfg, [], self, mode="bom")
         dlg.exec()
         if getattr(dlg, "owns_followup", False):
             return
@@ -1887,7 +1928,9 @@ class MainWindow(QMainWindow):
                 self, "Gerber",
                 f"The Gerber add-on could not load: {err}")
             return
-        GerberDialog(self.cfg, [], self).exec()
+        cls = self._need_addon("gerber", "addons.gerber.dialog:GerberDialog")
+        if cls is not None:
+            cls(self.cfg, [], self).exec()
 
     def _open_step(self):
         # STEP is its own add-on since 2026-09-10 -- see addons/step/addon.py.
@@ -1900,8 +1943,9 @@ class MainWindow(QMainWindow):
         """The STEP workbench, built the first time it is needed and kept —
         the same pattern as the Email inquiries screen."""
         if self.step_work is None:
-            self.step_work = StepDialog(self.cfg, [], self.step_host,
-                                        embedded=True)
+            self.step_work = self._need_addon(
+                "step", "addons.step.dialog:StepDialog")(
+                    self.cfg, [], self.step_host, embedded=True)
             self.step_host.layout().addWidget(self.step_work)
             self.step_work.leave_requested.connect(
                 lambda: self._show_screen("home"))
@@ -1941,30 +1985,41 @@ class MainWindow(QMainWindow):
                                lambda: self._show_screen("leads"))
 
     def _open_leads_dialog(self):
-        LeadsDialog(self.cfg, self).exec()
+        cls = self._need_addon("leads", "addons.leads.dialog:LeadsDialog")
+        if cls is None:
+            return
+        cls(self.cfg, self).exec()
         # A run finished in the dialog must show on the screen behind it.
-        self.leads_panel.refresh()
+        if self.leads_panel is not None:
+            self.leads_panel.refresh()
 
     def _open_email(self):
         self._authorized_then("email", "addon",
                                lambda: self._show_screen("email"))
 
     def _open_email_dialog(self, mode: str = "one"):
+        setup_cls = self._need_addon("email", "addons.email.dialog:EmailSetupDialog")
+        compose_cls = self._need_addon("email", "addons.email.dialog:EmailComposeDialog")
+        if setup_cls is None or compose_cls is None:
+            return
         if not email_config.can_send(self.cfg):
-            dlg = EmailSetupDialog(self.cfg, self)
+            dlg = setup_cls(self.cfg, self)
             if dlg.exec() != QDialog.Accepted:
                 return
             self.cfg = dlg.cfg
             self.email_panel.cfg = self.cfg
-        EmailComposeDialog(self.cfg, [], self,
-                           mode=mode if isinstance(mode, str) else "one").exec()
+        compose_cls(self.cfg, [], self,
+                    mode=mode if isinstance(mode, str) else "one").exec()
         # A send that just went out must be on the screen behind the window.
         self.email_panel.refresh()
 
     def _open_email_setup(self):
         """The only door back into the sending-account setup once one is
         already configured — see EmailPanel.header_actions()."""
-        dlg = EmailSetupDialog(self.cfg, self)
+        cls = self._need_addon("email", "addons.email.dialog:EmailSetupDialog")
+        if cls is None:
+            return
+        dlg = cls(self.cfg, self)
         if dlg.exec() == QDialog.Accepted:
             self.cfg = dlg.cfg
             self.email_panel.cfg = self.cfg

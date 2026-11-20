@@ -641,14 +641,16 @@ class TheFrontDoorLeadsWithTheDropZone(unittest.TestCase):
     def test_the_main_window_opens_the_dialog_with_the_files_attached(self):
         import main_window as MW
         fake = mock.Mock(cfg={})
+        # The opener now asks the registry for the dialog class (gate G0).
+        fake._need_addon = lambda key, dotted: MW._addon_class(key, dotted)
         with mock.patch.object(MW.CB, "boq_available", return_value=(True, "")), \
-                mock.patch.object(MW, "BoqDialog") as dlg:
+                mock.patch("addons.boq.dialog.BoqDialog") as dlg:
             dlg.return_value.owns_followup = True
             MW.MainWindow._open_boq_dialog(fake, ["/x/a.dxf", "/x/b.pdf"])
         args = dlg.call_args[0]
         self.assertEqual(args[1], [{"path": "/x/a.dxf"}, {"path": "/x/b.pdf"}])
         with mock.patch.object(MW.CB, "boq_available", return_value=(True, "")), \
-                mock.patch.object(MW, "BoqDialog") as dlg:
+                mock.patch("addons.boq.dialog.BoqDialog") as dlg:
             dlg.return_value.owns_followup = True
             MW.MainWindow._open_boq_dialog(fake)
         self.assertEqual(dlg.call_args[0][1], [])
