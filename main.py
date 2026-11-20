@@ -540,6 +540,8 @@ def main():
     cfg = CB.config.load()
     import pulse
     pulse.configure(cfg)        # the customer's on/off choice (Settings)
+    pulse.begin_session()       # reports an unclean previous run, marks this one
+    app.aboutToQuit.connect(pulse.clean_exit)
     i18n.start(cfg, app)
 
     # The signed-in member's role decides the accent colour, so a glance at

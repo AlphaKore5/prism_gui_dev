@@ -1025,6 +1025,9 @@ class BoqDialog(PrismDialog):
         root.addWidget(self.made_sub)
         root.addWidget(self.result_actions)
         root.addWidget(self.result, stretch=1)
+        self.feedback = None            # a FeedbackBar, replaced for each written BOQ
+        self._feedback_slot = QVBoxLayout()
+        root.addLayout(self._feedback_slot)
         # "Want to change something? Just type it": the follow-up the old pop-up offered,
         # right under the document.
         self.change_box = QWidget()
@@ -1048,6 +1051,7 @@ class BoqDialog(PrismDialog):
                                     icon_name="external", small=True,
                                     on_click=self._open_link)
         self.open_btn.setEnabled(False)
+        self.open_btn.clicked.connect(lambda: self._feedback_outcome("used"))
         self._actions.addWidget(self.open_btn)
         # item 66: fill the CLIENT'S OWN template (their logo, letterhead,
         # column widths) with this result's line items, instead of handing
@@ -1059,6 +1063,7 @@ class BoqDialog(PrismDialog):
             i18n.t("Fill into template…"), "secondary", icon_name="paperclip",
             small=True, on_click=self._fill_template)
         self.fill_template_btn.setEnabled(False)
+        self.fill_template_btn.clicked.connect(lambda: self._feedback_outcome("used"))
         self._actions.addWidget(self.fill_template_btn)
         # Same job "Verify and remake" (the follow-up window's quick action)
         # already does -- read the drawing itself, not just the measured
@@ -1072,6 +1077,7 @@ class BoqDialog(PrismDialog):
                                        icon_name="eye", small=True,
                                        on_click=self._ask_recheck)
         self.recheck_btn.setEnabled(False)
+        self.recheck_btn.clicked.connect(lambda: self._feedback_outcome("redone"))
         self._actions.addWidget(self.recheck_btn)
         self._actions.addStretch(1)
         self.back_btn = self.button(i18n.t("Back"), icon_name="chevron-left",
@@ -2615,6 +2621,7 @@ class BoqDialog(PrismDialog):
                                 "are still saved." + (f"  ({timing})" if timing else ""))
         else:
             self._show_result(texts[0])
+            self._show_feedback()
             self.status.setText(
                 (f"Done in {timing}. " if timing else "Done. ")
                 + "Check the numbers against the saved file above.")
@@ -2649,6 +2656,22 @@ class BoqDialog(PrismDialog):
         })
         if texts:
             self._offer_followup()
+
+    def _show_feedback(self):
+        """A thumbs up / down under this BOQ, tied to a Pulse run record."""
+        import pulse
+        from widgets.feedback_bar import FeedbackBar
+        if self.feedback is not None:
+            self.feedback.setParent(None)
+            self.feedback.deleteLater()
+        rid = pulse.new_run_id()
+        pulse.run("ok", addon="boq", run_id=rid)
+        self.feedback = FeedbackBar("boq", rid)
+        self._feedback_slot.addWidget(self.feedback)
+
+    def _feedback_outcome(self, outcome: str):
+        if self.feedback is not None:
+            self.feedback.mark(outcome)
 
     def _pipe_written(self, ok: bool):
         if not ok:

@@ -1470,6 +1470,14 @@ class OutputPanel(QWidget):
         self._insert(row)
         return bubble
 
+    def add_feedback(self, addon: str, run_id: str):
+        """A thumbs up / down under the answer. Not part of the stored thread."""
+        from widgets.feedback_bar import FeedbackBar
+        bar = FeedbackBar(addon, run_id)
+        self._extras.append(bar)
+        self._insert(bar)
+        return bar
+
     def add_files(self, file_paths: list):
         file_paths = [p for p in (file_paths or []) if p]
         if not file_paths:

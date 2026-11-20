@@ -10,6 +10,8 @@ licence server (/v1/pulse, see license_server app/pulse.py):
   start  how many milliseconds from launch to a usable window
   slow   an action that took two seconds or more (which screen, how long)
   run    how a run ended: ok, failed or cancelled, in which add-on
+  crash  the previous run did not exit cleanly (a marker file was left behind)
+  feedback  a thumb (and one of three plain reasons) on a result; never text
 
 NEVER sent: a prompt, an answer, a file name or path, a name, an email, a key, an
 attachment. The server scrubs again; this scrubs first.
@@ -34,6 +36,7 @@ import sys
 import threading
 import time
 import traceback
+import uuid
 
 MAX_QUEUE = 300
 MAX_AGE = 7 * 86400
@@ -168,10 +171,31 @@ def error(exc_type, exc, tb, *, addon: str = "", screen: str = "") -> None:
         pass
 
 
-def run(result: str, *, addon: str = "", title: str = "", ms: int | None = None) -> None:
+def run(result: str, *, addon: str = "", title: str = "", ms: int | None = None,
+        run_id: str = "") -> None:
     """How a run ended. `title` is blanked like an error message."""
     record("run", result=result, addon=addon, title=scrub_title(title),
-           **({"ms": int(ms)} if ms is not None else {}))
+           **({"ms": int(ms)} if ms is not None else {}),
+           **({"run_id": run_id} if run_id else {}))
+
+
+def new_run_id() -> str:
+    return uuid.uuid4().hex
+
+
+RATINGS = ("up", "down", "")
+REASONS = ("wrong", "incomplete", "slow", "other", "")
+OUTCOMES = ("used", "edited", "redone", "none")
+
+
+def feedback(addon: str, run_id: str, *, rating: str = "", reason: str = "",
+             outcome: str = "none", model: str = "") -> None:
+    """A thumb, a reason chip, or what the person did next. No free text."""
+    rating = rating if rating in RATINGS else ""
+    reason = reason if reason in REASONS else ""
+    outcome = outcome if outcome in OUTCOMES else "none"
+    record("feedback", addon=addon, run_id=run_id, rating=rating, reason=reason,
+           outcome=outcome, **({"model": model} if model else {}))
 
 
 def slow(action: str, ms: float, *, addon: str = "", screen: str = "") -> None:
@@ -187,6 +211,105 @@ def started() -> None:
     _start_sent = True
     record("start", ms=int((time.perf_counter() - _launch) * 1000))
     flush_async(delay=20.0)
+
+
+# ── crash marker ───────────────────────────────────────────────────────────
+# A small file says "Prism is running". A clean exit removes it; if it is still
+# there at the next start, the last run died (power cut, kill, native crash) and
+# one `crash` event is recorded. The last screen is kept in memory and written
+# to the marker when the screen changes: one tiny local write on a click, which
+# costs nothing a person could see. faulthandler writes a native crash's stack
+# to a second file; only its last lines come back, scrubbed.
+_screen = "start"
+_trace_file = None
+TRACE_LINES = 10
+
+
+def _marker_path() -> str:
+    import paths
+    return paths.user_dir("pulse", "running.marker")
+
+
+def _trace_path() -> str:
+    import paths
+    return paths.user_dir("pulse", "native-crash.txt")
+
+
+def _write_marker() -> None:
+    import app_meta
+    path = _marker_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(json.dumps({"version": app_meta.VERSION, "last_screen": _screen}))
+
+
+def screen(name: str) -> None:
+    """The screen the person is on now. Never raises."""
+    global _screen
+    try:
+        if name == _screen:
+            return
+        _screen = str(name)[:40]
+        if os.path.exists(_marker_path()):
+            _write_marker()
+    except Exception:                                    # noqa: BLE001
+        pass
+
+
+def begin_session() -> None:
+    """Report an unclean previous run once, then mark this run as running and
+    point faulthandler at a fresh file. Never raises, never blocks."""
+    global _trace_file
+    try:
+        if not active():
+            return
+        marker = _marker_path()
+        if os.path.exists(marker):
+            try:
+                with open(marker, encoding="utf-8") as f:
+                    old = json.load(f)
+            except Exception:                            # noqa: BLE001
+                old = {}
+            version = str(old.get("version", ""))[:32]
+            last = str(old.get("last_screen", ""))[:40]
+            detail = "previous run did not exit cleanly"
+            try:
+                with open(_trace_path(), encoding="utf-8", errors="replace") as f:
+                    tail = [scrub_title(l) for l in f.read().splitlines()[-TRACE_LINES:] if l.strip()]
+                if tail:
+                    detail += " | " + " | ".join(tail)
+            except OSError:
+                pass
+            fp = hashlib.sha1(("unclean-exit" + version + last).encode()).hexdigest()[:16]
+            record("crash", fingerprint=fp, detail=detail[:900], last_screen=last, version=version)
+            os.remove(marker)
+        _write_marker()
+        try:
+            import faulthandler
+            _trace_file = open(_trace_path(), "w", encoding="utf-8")
+            faulthandler.enable(_trace_file)
+        except Exception:                                # noqa: BLE001
+            pass
+    except Exception:                                    # noqa: BLE001
+        pass
+
+
+def clean_exit() -> None:
+    """The app is quitting normally: remove the marker. Never raises."""
+    global _trace_file
+    try:
+        if _trace_file is not None:
+            import faulthandler
+            faulthandler.disable()
+            _trace_file.close()
+            _trace_file = None
+            os.remove(_trace_path())
+    except Exception:                                    # noqa: BLE001
+        pass
+    try:
+        os.remove(_marker_path())
+    except Exception:                                    # noqa: BLE001
+        pass
 
 
 # ── sending ────────────────────────────────────────────────────────────────

@@ -796,6 +796,7 @@ class MainWindow(QMainWindow):
     def _show_screen(self, name: str = "workbench"):
         """Switch screens, and tell Pulse when it took two seconds or more."""
         t0 = time.perf_counter()
+        pulse.screen(name)
         try:
             self._show_screen_now(name)
         finally:
@@ -3682,7 +3683,9 @@ class MainWindow(QMainWindow):
         awake.release()
         stopped = bool(getattr(self, "_active_run", None)
                        and self._active_run.stopping())
-        pulse.run("cancelled" if stopped else "ok", addon="task")
+        self._pulse_run_id = pulse.new_run_id()
+        pulse.run("cancelled" if stopped else "ok", addon="task",
+                  run_id=self._pulse_run_id)
         self._active_run = None
         self.agents_panel.set_run_enabled(True)
         self._sync_start_bar()
@@ -3746,7 +3749,11 @@ class MainWindow(QMainWindow):
         stage, text = chatlog.latest_answer(responses)
         if text:
             by = ai_server.display_agent(self._stage_agents.get(stage, ""), stage)
-            self.output_panel.add_answer(text, by, stage)
+            bubble = self.output_panel.add_answer(text, by, stage)
+            if not stopped and getattr(self, "_pulse_run_id", ""):
+                bar = self.output_panel.add_feedback("task", self._pulse_run_id)
+                if bubble is not None:
+                    bubble.copy_btn.clicked.connect(lambda _=False: bar.mark("used"))
         made, seen = [], set()
         for r in list(self._stage_results):
             for p in list(r.get("files") or []) + [r.get("url") or ""]:
