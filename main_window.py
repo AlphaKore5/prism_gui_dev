@@ -71,7 +71,7 @@ from widgets.output_panel import OutputPanel
 from workers import (RouteWorker, AutomationWorker, RecordWorker,
                      PlanBriefWorker,
                      StudioFollowupWorker,
-                     InterpretWorker, FindWorker, AuthorizeWorker, AttachWorker,
+                     InterpretWorker, FindWorker, AuthorizeWorker, AttachWorker, WarmImportsWorker,
                      FFmpegWorker, QuietUpdateWorker, UpdateWorker, FollowupRouteWorker,
                      ReelWorker)
 from wakeword import WakeWordListener
@@ -429,6 +429,9 @@ class MainWindow(QMainWindow):
             # it can appear behind it or with nowhere to centre itself — and
             # the constructor never returns until it is dismissed.
             QTimer.singleShot(0, self._first_run)
+        # Every build, source runs included: the slow libraries load in the
+        # background shortly after start (see WarmImportsWorker).
+        QTimer.singleShot(self.WARM_IMPORTS_MS, self._warm_heavy_imports)
 
     # ── keeping the licence and lease current ───────────────────────────────
     # The authorisation lease is short by design (about half an hour), so a
@@ -489,6 +492,15 @@ class MainWindow(QMainWindow):
         self._quiet_timer.timeout.connect(self._quiet_update_check)
         self._quiet_timer.start()
         QTimer.singleShot(self.QUIET_UPDATE_FIRST_MS, self._quiet_update_check)
+
+    # The libraries the first visit to an add-on would otherwise wait for.
+    WARM_IMPORTS_MS = 4000
+    WARM_IMPORTS = ("cadquery",)            # STEP: 1.5 s of its 1.9 s first open
+
+    def _warm_heavy_imports(self):
+        worker = WarmImportsWorker(self.WARM_IMPORTS)
+        self._workers.append(worker)
+        worker.start()
 
     def _quiet_update_check(self):
         """Start the background check unless one is running or an update is

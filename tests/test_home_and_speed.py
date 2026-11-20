@@ -336,3 +336,23 @@ class NoNetworkOnTheUiThread(_Base):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SlowLibrariesLoadInTheBackground(unittest.TestCase):
+    """20 Nov 2026: STEP's first open took 1.9 s, 1.5 s of it import
+    cadquery. It now loads on a worker a few seconds after start."""
+
+    def test_the_worker_imports_what_it_is_given(self):
+        import importlib
+        import sys as _sys
+        _sys.modules.pop("colorsys", None)
+        w = main_window.WarmImportsWorker(("colorsys", "no_such_module_xyz"))
+        w.run()                                          # a missing one is ignored
+        self.assertIn("colorsys", _sys.modules)
+        importlib.import_module("colorsys")
+
+    def test_the_window_schedules_it_for_step(self):
+        self.assertIn("cadquery", main_window.MainWindow.WARM_IMPORTS)
+        self.assertGreater(main_window.MainWindow.WARM_IMPORTS_MS, 0)
+        import workers as _w
+        self.assertTrue(issubclass(main_window.WarmImportsWorker, _w._Worker))

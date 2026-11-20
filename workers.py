@@ -46,6 +46,27 @@ class _Worker(QThread):
         _running.discard(self)
 
 
+class WarmImportsWorker(_Worker):
+    """Load slow libraries in the background a few seconds after start, so
+    the first visit to the screen that needs them is not the one that pays.
+    Measured 20 Nov 2026: STEP's first open took 1.9 s, 1.5 s of it
+    `import cadquery` (OpenCascade); the owner found switching add-ons slow.
+    A library that will not load is ignored here: the screen says why when
+    it is opened, exactly as before."""
+
+    def __init__(self, modules: tuple[str, ...]):
+        super().__init__()
+        self.modules = tuple(modules)
+
+    def run(self):
+        import importlib
+        for name in self.modules:
+            try:
+                importlib.import_module(name)
+            except Exception:                           # noqa: BLE001
+                pass
+
+
 class AttachWorker(_Worker):
     """Read a file (or a folder's files) for the run without freezing the window.
 
