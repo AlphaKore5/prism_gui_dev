@@ -170,10 +170,12 @@ class Widget(Base):
         with mock.patch.dict(ai_server._run), mock.patch.object(ai_server, "active", lambda: True), \
              mock.patch.object(ai_server, "_ai", lambda: mock.Mock()):
             ai_server.begin_run("r0123456789abcdef")
-        rid = pulse.new_run_id()
-        self.assertEqual("r0123456789abcdef", rid)
-        pulse.run("ok", addon="task", run_id=rid)
-        FeedbackBar("task", rid).up_btn.click()
+            # patch.dict puts _run back when the block ends, so everything that
+            # reads the gateway's id has to happen inside it.
+            rid = pulse.new_run_id()
+            self.assertEqual("r0123456789abcdef", rid)
+            pulse.run("ok", addon="task", run_id=rid)
+            FeedbackBar("task", rid).up_btn.click()
         ev = self.queued()
         self.assertEqual(["r0123456789abcdef"] * 2, [e["run_id"] for e in ev])
 
