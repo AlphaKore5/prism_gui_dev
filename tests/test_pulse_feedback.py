@@ -70,7 +70,8 @@ class CrashMarker(Base):
         self.assertEqual(1, len(crashes))
         c = crashes[0]
         self.assertEqual("boq", c["last_screen"])
-        self.assertEqual("previous run did not exit cleanly", c["detail"])
+        # detail is a dict on the wire (server PulseEventIn.detail is dict|None); this used to expect a string
+        self.assertEqual({"note": "previous run did not exit cleanly"}, c["detail"])
         self.assertEqual(16, len(c["fingerprint"]))
         import hashlib
         self.assertEqual(hashlib.sha1(("unclean-exit" + c["version"] + "boq").encode()).hexdigest()[:16],
@@ -86,12 +87,32 @@ class CrashMarker(Base):
         with open(os.path.join(self.tmp, "pulse", "native-crash.txt"), "w") as f:
             f.write("\n".join(f'File "{home}/secret/Client Plans/a.py", line {i} in f{i}' for i in range(30)))
         pulse.begin_session()
-        detail = [e for e in self.queued() if e["kind"] == "crash"][0]["detail"]
+        detail = [e for e in self.queued() if e["kind"] == "crash"][0]["detail"]["note"]
         self.assertNotIn("secret", detail)
         self.assertNotIn("Client", detail)
         self.assertEqual(10, detail.count(" | "))       # exactly the last ten lines
         self.assertIn("line <n>", detail.replace("in f<n>", ""))
         self.assertNotIn("line 19", detail)
+
+    def test_crash_event_is_accepted_by_the_server_schema(self):
+        server = os.path.join(os.path.dirname(ROOT), "wt-server-ai")
+        if not os.path.isdir(server):
+            self.skipTest("server worktree not found at " + server)
+        sys.path.insert(0, server)
+        try:
+            from app.schemas import PulseEventIn
+        except Exception as e:                                       # noqa: BLE001
+            self.skipTest("server schemas not importable: %r" % (e,))
+        finally:
+            sys.path.remove(server)
+        pulse.begin_session()
+        pulse.screen("a-screen-name-longer-than-twenty-four")
+        self._close_trace()
+        pulse.begin_session()
+        c = [e for e in self.queued() if e["kind"] == "crash"][0]
+        PulseEventIn(**c)                                            # raises if the server would refuse it
+        self.assertLessEqual(len(c["last_screen"]), 24)
+        self.assertIsInstance(c["detail"], dict)
 
     def test_it_never_raises_and_does_nothing_when_pulse_is_off(self):
         pulse.configure({"pulse_enabled": False})

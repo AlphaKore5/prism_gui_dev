@@ -170,6 +170,33 @@ class Sending(Base):
         self.assertEqual([50, 50, 20], sizes)
 
 
+class MatchesServerSchema(Base):
+    def test_every_kind_the_client_sends_is_accepted_by_the_server_model(self):
+        server = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "wt-server-ai")
+        if not os.path.isdir(server):
+            self.skipTest("server worktree not found at " + server)
+        sys.path.insert(0, server)
+        try:
+            from app.schemas import PulseEventIn
+        except Exception as e:                                       # noqa: BLE001
+            self.skipTest("server schemas not importable: %r" % (e,))
+        finally:
+            sys.path.remove(server)
+        try:
+            _boom()
+        except KeyError:
+            pulse.error(*sys.exc_info(), addon="a" * 40, screen="s" * 40)
+        pulse.run("failed", addon="task", title="x" * 500, ms=1200, run_id=pulse.new_run_id())
+        pulse.slow("open step", 2600, screen="step")
+        pulse.started()
+        pulse.feedback("task", "abc123", rating="down", reason="wrong", outcome="used", model="gpt-4.1")
+        kinds = set()
+        for ev in self.queued():
+            PulseEventIn(**ev)                                       # raises if the server would refuse it
+            kinds.add(ev["kind"])
+        self.assertEqual({"error", "run", "slow", "start", "feedback"}, kinds)
+
+
 class WiredIn(Base):
     def test_the_crash_hook_in_diagnostics_reports_to_pulse(self):
         import diagnostics

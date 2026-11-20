@@ -138,12 +138,20 @@ def _context() -> dict:
             "channel": "dev" if channel.is_dev() else "prod"}
 
 
+# Server PulseEventIn max_length per string field (wt-server-ai app/schemas.py).
+_MAX_LEN = {"version": 20, "flavour": 16, "platform": 24, "addon": 24, "screen": 24,
+            "title": 400, "last_screen": 24}
+
+
 def record(kind: str, **fields) -> None:
     """Add one event to the queue. Never raises."""
     try:
         if not active():
             return
         ev = {**_context(), "kind": kind, "at": int(time.time()), **fields}
+        for k, n in _MAX_LEN.items():            # the server refuses the whole batch over one long field
+            if isinstance(ev.get(k), str):
+                ev[k] = ev[k][:n]
         path = _queue_path()
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with _lock:
@@ -279,8 +287,8 @@ def begin_session() -> None:
                     old = json.load(f)
             except Exception:                            # noqa: BLE001
                 old = {}
-            version = str(old.get("version", ""))[:32]
-            last = str(old.get("last_screen", ""))[:40]
+            version = str(old.get("version", ""))[:20]
+            last = str(old.get("last_screen", ""))[:24]
             detail = "previous run did not exit cleanly"
             try:
                 with open(_trace_path(), encoding="utf-8", errors="replace") as f:
@@ -290,7 +298,7 @@ def begin_session() -> None:
             except OSError:
                 pass
             fp = hashlib.sha1(("unclean-exit" + version + last).encode()).hexdigest()[:16]
-            record("crash", fingerprint=fp, detail=detail[:900], last_screen=last, version=version)
+            record("crash", fingerprint=fp, detail={"note": detail[:900]}, last_screen=last, version=version)
             os.remove(marker)
         _write_marker()
         try:
