@@ -910,12 +910,22 @@ class TheReviewPageComesBeforeTheBuild(unittest.TestCase):
         self.assertEqual(parts[0]["size_mm"], (120.0, 80.0, 16.0))
         self.assertEqual(parts[0]["holes"][0], {"dia_mm": 10.0, "count": 1})
 
+    def test_a_plan_with_no_change_does_not_ask_to_confirm(self):
+        out = tempfile.mkdtemp()
+        page = open(SF.review_html(self.REPORT, {"changes": [], "advice": ["Which holes?"]},
+                                   out, question="make them bigger"), encoding="utf-8").read()
+        self.assertIn("Nothing will be built", page)
+        self.assertNotIn("Build the modified model", page)
+
     def test_the_page_says_nothing_is_built_yet(self):
         out = tempfile.mkdtemp()
         page = open(SF.review_html(self.REPORT, self.PLAN, out,
                                    question="fit 6mm"),
                     encoding="utf-8").read()
         self.assertIn("Nothing is built yet", page)
+        # Names the real button (owner: "asking for confirmation but there is
+        # no button" -- the page is a document; the button is in Prism).
+        self.assertIn("Build the modified model", page)
         self.assertIn("Hole Ø5 → Ø6", page)
         self.assertIn("60.00 x 40.00 x 8.00", page)
         self.assertIn("class='changed'", page)
