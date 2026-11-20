@@ -357,3 +357,31 @@ def _a_platform_call_never_reaches_the_network(monkeypatch):
         return
     monkeypatch.setattr(ui, "PlatformWorker", _NoServer)
     yield
+
+
+# Each test file's process ends right after pytest has written its results,
+# without Qt's own shutdown. Linux CI, 19-20 Nov 2026: test_leads_filter_panel
+# passed every test and then hung in native code at exit (watchdog dump: one
+# thread, "<no Python frame>"), costing 14 minutes per try and failing the
+# job when the retry hung too. The exit code is kept, so nothing is hidden;
+# only the native teardown after the results is skipped. The app's own exit
+# is unchanged.
+_EXIT_STATUS = None
+
+
+def pytest_sessionfinish(session, exitstatus):
+    global _EXIT_STATUS
+    _EXIT_STATUS = int(exitstatus)
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_unconfigure(config):
+    if _EXIT_STATUS is None or os.environ.get("PRISM_TEST_NORMAL_EXIT"):
+        return
+    import sys as _sys
+    for stream in (_sys.stdout, _sys.stderr):
+        try:
+            stream.flush()
+        except Exception:                               # noqa: BLE001
+            pass
+    os._exit(_EXIT_STATUS)

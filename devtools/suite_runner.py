@@ -154,7 +154,7 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("files", nargs="*")
     ap.add_argument("--timeout", type=int, default=0, help="per-test timeout (pytest-timeout)")
-    ap.add_argument("--file-timeout", type=int, default=900)   # slowest healthy file: 363 s
+    ap.add_argument("--file-timeout", type=int, default=480)   # slowest healthy file: 363 s (watchdog at 420 s)
     args = ap.parse_args(argv)
 
     files = [Path(f) for f in args.files] or sorted((ROOT / "tests").glob("test_*.py"))
