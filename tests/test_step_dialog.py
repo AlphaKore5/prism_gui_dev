@@ -1288,6 +1288,14 @@ class AskAndEditAreTwoThingsAndEachSaysWhoAnswered(unittest.TestCase):
         self.assertEqual(dlg.out_tabs.current(), 1)
         self.assertIn("question", dlg.status.text())
 
+    def test_a_polite_request_is_a_request_not_a_question(self):
+        """Owner's real request, 20 Nov 2026."""
+        for text in ("can you change the whole and make them 0.05 bigger",
+                     "Could you enlarge H3 to 14 mm", "please make the holes 1 mm bigger"):
+            self.assertFalse(SD._looks_like_question(text), text)
+        for text in ("what material is this?", "Can this be moulded in PP?", "which resin"):
+            self.assertTrue(SD._looks_like_question(text), text)
+
     def test_a_change_prism_cannot_make_says_so_and_shows_why(self):
         """19 Nov 2026, real window: "Change the single 13 mm hole on the top
         part to 12 mm." got "Nothing was changed — that reads as a question".

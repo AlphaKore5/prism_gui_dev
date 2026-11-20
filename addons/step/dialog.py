@@ -132,9 +132,19 @@ _QUESTION_START = re.compile(
     r"should|would|will)\b", re.I)
 
 
+# "can you change ...", "could you make ...", "please enlarge ..." are polite
+# INSTRUCTIONS, not questions (owner, 20 Nov 2026: "can you change the whole
+# and make them 0.05 bigger" was told it "reads as a question").
+_POLITE_REQUEST = re.compile(
+    r"^\s*(?:(?:can|could|would|will)\s+(?:you|u)\b|please\b|pls\b|kindly\b)", re.I)
+
+
 def _looks_like_question(text: str) -> bool:
-    """"what material is this?" vs "change the hole to 12 mm"."""
+    """"what material is this?" vs "change the hole to 12 mm" / "can you
+    make the holes bigger"."""
     text = (text or "").strip()
+    if _POLITE_REQUEST.match(text):
+        return False
     return text.endswith("?") or bool(_QUESTION_START.match(text))
 
 
@@ -2436,11 +2446,12 @@ class StepDialog(PrismDialog):
                 # It used to say "that reads as a question" (19 Nov 2026).
                 self._show_tab(2)
                 self._stay_on_plan = True        # _finish would go back to Chat
-                self._notes.append(f"{report['file']}: no change Prism can make — "
+                self._notes.append(f"{report['file']}: nothing changed yet — "
                                    "the Plan tab says why")
                 note = i18n.t(
-                    "Prism can't make this change itself — the Plan tab says "
-                    "why and what to do instead.")
+                    "Nothing was changed yet — the Plan tab says why. Often "
+                    "Prism needs one detail (which holes, the exact size, or "
+                    "a scale); say it and press Make a change again.")
                 self.status.setText(note)
                 self.canvas.toast(note, [], seconds=12)
                 if popup is None:
