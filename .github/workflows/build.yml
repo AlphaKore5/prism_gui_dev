@@ -47,8 +47,10 @@ jobs:
         include:
           - os: ubuntu-22.04
             label: Linux
+            pins: linux-x64
           - os: windows-latest
             label: Windows
+            pins: windows-x64
           # MACOS DEFERRED for the dev 1.8.1 release (owner, 2026-11-18): GitHub
           # refuses the runner ("The configuration 'macos-14-arm64-us-default' is
           # not supported"), the job is cancelled at once, and `release` needs the
@@ -93,7 +95,9 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          # Exact versions (constraints/README.md): a library changes when we
+          # change the file, not when PyPI publishes. A missing file fails the job.
+          pip install -r requirements.txt -c constraints/${{ matrix.pins }}.txt
           pip install pytest pytest-timeout
 
       # No PRISM_LICENSE_OFFLINE_DEV here, and never add it. It is read inside
@@ -125,8 +129,10 @@ jobs:
         include:
           - os: ubuntu-22.04     # oldest supported glibc — newer ones can't run
             label: Linux (x64)   # binaries built against a newer libc
+            pins: linux-x64
           - os: windows-latest
             label: Windows (x64)
+            pins: windows-x64
           # MACOS DEFERRED (see the same note in the `tests` matrix above).
           # - os: macos-14         # Apple Silicon
           #   label: macOS (Apple Silicon)
@@ -182,8 +188,8 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install -r packaging/requirements-build.txt
+          pip install -r requirements.txt -c constraints/${{ matrix.pins }}.txt
+          pip install -r packaging/requirements-build.txt -c constraints/${{ matrix.pins }}.txt
 
       # Prism Studio's browser. `pip install playwright` (above) only gets the
       # Python driver; the Chromium binary is a separate download this step
