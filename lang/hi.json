@@ -6464,7 +6464,6 @@
   "Prism can read .txt, .md, .csv, .docx and .pdf files here. For anything else, paste the text.": "Prism यहाँ .txt, .md, .csv, .docx और .pdf फ़ाइलें पढ़ सकता है। बाकी के लिए टेक्स्ट पेस्ट करें।",
   "Prism can read the labels and symbols on it. It asks before anything is sent to AI.": "Prism इस पर लिखे लेबल और चिह्न पढ़ सकता है। AI को कुछ भेजने से पहले यह पूछता है।",
   "Prism can't find the original mail for this inquiry — it may have been entered by hand, or be older than what Prism has kept.": "Prism को इस पूछताछ का मूल मेल नहीं मिल रहा — हो सकता है यह हाथ से डाली गई हो, या Prism द्वारा रखे गए मेल से पुरानी हो।",
-  "Prism can't make this change itself — the Plan tab says why and what to do instead.": "Prism यह बदलाव खुद नहीं कर सकता — Plan टैब बताता है कि क्यों और उसकी जगह क्या करें।",
   "Prism can't resolve this by itself — a person must check it.": "Prism इसे खुद हल नहीं कर सकता — किसी व्यक्ति को इसकी जाँच करनी होगी।",
   "Prism can't show this file type inline yet.": "Prism इस फ़ाइल प्रकार को अभी अंदर नहीं दिखा सकता।",
   "Prism cannot play this kind of file inside its own window yet.": "Prism इस तरह की फ़ाइल अपनी विंडो के अंदर अभी नहीं चला सकता।",
@@ -6479,5 +6478,5 @@
   "Prism could not write that file. Try another folder or another format.": "Prism वह फ़ाइल नहीं लिख सका। कोई दूसरा फ़ोल्डर या दूसरा फ़ॉर्मैट आज़माएँ।",
   "Prism couldn't open the login tabs.\n\n{error}\n\nThe details are in Prism's log.": "Prism लॉगिन टैब नहीं खोल सका।\n\n{error}\n\nविवरण Prism के log में हैं।"
  },
- "count": 6476
+ "count": 6475
 }
