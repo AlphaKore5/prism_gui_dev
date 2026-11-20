@@ -10,3 +10,13 @@
 # PDF; do not paper over it — it is the customer-facing quotation.
 test_inquiry_files.py::TheQuotationPDF::test_a_new_pdf_replaces_an_old_one
 test_inquiry_files.py::TheQuotationPDF::test_it_reads_as_a_quotation_on_the_companys_name
+
+# Windows runner only, since at least 1.8.6 (measured 20 Nov 2026: 9-16 of 30
+# runs): the process dies with an access violation while a task's worker is
+# created after an earlier task (native frame
+# pyside6!PySide::SignalManager::retrieveMetaObject, from a procdump crash
+# dump). Not fixed by: cycle collector on the GUI thread, workers on real
+# threads, patching _Worker.start once per file. Not seen in the real app; not
+# ruled out either. Owner chose to release dev 1.8.9 with this recorded rather
+# than hold it (20 Nov 2026). RELEASE_ISSUES.md ISS-026. Remove when fixed.
+crash:test_chat_thread.py
