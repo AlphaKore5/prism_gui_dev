@@ -26,6 +26,10 @@ Tests: **1966 passing** (6 skipped, 8 Sep 2026 after Round 16 landed on main —
 - An empty AI answer is asked once more of Sonnet (a reel's design step came back empty twice); the studio's error names the real reason instead of "No JSON found".
 - Build self-check now requires pdfplumber, pypdfium2, rapidocr (+ its model files), faster-whisper and the video player; CI's Linux build installs libpulse0 for it.
 - Python's cycle collector runs on the GUI thread only (gui_gc.py).
+- BOQ: a run with no typed request is named after the job ("HVAC drawing") and shows in the BOQ screen's Recent runs (it vanished).
+- STEP: "can you / could you / please …" is a request, not a question; a plan with no change says Prism needs a detail; the review page names the "Build the modified model" button.
+- STEP's first open 1.9 s → 0.25 s (its 3D library loads in the background after start).
+- Tests: each file's process exits right after its results (a Linux exit hang failed the job twice); per-file limit 8 min.
 
 **Known, not fixed:** on the Windows test runner `tests/test_chat_thread.py` still crashes in about half of runs (passes on its retry). Native frame: `pyside6!SignalManager::retrieveMetaObject` while a task worker is created. Not seen in the real app; not ruled out either. See RELEASE_ISSUES.md ISS-026.
 
