@@ -538,6 +538,8 @@ def main():
     # next start on; file listing only, no network.
     deps.ensure_environment()
     cfg = CB.config.load()
+    import pulse
+    pulse.configure(cfg)        # the customer's on/off choice (Settings)
     i18n.start(cfg, app)
 
     # The signed-in member's role decides the accent colour, so a glance at
@@ -577,6 +579,7 @@ def main():
     from main_window import MainWindow
     win = MainWindow()
     win.show()
+    pulse.started()             # milliseconds from launch to a usable window
 
     # The window is up — this version is good enough to trust. Clear the
     # pending-update marker and drop the one-launch-kept backup, so the NEXT

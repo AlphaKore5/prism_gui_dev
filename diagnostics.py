@@ -109,6 +109,15 @@ def write(level: str, message: str) -> None:
         pass
 
 
+def _pulse(kind, value, tb) -> None:
+    """Tell the server (scrubbed, queued, never blocking). See pulse.py."""
+    try:
+        import pulse
+        pulse.error(kind, value, tb)
+    except Exception:                               # noqa: BLE001
+        pass
+
+
 def install() -> None:
     """Mirror the engine's messages into the log, and catch what crashes.
 
@@ -143,6 +152,7 @@ def install() -> None:
 
     def hook(kind, value, tb):
         write("CRASH", "".join(traceback.format_exception(kind, value, tb)))
+        _pulse(kind, value, tb)
         previous_hook(kind, value, tb)
 
     sys.excepthook = hook
@@ -153,6 +163,7 @@ def install() -> None:
         def thread_hook(args):
             write("CRASH", "".join(traceback.format_exception(
                 args.exc_type, args.exc_value, args.exc_traceback)))
+            _pulse(args.exc_type, args.exc_value, args.exc_traceback)
 
         threading.excepthook = thread_hook
     except Exception:                               # noqa: BLE001

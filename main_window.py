@@ -13,6 +13,7 @@ want to be on screen at once, and the plan is one click back."""
 from __future__ import annotations
 import json
 import os
+import time
 from PySide6.QtCore import Qt, QTimer, QUrl, Signal, QSize, QRectF, QPointF
 from PySide6.QtGui import QGuiApplication, QFont, QCursor, QDesktopServices, QPainter, QPixmap, QColor, QImage, QLinearGradient, QRadialGradient, QBrush
 from PySide6.QtWidgets import (
@@ -36,6 +37,7 @@ import identity
 import deps
 import licensing
 import ai_server
+import pulse
 import paths
 import theme
 import updater
@@ -792,6 +794,14 @@ class MainWindow(QMainWindow):
         return wrap
 
     def _show_screen(self, name: str = "workbench"):
+        """Switch screens, and tell Pulse when it took two seconds or more."""
+        t0 = time.perf_counter()
+        try:
+            self._show_screen_now(name)
+        finally:
+            pulse.slow(f"open {name}", (time.perf_counter() - t0) * 1000, screen=name)
+
+    def _show_screen_now(self, name: str = "workbench"):
         """Switch the body stack and keep the rail's highlight in step."""
         if name in _SWITCHED_OFF:
             # Nothing draws a way here; this is for anything that still asks
@@ -3672,6 +3682,7 @@ class MainWindow(QMainWindow):
         awake.release()
         stopped = bool(getattr(self, "_active_run", None)
                        and self._active_run.stopping())
+        pulse.run("cancelled" if stopped else "ok", addon="task")
         self._active_run = None
         self.agents_panel.set_run_enabled(True)
         self._sync_start_bar()
@@ -4590,6 +4601,7 @@ class MainWindow(QMainWindow):
 
     def _on_run_failed(self, error: str):
         awake.release()
+        pulse.run("failed", addon="task", title=str(error))
         self._active_run = None
         self.agents_panel.set_run_enabled(True)
         self._sync_start_bar()
