@@ -144,6 +144,41 @@ def spec_excludes(flavour: str | None = None) -> list[str]:
             + package_excludes(flavour))
 
 
+# Who each build says it is (gate G2). DATA ONLY: nothing reads this yet (not
+# app_meta, build.py, updater.py or CI). `name` is the install folder and the
+# archive stem (no spaces, like today's "Prism"), `display` what the person
+# sees, `bundle_id` the macOS bundle / Linux .desktop id, `channel` the suffix
+# on the update channel name. "complete" is today's product and MUST stay
+# byte-for-byte what app_meta.py and updater.platform_tag() give (a test pins
+# it): a client that sends no channel (1.6.10, 1.6.11) keeps being served the
+# complete build and can never be handed a flavour's manifest. Never reuse a
+# retired name.
+IDENTITY: dict[str, dict[str, str]] = {
+    "complete": {"name": "Prism", "display": "Prism",
+                 "bundle_id": "in.alphakore.prism", "channel": ""},
+    "studio": {"name": "Prism-Studio", "display": "Prism Studio",
+               "bundle_id": "in.alphakore.prism.studio", "channel": "studio"},
+    "sales": {"name": "Prism-Sales", "display": "Prism Sales",
+              "bundle_id": "in.alphakore.prism.sales", "channel": "sales"},
+    "engineering": {"name": "Prism-Engineering", "display": "Prism Engineering",
+                    "bundle_id": "in.alphakore.prism.engineering",
+                    "channel": "engineering"},
+}
+
+
+def identity(flavour: str | None = None) -> dict[str, str]:
+    return IDENTITY[flavour or FLAVOUR]
+
+
+def update_channel(platform_tag: str, flavour: str | None = None) -> str:
+    """The update channel name for this flavour given the base `<os>-<arch>`
+    tag (`updater.platform_tag()`): the tag itself for "complete", else the
+    tag plus "-<channel>". Manifest `manifest.<this>.signed` and the asset tag
+    `v<ver>-assets-<this>` follow from it."""
+    suffix = identity(flavour)["channel"]
+    return f"{platform_tag}-{suffix}" if suffix else platform_tag
+
+
 # main.py's frozen self-test (PRISM_SELFTEST) proves each tool a build ships.
 # A check that belongs to an add-on runs only in a build that contains that
 # add-on (ANY of the keys listed). A check not listed here runs in every
