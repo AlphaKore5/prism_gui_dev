@@ -20,6 +20,7 @@ SPEC_DIR = os.path.dirname(os.path.abspath(SPEC))
 GUI_DIR = os.path.dirname(SPEC_DIR)
 sys.path.insert(0, GUI_DIR)
 import app_meta   # noqa: E402
+import flavour as _flavour   # noqa: E402  (also decides which packages ship)
 
 IS_WIN = sys.platform.startswith("win")
 IS_MAC = sys.platform == "darwin"
@@ -288,13 +289,16 @@ except Exception:                                       # not installed: source-
 # machine with an install guide — which is exactly what happened to the first
 # Windows user. There is a runtime download as a fallback (core/ffmpeg.py),
 # but a customer should never meet it.
-try:
-    import imageio_ffmpeg  # noqa: F401
-    datas += collect_data_files("imageio_ffmpeg")
-    print("[prism] FFmpeg bundled")
-except ImportError:
-    print("[prism] WARNING: imageio-ffmpeg is not installed, so this build "
-          "ships no FFmpeg. Reel will have to download it on first use.")
+if not _flavour.bundles("imageio_ffmpeg"):
+    print("[prism] FFmpeg not bundled: no Reel or Motion in this flavour")
+else:
+    try:
+        import imageio_ffmpeg  # noqa: F401
+        datas += collect_data_files("imageio_ffmpeg")
+        print("[prism] FFmpeg bundled")
+    except ImportError:
+        print("[prism] WARNING: imageio-ffmpeg is not installed, so this build "
+              "ships no FFmpeg. Reel will have to download it on first use.")
 
 def _engine_modules() -> list[str]:
     """Every core.* module, read off disk rather than listed by hand.
@@ -426,7 +430,10 @@ _REQUIRED = {
 if sys.platform == "darwin":
     _REQUIRED.update({"Vision": "reading text in pictures on a Mac",
                       "Quartz": "reading text in pictures on a Mac"})
-_missing = [f"{m} ({why})" for m, why in _REQUIRED.items() if _ilu.find_spec(m) is None]
+# Only what THIS flavour ships (flavour.PACKAGE_NEEDS): a Sales runner need not
+# have cadquery or playwright installed.
+_missing = [f"{m} ({why})" for m, why in _REQUIRED.items()
+            if _flavour.bundles(m) and _ilu.find_spec(m) is None]
 if _missing:
     raise SystemExit("Refusing to build: these packages are not installed on "
                      "this runner, so the app would ship with features that "
@@ -459,16 +466,19 @@ except ImportError:
 # developer's machine and failed on a customer's with a DIFFERENT error
 # than "no module named cadquery" (that one's just this requirements.txt
 # missing the line; this is the next failure after that's fixed).
-try:
-    import cadquery    # noqa: F401
-    import OCP          # noqa: F401
-    hiddenimports += collect_submodules("OCP")
-    hiddenimports += collect_submodules("cadquery")
-    datas += collect_data_files("OCP")
-    print("[prism] STEP's cadquery/OCP bundled")
-except ImportError:
-    print("[prism] cadquery not installed - STEP will be unavailable in "
-          "this build")
+if not _flavour.bundles("cadquery"):
+    print("[prism] cadquery/OCP not bundled: no STEP in this flavour")
+else:
+    try:
+        import cadquery    # noqa: F401
+        import OCP          # noqa: F401
+        hiddenimports += collect_submodules("OCP")
+        hiddenimports += collect_submodules("cadquery")
+        datas += collect_data_files("OCP")
+        print("[prism] STEP's cadquery/OCP bundled")
+    except ImportError:
+        print("[prism] cadquery not installed - STEP will be unavailable in "
+              "this build")
 
 # Prism Studio's browser. playwright._impl._driver.compute_driver_executable()
 # locates both the Node driver AND the Chromium binary as a sibling of
@@ -494,15 +504,19 @@ except ImportError:
 # filtering, so anything trimmed from `datas` here gets silently re-added by
 # it — the real filter is the one applied to `a.datas` after Analysis(), well
 # below. See that comment for what gets trimmed and why.
-try:
-    import playwright  # noqa: F401
-    hiddenimports += collect_submodules("playwright")
-    datas += collect_data_files("playwright")
-    print("[prism] Prism Studio's browser engine bundled")
-except ImportError:
-    print("[prism] WARNING: playwright is not installed, so this build ships "
-          "no browser engine — Prism Studio will fall back to Prism Reel on "
-          "every machine that runs it.")
+if not _flavour.bundles("playwright"):
+    print("[prism] browser engine not bundled: no Reel, Motion or BOQ in "
+          "this flavour")
+else:
+    try:
+        import playwright  # noqa: F401
+        hiddenimports += collect_submodules("playwright")
+        datas += collect_data_files("playwright")
+        print("[prism] Prism Studio's browser engine bundled")
+    except ImportError:
+        print("[prism] WARNING: playwright is not installed, so this build ships "
+              "no browser engine — Prism Studio will fall back to Prism Reel on "
+              "every machine that runs it.")
 
 hiddenimports += hiddenimports_cv2
 if sys.platform == "darwin":

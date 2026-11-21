@@ -29,11 +29,9 @@ import flavour  # noqa: E402
 BUNDLE = os.environ.get("PRISM_BUNDLE_DIR", "")
 FLAV = os.environ.get("PRISM_BUNDLE_FLAVOUR", "")
 
-# Heavy dependencies only the named add-ons need (to be confirmed per brief
-# 2/3 when G2 lands; the check is on top-level package folder names).
-HEAVY = {"boq": ("cadquery", "ezdxf", "OCP"), "step": ("cadquery", "OCP"),
-         "gerber": ("gerbonara",), "leads": ("undetected_chromedriver",),
-         "whatsapp": ("selenium",)}
+# Heavy dependencies a flavour must not ship: flavour.PACKAGE_NEEDS decides
+# (owner decisions 2026-11-21: ezdxf, matplotlib, pypdfium2, numpy, PIL, OCR,
+# Drive and voice stay in EVERY build, so they are not here).
 
 _WHY = ("no built bundle: set PRISM_BUNDLE_DIR (unzipped onedir/.app) and "
         "PRISM_BUNDLE_FLAVOUR to run the G3 bundle-content test")
@@ -74,18 +72,11 @@ class TheBundleHoldsOnlyItsFlavour(unittest.TestCase):
                                  "%s mentions %s in %s" % (FLAV, needle[1], path))
 
     def test_no_heavy_dependency_of_an_absent_addon(self):
-        keep = set(flavour.addon_keys(FLAV))
-        needed = {d for k in keep for d in HEAVY.get(k, ())}
         files = _files(BUNDLE)
-        for key, deps in HEAVY.items():
-            if key in keep:
-                continue
-            for dep in deps:
-                if dep in needed:
-                    continue
-                self.assertFalse(
-                    [f for f in files if ("/%s/" % dep) in ("/" + f)],
-                    "%s bundle ships %s (only %s needs it)" % (FLAV, dep, key))
+        for dep in flavour.package_excludes(FLAV):
+            self.assertFalse(
+                [f for f in files if ("/%s/" % dep) in ("/" + f)],
+                "%s bundle ships %s (no add-on in it needs it)" % (FLAV, dep))
 
     def test_other_flavour_selection_modules_absent(self):
         files = " ".join(_files(BUNDLE))
