@@ -1535,7 +1535,8 @@ class SupportPanel(QWidget):
             elif any(w in context_text for w in ("email", "inquiry", "smtp")):
                 action = "email"
 
-        if action and registry.is_off(action.lower()):
+        if action and (registry.is_off(action.lower())
+                       or registry.is_absent(action.lower())):
             action = ""     # a switched-off add-on gets no "take me there"
         if action:
             clean_act = action.lower().replace("settings:", "")

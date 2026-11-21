@@ -38,7 +38,7 @@ from addons.manifest import Addon
 # plain `from addons.x.addon import MANIFEST` lines. The if-chain below is
 # static on purpose: the analyser sees every branch, and packaging/prism.spec
 # EXCLUDES the other flavours' add-on packages so they are not bundled.
-from flavour import FLAVOUR, addon_keys                      # noqa: E402
+from flavour import ADDONS_BY_FLAVOUR, FLAVOUR, addon_keys                      # noqa: E402
 
 if FLAVOUR == "complete":
     from addons.flavours.complete import MANIFESTS as _MANIFESTS    # noqa: E402
@@ -82,6 +82,13 @@ def is_off(key: str) -> bool:
     Anything else, including a key that is not an add-on at all, is False."""
     a = _BY_KEY.get(key)
     return bool(a and a.is_off())
+
+
+def is_absent(key: str) -> bool:
+    """True when `key` is an add-on this build's flavour does not contain.
+    Always False for "complete". Help and Lumi use it, with is_off, so they
+    never describe a tool the build has not got."""
+    return key in ADDONS_BY_FLAVOUR["complete"] and key not in _BY_KEY
 
 
 def keys() -> tuple[str, ...]:

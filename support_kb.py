@@ -2023,7 +2023,8 @@ _ALL = (_START, _RUNNING, _SIGNIN, _LICENCE, _FILES, _ADDONS, _VOICE, _TEAM,
 # `related` pointers to them, so Help, search and Lumi's context never offer
 # a door the app will not open. They come back when the add-on is LIVE again.
 _OFF = {q.qid for t in _ALL for q in t.questions
-        if registry.is_off(q.answer.action)}
+        if registry.is_off(q.answer.action)
+        or registry.is_absent(q.answer.action)}
 
 
 def _switched_on(t: Topic) -> Topic:

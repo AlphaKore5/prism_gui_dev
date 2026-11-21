@@ -185,7 +185,8 @@ class GuideDialog(PrismDialog):
 
         state = licensing.state()
         for topic in TOPICS:
-            if topic.addon and registry.is_off(topic.addon):
+            if topic.addon and (registry.is_off(topic.addon)
+                                or registry.is_absent(topic.addon)):
                 continue
             unlocked = not topic.feature or state.has(topic.feature)
             self.body.addWidget(

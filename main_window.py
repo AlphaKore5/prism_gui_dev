@@ -804,7 +804,7 @@ class MainWindow(QMainWindow):
 
     def _show_screen_now(self, name: str = "workbench"):
         """Switch the body stack and keep the rail's highlight in step."""
-        if name in _SWITCHED_OFF:
+        if name in _SWITCHED_OFF or registry.is_absent(name):
             # Nothing draws a way here; this is for anything that still asks
             # (an old Lumi answer, a stale command). Stay put and say why.
             self.statusBar().showMessage(
