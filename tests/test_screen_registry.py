@@ -33,6 +33,7 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+import flavour                                          # noqa: E402
 import main_window                                      # noqa: E402
 import plans                                            # noqa: E402
 from addons import manifest, registry                   # noqa: E402
@@ -128,6 +129,10 @@ class TheStackIsInTheDeclaredOrder(GateTest):
         "whatsapp": "whatsapp_panel",
     }
 
+    # screens whose panel comes from an add-on (the screen name is the key)
+    ADDON_SCREENS = ("inquiry", "boq", "email", "gerber", "bom", "step",
+                     "leads", "whatsapp")
+
     def test_the_page_at_each_index_is_the_panel_the_table_names(self):
         self.grant(EVERYTHING)
         win = self._window()
@@ -138,6 +143,13 @@ class TheStackIsInTheDeclaredOrder(GateTest):
         for name, attribute in self.PANELS.items():
             with self.subTest(screen=name):
                 index = main_window.SCREEN_INDEX[name]
+                if name in self.ADDON_SCREENS and name not in flavour.addon_keys():
+                    # Gate G1: this build does not contain the add-on. G0 keeps
+                    # its screen number (an empty placeholder page) so every
+                    # later index is unchanged; the panel attribute is None.
+                    self.assertIsNone(getattr(win, attribute, None))
+                    self.assertIsNotNone(win.screens.widget(index))
+                    continue
                 self.assertIs(
                     win.screens.widget(index), getattr(win, attribute),
                     "index %d should hold %s (screen %r) but holds something "

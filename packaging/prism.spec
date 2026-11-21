@@ -531,7 +531,14 @@ except ImportError:
 
 # Qt is modular and PyInstaller takes the lot by default; these are the big
 # ones Prism never touches. Dropping them roughly halves the download.
-excludes = [
+# Add-ons that belong to another flavour are not bundled (G1; the engine
+# modules and heavy dependencies they alone use are G2). For the "complete"
+# flavour flavour.spec_excludes() is EMPTY, so this list stays exactly what it
+# was before flavours existed (tests/test_flavour.py pins it).
+import flavour as _flavour
+_other_addons = _flavour.spec_excludes()
+
+excludes = _other_addons + [
     "PySide6.QtQml", "PySide6.QtQuick", "PySide6.QtQuick3D", "PySide6.Qt3DCore",
     "PySide6.QtWebEngineCore", "PySide6.QtWebEngineWidgets", "PySide6.QtWebEngine",
     # QtMultimedia / QtMultimediaWidgets are NOT excluded any more (owner,

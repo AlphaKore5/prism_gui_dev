@@ -30,6 +30,7 @@ from unittest import mock
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+import flavour                                          # noqa: E402
 import plans                                            # noqa: E402
 import widgets.sidebar as sidebar                       # noqa: E402
 from test_gates import GateTest                         # noqa: E402
@@ -63,6 +64,11 @@ ADDON_FEATURES = {
     # no other add-on claims that key.
     "whatsapp": "marketing",
 }
+# Gate G1: a flavour build contains only some add-ons, and only those have a
+# gate to test. The table above stays the complete truth (flavour.py pins
+# which add-ons each flavour has, tests/test_flavour.py checks it).
+ADDON_FEATURES = {k: f for k, f in ADDON_FEATURES.items()
+                  if k in flavour.addon_keys()}
 
 EVERYTHING = tuple(plans.FEATURES)
 

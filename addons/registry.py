@@ -33,28 +33,41 @@ from addons import manifest
 from addons.manifest import Addon
 
 # ── the registry ─────────────────────────────────────────────────────────
-# Static, explicit, one line each. Never importlib. See the docstring.
-from addons.bom.addon import MANIFEST as _bom              # noqa: E402
-from addons.boq.addon import MANIFEST as _boq              # noqa: E402
-from addons.email.addon import MANIFEST as _email          # noqa: E402
-from addons.gerber.addon import MANIFEST as _gerber        # noqa: E402
-from addons.inquiry.addon import MANIFEST as _inquiry      # noqa: E402
-from addons.leads.addon import MANIFEST as _leads          # noqa: E402
-from addons.motion.addon import MANIFEST as _motion        # noqa: E402
-from addons.reel.addon import MANIFEST as _reel            # noqa: E402
-from addons.step.addon import MANIFEST as _step            # noqa: E402
-from addons.whatsapp.addon import MANIFEST as _whatsapp    # noqa: E402
+# Static, explicit, never importlib. Which add-ons this build contains is
+# decided by flavour.FLAVOUR (baked at build time); each flavour module has
+# plain `from addons.x.addon import MANIFEST` lines. The if-chain below is
+# static on purpose: the analyser sees every branch, and packaging/prism.spec
+# EXCLUDES the other flavours' add-on packages so they are not bundled.
+from flavour import FLAVOUR, addon_keys                      # noqa: E402
+
+if FLAVOUR == "complete":
+    from addons.flavours.complete import MANIFESTS as _MANIFESTS    # noqa: E402
+elif FLAVOUR == "studio":
+    from addons.flavours.studio import MANIFESTS as _MANIFESTS      # noqa: E402
+elif FLAVOUR == "sales":
+    from addons.flavours.sales import MANIFESTS as _MANIFESTS       # noqa: E402
+elif FLAVOUR == "engineering":
+    from addons.flavours.engineering import MANIFESTS as _MANIFESTS # noqa: E402
+else:
+    raise RuntimeError("unknown build flavour %r" % (FLAVOUR,))
 
 REGISTRY: tuple[Addon, ...] = tuple(sorted(
-    (_inquiry, _boq, _gerber, _step, _bom, _email, _reel, _motion, _leads,
-     _whatsapp),
-    key=lambda a: (a.order, a.key)))
+    _MANIFESTS, key=lambda a: (a.order, a.key)))
+
+# A flavour module and flavour.ADDONS_BY_FLAVOUR must name the same add-ons.
+if {a.key for a in REGISTRY} != set(addon_keys()):
+    raise RuntimeError(
+        "flavour %r: addons/flavours imports %s but flavour.py lists %s"
+        % (FLAVOUR, sorted(a.key for a in REGISTRY), sorted(addon_keys())))
 
 # What the selftest asserts it can see. A count rather than a list, so that
 # adding an add-on does not mean editing main.py too -- but a count all the
 # same, because "the shelf is empty" and "the shelf is fine" must not look
 # alike to a smoke test.
-EXPECTED = len(REGISTRY)
+# Counted from the flavour table, not from REGISTRY itself: len(REGISTRY) ==
+# len(REGISTRY) can never fail, so the selftest would not notice a shelf that
+# came up short.
+EXPECTED = len(addon_keys())
 
 _BY_KEY = {a.key: a for a in REGISTRY}
 
@@ -148,11 +161,17 @@ def addon_modules() -> tuple[str, ...]:
     """
     here = os.path.dirname(os.path.abspath(__file__))
     root = os.path.dirname(here)
+    from flavour import FLAVOURS, excluded_addon_keys
+    skip_dirs = set(excluded_addon_keys())
+    skip_files = {f + ".py" for f in FLAVOURS if f != FLAVOUR}
     found = []
     for folder, dirs, files in os.walk(here):
-        dirs[:] = [d for d in dirs if d != "__pycache__"]
+        dirs[:] = [d for d in dirs if d != "__pycache__"
+                   and not (folder == here and d in skip_dirs)]
         for name in files:
             if not name.endswith(".py"):
+                continue
+            if os.path.basename(folder) == "flavours" and name in skip_files:
                 continue
             rel = os.path.relpath(os.path.join(folder, name), root)
             dotted = rel[:-3].replace(os.sep, ".")

@@ -27,6 +27,7 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+import flavour                                          # noqa: E402
 import plans                                            # noqa: E402
 from addons import manifest, names, registry            # noqa: E402
 
@@ -37,11 +38,17 @@ ADDONS_DIR = os.path.join(ROOT, "addons")
 # interpreter. Everything here must be importable with no Qt, no engine and
 # no display.
 STDLIB_ONLY = ["addons/__init__.py", "addons/manifest.py", "addons/names.py",
-               "addons/registry.py"]
+               "addons/registry.py", "flavour.py"]
+
+# addons/flavours/ is not an add-on: it is the registry's own selection layer
+# (gate G1), one module per build flavour holding plain static imports of that
+# flavour's manifests. It is part of the manifest layer, so it is held to the
+# same stdlib-only rule, and to a narrower import rule of its own below.
+FLAVOUR_MODULES = "flavours"
 
 # Modules the manifest layer is allowed to import besides the standard
-# library: itself.
-OWN = {"addons"}
+# library: itself, and flavour.py (itself stdlib-only, checked above).
+OWN = {"addons", "flavour"}
 
 
 def _imports(path: str) -> list[tuple[str, int]]:
@@ -61,7 +68,7 @@ def _addon_packages() -> list[str]:
     return sorted(
         name for name in os.listdir(ADDONS_DIR)
         if os.path.isdir(os.path.join(ADDONS_DIR, name))
-        and name != "__pycache__")
+        and name not in ("__pycache__", FLAVOUR_MODULES))
 
 
 class TheManifestLayerIsStdlibOnly(unittest.TestCase):
@@ -74,7 +81,10 @@ class TheManifestLayerIsStdlibOnly(unittest.TestCase):
         stdlib = set(getattr(sys, "stdlib_module_names", ()))
         offenders = []
         for rel in STDLIB_ONLY + [
-                "addons/%s/addon.py" % p for p in _addon_packages()]:
+                "addons/%s/addon.py" % p for p in _addon_packages()] + [
+                "addons/%s/%s" % (FLAVOUR_MODULES, f) for f in
+                sorted(os.listdir(os.path.join(ADDONS_DIR, FLAVOUR_MODULES)))
+                if f.endswith(".py")]:
             path = os.path.join(ROOT, rel)
             if not os.path.isfile(path):
                 continue
@@ -138,6 +148,26 @@ class NoAddOnKnowsAnotherAddOn(unittest.TestCase):
               "route through the host. An import couples you to the other "
               "add-on's module path, class name, constructor AND to the "
               "customer being entitled to it.")
+
+    def test_a_flavour_module_imports_only_add_on_manifests(self):
+        """The flavour modules may name any add-on, but only its manifest
+        (addons.<key>.addon). Reaching for a panel, worker or dialog here
+        would couple the selection layer to an add-on's internals."""
+        folder = os.path.join(ADDONS_DIR, FLAVOUR_MODULES)
+        offenders = []
+        for name in sorted(os.listdir(folder)):
+            if not name.endswith(".py") or name == "__init__.py":
+                continue
+            for mod, lineno in _imports(os.path.join(folder, name)):
+                parts = mod.split(".")
+                if parts[0] == "addons" and not (
+                        len(parts) == 3 and parts[2] == "addon"):
+                    offenders.append("addons/%s/%s:%d  %s"
+                                     % (FLAVOUR_MODULES, name, lineno, mod))
+        self.assertEqual(
+            offenders, [],
+            "A flavour module imported more than an add-on's manifest:\n  "
+            + "\n  ".join(offenders))
 
     def test_every_add_on_package_is_in_the_registry(self):
         """Unregistered code ships, is unreachable and is UNGATED, which is
@@ -353,10 +383,19 @@ class TheRegistryStillMatchesTheLiveTables(unittest.TestCase):
     # be removed from the UI for now, so addons/bom/addon.py is status=OFF.
     # Flipping it back to LIVE puts "bom" back at the end of both lists
     # (tests/test_ui_port_bom_hidden.py proves that).
-    GOLDEN_RAIL = ["inquiry", "boq", "gerber", "step", "email", "leads",
-                   "whatsapp"]
-    GOLDEN_HOME = ["inquiry", "boq", "gerber", "step", "email", "leads",
-                   "whatsapp", "reel", "motion"]
+    #
+    # Flavours (gate G1): the two lists below are the COMPLETE build's shelves,
+    # pinned exactly as before. A flavour build shows the same shelves minus
+    # the add-ons it does not contain, in the same order (every add-on keeps
+    # its manifest `order`), so the per-build lists are derived by filtering.
+    # What each flavour contains is pinned separately and explicitly in
+    # tests/test_flavour.py, so this filter cannot hide a membership change.
+    COMPLETE_RAIL = ["inquiry", "boq", "gerber", "step", "email", "leads",
+                     "whatsapp"]
+    COMPLETE_HOME = ["inquiry", "boq", "gerber", "step", "email", "leads",
+                     "whatsapp", "reel", "motion"]
+    GOLDEN_RAIL = [k for k in COMPLETE_RAIL if k in flavour.addon_keys()]
+    GOLDEN_HOME = [k for k in COMPLETE_HOME if k in flavour.addon_keys()]
 
     def test_the_rail_shelf_is_what_we_decided(self):
         self.assertEqual(
