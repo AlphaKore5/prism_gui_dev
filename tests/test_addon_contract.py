@@ -108,7 +108,9 @@ class TheManifestLayerIsStdlibOnly(unittest.TestCase):
         proc = subprocess.run(
             [sys.executable, "-c",
              "import sys; sys.path.insert(0, '.'); "
-             "import addons.registry as R; print(len(R.REGISTRY))"],
+             "import flavour; flavour.FLAVOUR = %r; "      # the build's flavour
+             "import addons.registry as R; print(len(R.REGISTRY))"
+             % flavour.FLAVOUR],
             cwd=ROOT, capture_output=True, text=True)
         self.assertEqual(
             proc.returncode, 0,
@@ -175,8 +177,11 @@ class NoAddOnKnowsAnotherAddOn(unittest.TestCase):
         registered = set(registry.keys())
         on_disk = {p for p in _addon_packages()
                    if os.path.isfile(os.path.join(ADDONS_DIR, p, "addon.py"))}
+        # A flavour build leaves out add-ons on purpose (the tree still holds
+        # them); what it leaves out must be exactly what flavour.py says, so
+        # an add-on in no flavour's registry line still fails here.
         self.assertEqual(
-            on_disk - registered, set(),
+            on_disk - registered, set(flavour.excluded_addon_keys()),
             "these add-ons exist on disk but are in no registry line, so "
             "they ship without appearing and without a licence check: "
             + ", ".join(sorted(on_disk - registered)))
@@ -258,6 +263,18 @@ class TheManifestsAgreeWithTheRestOfTheApp(unittest.TestCase):
             for want in a.wants:
                 with self.subTest(addon=a.key, intent=want):
                     owner, handler = registry.offering(want)
+                    if owner is None and flavour.FLAVOUR != "complete":
+                        # A flavour build may lack the add-on that offers it
+                        # (Sales has no BOQ, so Inquiry's "measure drawing"
+                        # is unoffered and its button is not drawn: by
+                        # design). It must still be offered in the complete
+                        # build, by an add-on this build leaves out.
+                        from addons.flavours.complete import MANIFESTS
+                        owner = next(
+                            (m for m in MANIFESTS if not m.is_off()
+                             and m.key in flavour.excluded_addon_keys()
+                             and any(o.intent == want for o in m.offers)),
+                            None)
                     self.assertIsNotNone(
                         owner, "%s wants %r and nothing offers it"
                                % (a.key, want))

@@ -80,6 +80,17 @@ import pytest
 import gc as _gc
 _gc.disable()
 
+# Run the suite as one build flavour: PRISM_TEST_FLAVOUR=sales python -m pytest
+# ... It does what a flavour build does (sets flavour.FLAVOUR before anything
+# imports addons.registry), and it exists only here: flavour.py itself never
+# reads the environment, so a customer's build cannot be switched.
+if os.environ.get("PRISM_TEST_FLAVOUR"):
+    import flavour as _flavour
+    if os.environ["PRISM_TEST_FLAVOUR"] not in _flavour.FLAVOURS:
+        raise RuntimeError("PRISM_TEST_FLAVOUR=%r is not a flavour"
+                           % os.environ["PRISM_TEST_FLAVOUR"])
+    _flavour.FLAVOUR = os.environ["PRISM_TEST_FLAVOUR"]
+
 
 @pytest.fixture(autouse=True)
 def _collect_on_the_main_thread():

@@ -25,6 +25,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox, QWidget  # noqa: E402
 
 _app = QApplication.instance() or QApplication([])
 
+import flavour  # noqa: E402
 import main_window  # noqa: E402
 from addons import registry  # noqa: E402
 
@@ -103,9 +104,17 @@ class AWindowWithOnlyStudioTools(unittest.TestCase):
     def test_the_full_build_is_unchanged(self):
         win = main_window.MainWindow()
         self.assertEqual(len(main_window.SCREENS), win.screens.count())
+        # "Full" means every add-on THIS build contains has its panel and
+        # every one it does not contain has none (complete: all of them).
         for name in ("boq", "gerber", "step", "leads", "whatsapp", "inquiry", "email", "bom"):
-            self.assertIsNotNone(getattr(win, f"{name}_panel"), name)
-        self.assertIsNotNone(win.inquiry_work_panel)
+            if name in flavour.addon_keys():
+                self.assertIsNotNone(getattr(win, f"{name}_panel"), name)
+            else:
+                self.assertIsNone(getattr(win, f"{name}_panel"), name)
+        if "inquiry" in flavour.addon_keys():
+            self.assertIsNotNone(win.inquiry_work_panel)
+        else:
+            self.assertIsNone(win.inquiry_work_panel)
 
 
 if __name__ == "__main__":

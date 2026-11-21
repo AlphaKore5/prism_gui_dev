@@ -164,9 +164,11 @@ class TheStackIsInTheDeclaredOrder(GateTest):
             with self.subTest(screen=name):
                 before = win.screens.currentIndex()
                 win._show_screen(name)
-                if name in main_window._SWITCHED_OFF:
+                if (name in main_window._SWITCHED_OFF
+                        or registry.is_absent(name)):
                     # A switched-off add-on's page (bom since 2026-11-16)
-                    # keeps its index but is never shown: asking stays put.
+                    # keeps its index but is never shown: asking stays put. The same for
+                    # an add-on this flavour does not contain.
                     self.assertEqual(win.screens.currentIndex(), before)
                     continue
                 self.assertEqual(win.screens.currentIndex(), index)
