@@ -49,3 +49,34 @@ def spec_excludes(flavour: str | None = None) -> list[str]:
         return []
     return ([f"addons.{k}" for k in excluded_addon_keys(flavour)]
             + [f"addons.flavours.{f}" for f in FLAVOURS if f != flavour])
+
+
+# main.py's frozen self-test (PRISM_SELFTEST) proves each tool a build ships.
+# A check that belongs to an add-on runs only in a build that contains that
+# add-on (ANY of the keys listed). A check not listed here runs in every
+# flavour. "complete" holds all ten add-ons, so it runs every check, in
+# today's order. Checks of tools every build keeps (owner decision 2026-11-21:
+# OCR, Google Drive, faster-whisper, pypdfium2, numpy, PIL, ezdxf, matplotlib)
+# are deliberately not listed. The table is data so a test can list the checks per flavour.
+SELFTEST_NEEDS: dict[str, tuple[str, ...]] = {
+    "BOQ add-on (ezdxf)": ("boq",),
+    "Reel add-on (Pillow + renderer)": ("reel",),
+    # Owner decision 2026-11-21 (DECISIONS item 2): Chromium stays in Studio
+    # and Engineering (BOQ's PDF export and Motion rendering), not in Sales.
+    "Prism Studio browser (Chromium)": ("reel", "motion", "boq"),
+    "Reel encoding (FFmpeg)": ("reel", "motion"),
+    "Studio editor + Motion runtime files": ("reel", "motion"),
+    "Motion Graphics available": ("motion",),
+    "STEP available": ("step",),
+    "Gerber available": ("gerber",),
+    "dep:dns.resolver": ("inquiry", "email"),
+    "dep:shapely": ("gerber",),
+    "dep:gerbonara": ("gerber",),
+    "dep:pdfplumber": ("boq",),
+}
+
+
+def selftest_runs(check: str, flavour: str | None = None) -> bool:
+    """Does the self-test run `check` in this flavour?"""
+    need = SELFTEST_NEEDS.get(check)
+    return need is None or any(k in addon_keys(flavour) for k in need)

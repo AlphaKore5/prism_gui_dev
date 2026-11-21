@@ -16,6 +16,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # Before any import below reads "~": a dev build must not touch the real ~/.prism.
 import channel
+import flavour
 channel.isolate_home()
 
 from PySide6.QtGui import QFontDatabase
@@ -93,7 +94,11 @@ def _selftest(app) -> int:
     # excluded numpy and PIL, so BOQ and Reel failed only in the frozen build
     # and only when a customer clicked them. A dependency that is fine from
     # source and missing once packaged is exactly what this self-test is for.
-    boq_ok, boq_err = CB.boq_available()
+    # Each check that belongs to an add-on runs only in a build that contains
+    # that add-on (flavour.SELFTEST_NEEDS); "complete" runs them all.
+    _runs = flavour.selftest_runs
+    boq_ok, boq_err = (CB.boq_available() if _runs("BOQ add-on (ezdxf)")
+                       else (True, ""))
 
     # Reel is probed in two halves rather than through CB.reel_available(),
     # because it needs two different kinds of thing and only one of them is a
@@ -108,15 +113,17 @@ def _selftest(app) -> int:
     # the wheel — and it is bundled now. Still reported rather than fatal,
     # because a source checkout without the package is a normal thing to be
     # and Prism can fetch it at runtime (core/ffmpeg.py).
-    try:
-        from PIL import Image, ImageDraw   # noqa: F401
-        CB.get_reel()   # via the bridge: core_bridge is the only
-                        # module that may import the engine directly,
-                        # and tests/test_engine_facade.py enforces it.
-        reel_ok, reel_err = True, ""
-    except Exception as e:
-        reel_ok, reel_err = False, str(e)
-    ffmpeg_ok, ffmpeg_err = CB.reel_available()
+    reel_ok, reel_err = True, ""
+    if _runs("Reel add-on (Pillow + renderer)"):
+        try:
+            from PIL import Image, ImageDraw   # noqa: F401
+            CB.get_reel()   # via the bridge: core_bridge is the only
+                            # module that may import the engine directly,
+                            # and tests/test_engine_facade.py enforces it.
+        except Exception as e:
+            reel_ok, reel_err = False, str(e)
+    ffmpeg_ok, ffmpeg_err = ((CB.reel_available() if _runs("Reel encoding (FFmpeg)")
+                              else (True, "")))
 
     # Prism Studio's browser — the ONE thing this self-test did not look at,
     # and the thing that shipped broken. Every Windows and macOS build for
@@ -136,10 +143,14 @@ def _selftest(app) -> int:
     # itself was sitting right there — so "is the browser in the bundle"
     # would have passed on the broken build. This starts it, paints a frame
     # and closes it, which is the same round trip a render takes.
-    studio_ok, studio_err = CB.studio_render_selftest()
+    studio_ok, studio_err = (CB.studio_render_selftest()
+                             if _runs("Prism Studio browser (Chromium)")
+                             else (True, ""))
     # The editor's own JS/CSS and Motion's runtime are data files, not
     # modules — a bundle can lose them without a single import failing.
-    assets_ok, assets_err = CB.studio_assets_selftest()
+    assets_ok, assets_err = (CB.studio_assets_selftest()
+                             if _runs("Studio editor + Motion runtime files")
+                             else (True, ""))
 
     # The dependencies nothing else here would notice. Every one of them is
     # imported lazily, inside the function that needs it, so a build that
@@ -172,6 +183,8 @@ def _selftest(app) -> int:
                          # later, the engine and its silence filter ship.
                          ("faster_whisper", "turning speech into text on this computer"),
                          ("ctranslate2", "running the Whisper speech model")):
+        if not _runs("dep:" + module):
+            continue
         try:
             importlib.import_module(module)
         except Exception as e:                          # noqa: BLE001
@@ -179,8 +192,10 @@ def _selftest(app) -> int:
     # rapidocr imports fine without its model files and then downloads them
     # from the internet the first time OCR runs, on the customer's PC
     # (prism.spec, 27 Oct 2026). The wheel ships them; prove the build kept them.
+    import glob as _glob
     try:
-        import glob as _glob
+        if not _runs("dep:rapidocr"):
+            raise ImportError("not part of this build")
         import rapidocr as _ro
         _onnx = _glob.glob(os.path.join(os.path.dirname(_ro.__file__), "models", "*.onnx"))
         if len(_onnx) < 3:
@@ -244,16 +259,19 @@ def _selftest(app) -> int:
          automation_ok),
         (f"licence verification{'' if license_ok else f' — {license_err}'}",
          license_ok),
-        (f"BOQ add-on (ezdxf){'' if boq_ok else f' — {boq_err}'}", boq_ok),
-        (f"Reel add-on (Pillow + renderer)"
-         f"{'' if reel_ok else f' — {reel_err}'}", reel_ok),
+        *([(f"BOQ add-on (ezdxf){'' if boq_ok else f' — {boq_err}'}", boq_ok)]
+          if _runs("BOQ add-on (ezdxf)") else []),
+        *([(f"Reel add-on (Pillow + renderer)"
+            f"{'' if reel_ok else f' — {reel_err}'}", reel_ok)]
+          if _runs("Reel add-on (Pillow + renderer)") else []),
         (f"bundled dependencies"
          f"{'' if not missing_deps else ' — ' + '; '.join(missing_deps)}",
          not missing_deps),
     ]
-    if paths.is_frozen():
+    if paths.is_frozen() and _runs("Prism Studio browser (Chromium)"):
         checks.append((f"Prism Studio browser (Chromium)"
                        f"{'' if studio_ok else f' — {studio_err}'}", studio_ok))
+    if paths.is_frozen() and _runs("Reel encoding (FFmpeg)"):
         # FFmpeg too, and for the same reason. Studio's availability probe
         # asks for FFmpeg BEFORE it looks at the browser (reel_web.available),
         # so a bundle whose FFmpeg cannot be resolved turns Studio off — and
@@ -272,11 +290,13 @@ def _selftest(app) -> int:
         import keyring
         import googleapiclient   # noqa: F401
         from integrations import gdrive
-        probes = [("Motion Graphics", CB.motion_available()),
-                  ("STEP", CB.step_available()),
-                  ("Gerber", CB.gerber_available()),
-                  ("reading text from pictures", CB.ocr_available()),
-                  ("Google Drive", gdrive.deps_available())]
+        probes = [(name, probe()) for name, probe in (
+            ("Motion Graphics", CB.motion_available),
+            ("STEP", CB.step_available),
+            ("Gerber", CB.gerber_available),
+            ("reading text from pictures", CB.ocr_available),
+            ("Google Drive", gdrive.deps_available))
+            if name == "Google Drive" or _runs(name + " available")]
         if sys.platform in ("win32", "darwin"):
             probes.append(("voice input", wakeword.available()))
         try:
@@ -287,16 +307,18 @@ def _selftest(app) -> int:
         probes.append(("OS credential store", (keyring_ok, "no keyring backend")))
         # core.ocr swallows the import error and only says "pip install",
         # which hides the real cause in a frozen build (a broken cv2 once).
-        if not probes[3][1][0]:
-            try:
-                import rapidocr_onnxruntime   # noqa: F401
-            except Exception as e:                      # noqa: BLE001
-                probes[3] = (probes[3][0], (False, f"{type(e).__name__}: {e}"))
+        for _i, (_name, (_ok, _why)) in enumerate(probes):
+            if _name == "reading text from pictures" and not _ok:
+                try:
+                    import rapidocr_onnxruntime   # noqa: F401
+                except Exception as e:                  # noqa: BLE001
+                    probes[_i] = (_name, (False, f"{type(e).__name__}: {e}"))
         for name, (ok, why) in probes:
             checks.append((f"{name} available"
                            f"{'' if ok else ' — ' + why.split(chr(10))[0]}", ok))
-    checks.append((f"Studio editor + Motion runtime files"
-                   f"{'' if assets_ok else f' — {assets_err}'}", assets_ok))
+    if _runs("Studio editor + Motion runtime files"):
+        checks.append((f"Studio editor + Motion runtime files"
+                       f"{'' if assets_ok else f' — {assets_err}'}", assets_ok))
     # Video and audio play INSIDE Prism (owner, 19 Nov 2026): QtMultimedia
     # and its FFmpeg backend must be in the build, or open_preview quietly
     # falls back to "Open in another app" for every video. Required, not
@@ -373,28 +395,30 @@ def _selftest(app) -> int:
     print(f"  {'✓' if ok else '!'} voice input{'' if ok else f' — {why}'}"
           "  (optional — needs PortAudio on the machine)")
     import core_bridge          # deferred like the engine itself: see main()
-    ok, why = core_bridge.ocr_available()
-    print(f"  {'✓' if ok else '!'} reading text from pictures"
-          f"{f' ({why})' if ok else f' — {why}'}"
-          "  (a picture of a catalogue page becomes an inquiry)")
-    if not paths.is_frozen():
+    if _runs("reading text from pictures available"):
+        ok, why = core_bridge.ocr_available()
+        print(f"  {'✓' if ok else '!'} reading text from pictures"
+              f"{f' ({why})' if ok else f' — {why}'}"
+              "  (a picture of a catalogue page becomes an inquiry)")
+    if not paths.is_frozen() and _runs("Prism Studio browser (Chromium)"):
         print(f"  {'✓' if studio_ok else '!'} Prism Studio browser"
               f"{'' if studio_ok else f' — {studio_err}'}"
               "  (optional from source — `playwright install chromium`)")
     # ffmpeg_path()'s message is a multi-line install guide; one line is enough
     # here. split() rather than splitlines()[0] so an exception that stringifies
     # to "" can't turn a diagnostic into an IndexError.
-    ffmpeg_why = ffmpeg_err.split("\n")[0]
-    # Say WHICH FFmpeg. "✓ Reel encoding" told us nothing about whether the
-    # build actually shipped one — which is the single fact this line exists
-    # to establish, and the one that was wrong on Windows.
-    try:
-        ffmpeg_which = CB.get_ffmpeg().describe()
-    except Exception:
-        ffmpeg_which = "unknown"
-    print(f"  {'✓' if ffmpeg_ok else '!'} Reel encoding"
-          f"{'' if ffmpeg_ok else f' — {ffmpeg_why}'}"
-          f"  ({ffmpeg_which if ffmpeg_ok else 'Prism can download it'})")
+    if _runs("Reel encoding (FFmpeg)"):
+        ffmpeg_why = ffmpeg_err.split("\n")[0]
+        # Say WHICH FFmpeg. "✓ Reel encoding" told us nothing about whether the
+        # build actually shipped one — which is the single fact this line exists
+        # to establish, and the one that was wrong on Windows.
+        try:
+            ffmpeg_which = CB.get_ffmpeg().describe()
+        except Exception:
+            ffmpeg_which = "unknown"
+        print(f"  {'✓' if ffmpeg_ok else '!'} Reel encoding"
+              f"{'' if ffmpeg_ok else f' — {ffmpeg_why}'}"
+              f"  ({ffmpeg_which if ffmpeg_ok else 'Prism can download it'})")
     print(f"{app.applicationName()} {app.applicationVersion()} · "
           f"frozen={paths.is_frozen()} · {sys.platform} · py"
           f"{sys.version_info.major}.{sys.version_info.minor}")
