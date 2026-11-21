@@ -13,6 +13,7 @@ Qt runs offscreen; no window is ever shown.
 """
 from __future__ import annotations
 
+import functools
 import os
 import sys
 import tempfile
@@ -31,12 +32,43 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (  # noqa: E402
     Ed25519PrivateKey)
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
+import flavour  # noqa: E402
 import licensing  # noqa: E402
 import mint  # noqa: E402
 from licensing import device, keys, store  # noqa: E402
 
 DAY = 86400
 _app = QApplication.instance() or QApplication([])
+
+
+def needs_addon(key, screen=None, agents=()):
+    """A test about one add-on's gate. In a flavour that contains the add-on it
+    runs unchanged. In one that does not, the gate does not exist, so the test
+    asserts the add-on's absence instead: not in the registry, its routed
+    agents are not gated, and (when `screen` names the screen it used to open)
+    asking for that screen stays put, says "isn't available" and shows no
+    licence pitch."""
+    def deco(fn):
+        @functools.wraps(fn)
+        def wrapper(self):
+            if key in flavour.addon_keys():
+                return fn(self)
+            import main_window
+            from addons import registry
+            self.assertIsNone(registry.by_key(key))
+            for agent in agents:
+                self.assertNotIn(agent, main_window.AGENT_FEATURES)
+            if screen:
+                self.grant(["core"])
+                win = self._window()
+                before = win.screens.currentIndex()
+                win._show_screen(screen)
+                self.assertEqual(win.screens.currentIndex(), before)
+                self.assertIn("isn't available",
+                              win.statusBar().currentMessage())
+                self.assertEqual(self.paywalled, [])
+        return wrapper
+    return deco
 
 
 # ── keep the test suite out of the developer's own run history ──────────────
@@ -224,6 +256,7 @@ class WindowGates(GateTest):
     """The real MainWindow methods, with the dialogs stubbed out so a failure
     to gate shows up as an attempted open rather than a hung modal."""
 
+    @needs_addon("boq", "boq")
     def test_locked_addon_does_not_open_its_dialog(self):
         import main_window
         self.grant(["core"])            # no boq
@@ -233,6 +266,7 @@ class WindowGates(GateTest):
         dialog.assert_not_called()
         self.assertEqual(self.paywalled, ["boq"])
 
+    @needs_addon("boq", "boq")
     def test_owned_addon_gets_past_the_gate(self):
         import main_window
         self.grant(["core", "boq"])
@@ -248,6 +282,7 @@ class WindowGates(GateTest):
             win._open_boq()
         self.assertEqual(self.paywalled, [])
 
+    @needs_addon("boq", "boq")
     def test_owned_addon_still_blocked_when_the_server_is_unreachable(self):
         """No offline fallback: owning BOQ is not enough, the server has to
         say yes at the moment it is opened."""
@@ -265,6 +300,7 @@ class WindowGates(GateTest):
         dialog.assert_not_called()
         warned.assert_called_once()
 
+    @needs_addon("email", "email")
     def test_email_gate(self):
         import main_window
         self.grant(["core"])
@@ -297,11 +333,17 @@ class WindowGates(GateTest):
         self.grant(["core", "boq"])
         win = self._window()
         gated = win.sidebar._gated
-        self.assertTrue(gated["boq"][0].property("locked") in (False, None))
-        self.assertTrue(gated["email"][0].property("locked"))
-        # Locked, but still clickable — the click is the customer telling us
-        # what they want, and it opens the pitch.
-        self.assertTrue(gated["email"][0].isEnabled())
+        # (a row exists only for add-ons this build contains)
+        keys_here = flavour.addon_keys()
+        self.assertEqual("boq" in gated, "boq" in keys_here)
+        self.assertEqual("email" in gated, "email" in keys_here)
+        if "boq" in keys_here:
+            self.assertTrue(gated["boq"][0].property("locked") in (False, None))
+        if "email" in keys_here:
+            self.assertTrue(gated["email"][0].property("locked"))
+            # Locked, but still clickable — the click is the customer telling us
+            # what they want, and it opens the pitch.
+            self.assertTrue(gated["email"][0].isEnabled())
 
 
 class GettingOut(GateTest):
@@ -423,6 +465,7 @@ class RoutedAgentGate(GateTest):
     """Prism Reel can enter a plan through the router without the customer
     ever touching the rail, so the sidebar gate alone would leak it."""
 
+    @needs_addon("reel", agents=("Prism Reel", "Prism Studio"))
     def test_locked_routed_agent_is_offered_as_a_drop(self):
         import main_window
         from PySide6.QtWidgets import QMessageBox
@@ -446,6 +489,7 @@ class RoutedAgentGate(GateTest):
         self.assertNotIn("Prism Reel", ran.values())
         self.assertIn("Claude", ran.values())
 
+    @needs_addon("reel", agents=("Prism Reel", "Prism Studio"))
     def test_declining_the_drop_shows_the_pitch(self):
         import main_window
         from PySide6.QtWidgets import QMessageBox
@@ -464,6 +508,7 @@ class RoutedAgentGate(GateTest):
         worker.assert_not_called()
         self.assertEqual(self.paywalled, ["reel"])
 
+    @needs_addon("reel", agents=("Prism Reel", "Prism Studio"))
     def test_declining_does_not_arm_the_queue_to_run_by_itself(self):
         """Cancel on a gate used to leave _auto_run set, so the NEXT task
         planned on the same surface started on its own instead of waiting
@@ -485,6 +530,7 @@ class RoutedAgentGate(GateTest):
 
         self.assertFalse(win._auto_run)
 
+    @needs_addon("reel", agents=("Prism Reel", "Prism Studio"))
     def test_accepting_the_drop_arms_the_queue(self):
         import main_window
         from PySide6.QtWidgets import QMessageBox
@@ -945,6 +991,7 @@ class UnpromptedStepGate(GateTest):
         self.assertIn("make a reel for instagram", stages["leads"][0])
         self.assertIn("leads", worker.call_args[0][1]["agents"])
 
+    @needs_addon("reel", agents=("Prism Studio",))
     def test_a_hand_ticked_picture_step_in_a_studio_reel_is_kept(self):
         """It used to be offered as a drop ("Prism Studio makes its own
         artwork"). Ticking it by hand is now taken as meant."""
