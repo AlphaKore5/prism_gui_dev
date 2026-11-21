@@ -92,6 +92,27 @@ if os.environ.get("PRISM_TEST_FLAVOUR"):
     _flavour.FLAVOUR = os.environ["PRISM_TEST_FLAVOUR"]
 
 
+def pytest_collection_modifyitems(config, items):
+    """E6c: under PRISM_TEST_FLAVOUR, skip (with the reason) every test in a
+    file that imports an add-on that flavour does not contain. Nothing runs
+    differently without the variable."""
+    flav = os.environ.get("PRISM_TEST_FLAVOUR")
+    if not flav or flav == "complete":
+        return
+    from flavour_skip import skip_reason
+    reasons: dict = {}
+    for item in items:
+        path = str(item.fspath)
+        if path not in reasons:
+            try:
+                with open(path, encoding="utf-8") as fh:
+                    reasons[path] = skip_reason(fh.read(), flav)
+            except (OSError, SyntaxError):
+                reasons[path] = ""
+        if reasons[path]:
+            item.add_marker(pytest.mark.skip(reason=reasons[path]))
+
+
 @pytest.fixture(autouse=True)
 def _collect_on_the_main_thread():
     yield
