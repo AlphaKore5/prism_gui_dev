@@ -58,7 +58,66 @@ That request, and the server's bookkeeping of it, includes:
 **No brief, no prompt, no output, and no filename is ever sent to us.** This
 is not a policy choice we could reverse later without a code change — the
 client-side code has nowhere in its request schema to put that data, and the
-server has nowhere to store it if it somehow arrived.
+server has no field built to store it. Prism's error reports (section 3A) are
+written to contain none of this: they are scrubbed on your computer and again
+on our server, though a scrubber is not a guarantee, which is why 3A says what
+to do if you ever see one that does.
+
+### 3A. Error reports and quality signals ("Pulse")
+
+Prism can tell us when something breaks, so we can fix it without you having to
+write to us. This is separate from the licence check in section 3. It is on by
+default and you can turn it off at any time (see "Your choice" below).
+
+**What Prism sends.** Each report is a short record containing only:
+
+- when something fails: the kind of error (for example "KeyError"), the names of
+  the code files and functions in Prism itself where it failed (for example
+  `stepfile.py: apply_plan`), a code made from those, and a one-line error
+  message in which quoted text, numbers, email addresses, file paths, long keys
+  and web-address parameters have been removed or replaced;
+- when the previous session ended unexpectedly: that it did, and which screen
+  Prism was on;
+- how long Prism took to open, in milliseconds;
+- actions that took two seconds or longer: which add-on and screen, and how long;
+- how a run ended: finished, failed or cancelled, and in which add-on;
+- your answers on results: a thumbs up or down, one of a few fixed reasons you
+  may pick (for example "wrong", "incomplete", "slow"), and what happened to the
+  result next (used as it was, edited, redone). These are fixed choices; Prism
+  never sends text you typed;
+- with every record: the Prism version, your operating system, the add-on and
+  screen involved, and your licence ID and device fingerprint (the same ones as
+  in section 3, so a report can be tied to a licence and a seat).
+
+**What Prism never sends in these reports.** Your prompts, the answers or
+outputs the AI tools give you, your files, file names or folder paths, names,
+email addresses, passwords, API keys or licence keys, and attachments.
+Scrubbing happens on your computer first and again on our server before
+anything is stored. Reports are designed not to contain personal content; if you
+ever see one that does, tell us (section 12) and we will delete it.
+
+**Your choice.** In Settings, under "Help improve Prism", the switch "Send
+Prism's error reports" turns this off or on. It takes effect immediately,
+without restarting Prism. While it is off, nothing is queued or sent. Prism's
+licence check (section 3) is not affected and is not optional, because it is how
+your licence is enforced.
+
+**What we do with it.** We use these reports only to find and fix faults, to see
+whether new versions start and run well, and to see which kinds of results
+people find useful. We do not use them to profile you, to measure what you work
+on, or to change what you can do in Prism: a report never switches a feature on
+or off.
+
+**Who can see it.** Only Alphakore administrators, through the admin login of
+our operator console. The reports are stored in the same licence-server
+database as section 6. We do not sell them or share them with advertisers.
+
+**How long we keep it.** Pulse reports are deleted after 90 days.
+
+**If Prism is offline.** Reports wait in a small file in Prism's own folder on
+your computer (at most 300, and anything older than 7 days is dropped) and are
+sent the next time Prism can reach us. Turning the switch off stops sending;
+delete the `pulse` folder inside Prism's data folder to remove what is waiting.
 
 ## 4. Seat-sharing detection, specifically
 
@@ -91,7 +150,8 @@ required under India's Digital Personal Data Protection Act, 2023.]
 Licence and device records are kept for as long as your licence exists plus a
 reasonable period after expiry, for renewal and support history. Usage
 counts are aggregate and not tied to task content, so their retention is a
-storage-cost decision rather than a privacy-sensitive one. [A precise
+storage-cost decision rather than a privacy-sensitive one. Pulse reports
+(section 3A) are kept for 90 days and then deleted. [A precise
 retention schedule should be set and stated here before this is treated as
 final — currently the code enforces licence/seat state but does not itself
 delete old records on a timer.]

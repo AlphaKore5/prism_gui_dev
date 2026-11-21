@@ -12246,7 +12246,7 @@
   "Prism suggests {tool} — {why}": [
    "widgets/agents_panel.py"
   ],
-  "Prism tells us when something breaks, so we can fix it without you having to report it. It sends the kind of error and which part of Prism failed, how long Prism took to open, which screens were slow, and whether a run finished. It never sends your prompts, answers, files, names or keys.": [
+  "Prism tells us when something breaks, so we can fix it without you having to report it. It sends the kind of error and which part of Prism failed, how long Prism took to open, which screens were slow, whether a run finished, and your thumbs and what you did with a result. It never sends your prompts, answers, files, names or keys.": [
    "widgets/settings_panel.py"
   ],
   "Prism thinks": [

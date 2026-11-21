@@ -1038,7 +1038,8 @@ class SettingsPanel(QDialog):
         body.addWidget(C.label(
             i18n.t("Prism tells us when something breaks, so we can fix it without you having to "
                    "report it. It sends the kind of error and which part of Prism failed, how long "
-                   "Prism took to open, which screens were slow, and whether a run finished. "
+                   "Prism took to open, which screens were slow, whether a run finished, and "
+                   "your thumbs and what you did with a result. "
                    "It never sends your prompts, answers, files, names or keys."),
             level="META", wrap=True))
         col.addWidget(card)

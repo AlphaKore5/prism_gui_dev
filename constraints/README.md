@@ -7,11 +7,13 @@ job. A missing file for a platform fails the job, on purpose.
 ## Why
 
 Until 1.8.9 none of the 31 lines in `requirements.txt` was pinned, so every
-release installed whatever was newest that day. Measured on the real update
-manifests: updating 1.8.6 -> 1.8.9 meant fetching 207 MB, of which **163 MB was
-third-party libraries that changed on their own** (av 64 MB, ctranslate2 61 MB,
-PySide6 22 MB, hf_xet, tokenizers, faster-whisper). A code-only release should
-fetch about 35-40 MB, and a library should never change without a decision.
+release installed whatever was newest that day, so a library could change
+without anyone choosing it. (An earlier version of this note said the 207 MB
+1.8.6 -> 1.8.9 update was mostly libraries drifting. That was wrong: measured on
+the real manifests, 179 of the 190 changed Windows files were new, added by the
+speech feature, and no existing library changed version. Pinning would not have
+made that update smaller; it protects later releases.) A library should never
+change without a decision.
 
 ## Files
 
