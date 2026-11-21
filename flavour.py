@@ -59,6 +59,22 @@ def flavours_with(key: str) -> tuple[str, ...]:
     return tuple(f for f, keys in ADDONS_BY_FLAVOUR.items() if key in keys)
 
 
+# Words for the customer, matching entitlement_copy.py (engineering-steps
+# branch, 4eab057): the edition that owns an add-on is named "Prism Studio",
+# "Prism Sales" or "Prism Engineering". Derived from the table above.
+EDITION_NAMES = {"studio": "Prism Studio", "sales": "Prism Sales",
+                 "engineering": "Prism Engineering"}
+
+
+def owner_edition_name(key: str) -> str:
+    """Display name of the first edition (studio, sales, engineering) that
+    contains add-on `key`, or ""."""
+    for f, name in EDITION_NAMES.items():
+        if key in ADDONS_BY_FLAVOUR[f]:
+            return name
+    return ""
+
+
 def addon_keys(flavour: str | None = None) -> tuple[str, ...]:
     return ADDONS_BY_FLAVOUR[flavour or FLAVOUR]
 

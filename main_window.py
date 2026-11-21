@@ -780,12 +780,14 @@ class MainWindow(QMainWindow):
         or a licence pitch for something that cannot open."""
         if not registry.is_absent(key):
             return False
-        editions = ", ".join(f.capitalize() for f in flavour.flavours_with(key))
-        QMessageBox.information(
-            self, "Prism",
-            i18n.t("{name} is not in this build of Prism.").format(
-                name=flavour.ADDON_NAMES.get(key, key))
-            + " " + i18n.t("It comes with: {editions}.").format(editions=editions))
+        name = flavour.ADDON_NAMES.get(key, key)
+        edition = flavour.owner_edition_name(key)
+        text = i18n.t("{name} is not in this build of Prism.").format(name=name)
+        if edition:
+            # Same edition naming as entitlement_copy.absent_message.
+            text += " " + i18n.t("It is part of {edition}. Open {edition} "
+                                 "to use it.").format(edition=edition)
+        QMessageBox.information(self, "Prism", text)
         return True
 
     def _need_addon(self, key: str, dotted: str):

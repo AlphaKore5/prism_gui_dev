@@ -45,8 +45,7 @@ class NotInThisBuild(TG.GateTest):
                 text = info.call_args[0][2]
                 self.assertIn(flavour.ADDON_NAMES[key], text)
                 self.assertIn("not in this build", text)
-                for f in flavour.flavours_with(key):
-                    self.assertIn(f.capitalize(), text)
+                self.assertIn("Open " + flavour.owner_edition_name(key), text)
                 self.assertFalse(auth.called)
                 self.assertFalse(shown.called)
                 self.assertFalse(rd.called or md.called)
@@ -110,6 +109,9 @@ class DataMatchesTheManifests(unittest.TestCase):
         self.assertEqual(set(flavour.ADDON_NAMES), set(flavour.ADDONS_BY_FLAVOUR["complete"]))
         self.assertEqual(flavour.addon_for_agent("Prism Studio"), "reel")
         self.assertEqual(flavour.addon_for_agent("ChatGPT"), "")
+        self.assertEqual(flavour.owner_edition_name("reel"), "Prism Studio")
+        self.assertEqual(flavour.owner_edition_name("boq"), "Prism Engineering")
+        self.assertEqual(flavour.owner_edition_name("leads"), "Prism Sales")
 
 
 if __name__ == "__main__":
