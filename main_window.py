@@ -29,6 +29,7 @@ import awake
 import chatlog
 import core_bridge as CB
 import docexport
+import flavour
 import email_config
 import diagnostics
 import i18n
@@ -770,6 +771,22 @@ class MainWindow(QMainWindow):
         panel = cls(self.cfg, *extra) if cls is not None else None
         self.screens.addWidget(panel if panel is not None else QWidget())
         return panel
+
+    def _not_in_build(self, key: str) -> bool:
+        """Gate G6. True, after telling the person so, when add-on `key` is not
+        part of this build. Chat commands, a routed Reel/Studio/Motion step and
+        stale shortcuts can all still ask for a tool a Sales or Engineering
+        build never shipped; they get this plain answer, not an import error
+        or a licence pitch for something that cannot open."""
+        if not registry.is_absent(key):
+            return False
+        editions = ", ".join(f.capitalize() for f in flavour.flavours_with(key))
+        QMessageBox.information(
+            self, "Prism",
+            i18n.t("{name} is not in this build of Prism.").format(
+                name=flavour.ADDON_NAMES.get(key, key))
+            + " " + i18n.t("It comes with: {editions}.").format(editions=editions))
+        return True
 
     def _need_addon(self, key: str, dotted: str):
         """The add-on class an opener needs, or None after telling the person
@@ -1595,6 +1612,8 @@ class MainWindow(QMainWindow):
         return self.work_stack.currentIndex() == RUNNING and not self._run_finished
 
     def _handle_command(self, key: str):
+        if self._not_in_build(key):
+            return
         if key == "home":
             self._show_screen("home")
         elif key == "workbench":
@@ -2767,6 +2786,13 @@ class MainWindow(QMainWindow):
         # stages are the engine's own insertions (Studio's image maker) and
         # only learn they were switched off this way.
         dropped: set = set(self.agents_panel.left_out_stages())
+
+        # A plan can name Prism Reel / Studio / Motion in a build that never
+        # shipped them (the router does not know the build). Say so before
+        # anything is probed, offered or run.
+        for agent in run_agents.values():
+            if self._not_in_build(flavour.addon_for_agent(agent)):
+                return
 
         # A ticked step with no prompt behind it is the run that uploads the
         # files, asks nothing, and sits out the whole 300s cap — twice over on

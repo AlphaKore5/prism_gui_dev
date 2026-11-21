@@ -30,6 +30,35 @@ ADDONS_BY_FLAVOUR: dict[str, tuple[str, ...]] = {
 FLAVOURS = tuple(ADDONS_BY_FLAVOUR)
 
 
+# What to call each add-on when telling someone their build does not have it
+# (gate G6), and which routed agents belong to it (only Reel and Motion own
+# any). The manifests of an absent add-on are not in the build, so this is the
+# one place a build without them can still read the names. A test pins both
+# against the manifests in the complete build.
+ADDON_NAMES: dict[str, str] = {
+    "inquiry": "Email inquiries", "boq": "BOQ", "gerber": "Gerber",
+    "step": "STEP", "bom": "BOM", "email": "Email", "leads": "Leads",
+    "whatsapp": "WhatsApp", "reel": "Reel / Studio", "motion": "Motion Graphics",
+}
+ADDON_AGENTS: dict[str, tuple[str, ...]] = {
+    "reel": ("Prism Reel", "Prism Studio"),
+    "motion": ("Prism Motion",),
+}
+
+
+def addon_for_agent(agent: str) -> str:
+    """The add-on key that owns a routed agent, or ""."""
+    for key, agents in ADDON_AGENTS.items():
+        if agent in agents:
+            return key
+    return ""
+
+
+def flavours_with(key: str) -> tuple[str, ...]:
+    """The flavours whose builds contain add-on `key`."""
+    return tuple(f for f, keys in ADDONS_BY_FLAVOUR.items() if key in keys)
+
+
 def addon_keys(flavour: str | None = None) -> tuple[str, ...]:
     return ADDONS_BY_FLAVOUR[flavour or FLAVOUR]
 
