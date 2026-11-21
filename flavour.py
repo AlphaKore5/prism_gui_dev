@@ -15,7 +15,7 @@ disagree, so a flavour module cannot quietly gain or lose an add-on.
 """
 from __future__ import annotations
 
-FLAVOUR = "engineering"      # "complete" | "studio" | "sales" | "engineering"
+FLAVOUR = "complete"         # "complete" | "studio" | "sales" | "engineering"
 
 # add-on keys per flavour. Order does not matter here (registry sorts by
 # manifest order). Feature keys are untouched: a licence still means the same.
