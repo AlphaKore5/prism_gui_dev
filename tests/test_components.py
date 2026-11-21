@@ -474,7 +474,7 @@ class TestPackagingGuard(unittest.TestCase):
         self.assertRegex(req, r"(?m)^matplotlib\s*$")
         spec = open(os.path.join(ROOT, "packaging", "prism.spec"),
                     encoding="utf-8").read()
-        excludes = re.search(r"excludes = \[(.*?)\n\]", spec, re.S).group(1)
+        excludes = re.search(r"excludes = (?:_other_addons \+ )?\[(.*?)\n\]", spec, re.S).group(1)
         self.assertNotIn('"matplotlib"', excludes)
         self.assertIn('"matplotlib": "drawing pictures', spec)
 

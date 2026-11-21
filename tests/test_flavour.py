@@ -14,6 +14,10 @@ import sys
 import tempfile
 import unittest
 
+# The flavour this test run is (conftest sets flavour.FLAVOUR from
+# PRISM_TEST_FLAVOUR); "complete" when the variable is not set.
+RUNNING_AS = os.environ.get("PRISM_TEST_FLAVOUR") or "complete"
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
@@ -102,7 +106,8 @@ class TheShippedConstant(unittest.TestCase):
     def test_the_repository_ships_complete(self):
         with open(os.path.join(ROOT, "flavour.py"), encoding="utf-8") as f:
             self.assertIn('\nFLAVOUR = "complete"', f.read())
-        self.assertEqual(flavour.FLAVOUR, "complete")
+        # The constant a run sees is the flavour the run was started as.
+        self.assertEqual(flavour.FLAVOUR, RUNNING_AS)
 
     def test_flavour_table_matches_the_pinned_contents(self):
         self.assertEqual({k: set(v) for k, v in flavour.ADDONS_BY_FLAVOUR.items()},
@@ -170,7 +175,11 @@ class CompleteIsExactlyToday(unittest.TestCase):
         complete, _other_addons is flavour.spec_excludes() == [] , so the list
         is the literal, which must equal the recorded pre-flavour list."""
         self.assertEqual(flavour.spec_excludes("complete"), [])
-        self.assertEqual(flavour.spec_excludes(), [])   # shipped default
+        # shipped default: the flavour this run is (complete unless selected)
+        self.assertEqual(flavour.spec_excludes(),
+                         flavour.spec_excludes(RUNNING_AS))
+        if RUNNING_AS == "complete":
+            self.assertEqual(flavour.spec_excludes(), [])
         self.assertEqual(self._spec_excludes_literal(),
                          GOLDEN_COMPLETE_EXCLUDES)
         with open(os.path.join(ROOT, "packaging", "prism.spec"),
