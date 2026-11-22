@@ -816,6 +816,8 @@ class NoJargonOnScreen(unittest.TestCase):
             self.assertNotIn("rule", label.lower().replace("by a rule", ""))
 
 
+@unittest.skipUnless("inquiry" in __import__("flavour").addon_keys(),
+                     "Email inquiry automation is not in this build")
 class ItIsOnTheShelf(unittest.TestCase):
 
     # The rail's one grouped SECONDARY list became three flat ones when the
