@@ -104,6 +104,21 @@ def real_home(environ=None) -> str:
             or environ.get("HOME") or original("~"))
 
 
+def apply_flavour_override(environ=None, frozen=None) -> str:
+    """Developer opt-in: PRISM_FLAVOUR=<flavour> picks the flavour of a SOURCE
+    checkout (devtools/run_flavour.sh sets it). Ignored in a frozen build, so a
+    customer's environment can never switch what they bought (flavour.py itself
+    never reads the environment), and ignored when the value is not a flavour.
+    Returns the flavour in force. Called once from main.py, before
+    addons.registry is imported."""
+    import flavour
+    env = os.environ if environ is None else environ
+    want = env.get("PRISM_FLAVOUR", "")
+    if want in flavour.FLAVOURS and not (_frozen() if frozen is None else frozen):
+        flavour.FLAVOUR = want
+    return flavour.FLAVOUR
+
+
 def isolate_home(environ=None, *, install=None) -> str:
     """Point Prism's idea of "~" at a private folder, if this is a dev build or
     a source checkout asked to via PRISM_HOME. Returns that folder, or "" when
