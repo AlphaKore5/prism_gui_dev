@@ -3370,6 +3370,11 @@ class InquiryDialog(PipelineActions, PipelineScreen, QWidget):
         return row
 
     def _has_drawing(self, row: dict) -> bool:
+        # "Count quantities from the drawing" is only worth offering when this
+        # build has something that measures drawings (BOQ). Without one the
+        # drawing stays listed as an attachment but no button promises more.
+        if registry.offering(names.MEASURE_DRAWING)[0] is None:
+            return False
         folder = row.get("Folder", "")
         try:
             return bool(folder) and os.path.isdir(folder) and any(
