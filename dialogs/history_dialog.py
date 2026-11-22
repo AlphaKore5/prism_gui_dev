@@ -27,6 +27,8 @@ import roles as R
 import theme
 import viewer
 import workspace
+import entitlement_copy
+from addons import registry
 from dialogs.base import PrismDialog
 from widgets import controls as C
 from widgets import icons
@@ -36,6 +38,10 @@ from widgets.markdown import render_markdown
 
 _PATH_ROLE = 1000
 _RECORD_ROLE = 1001
+
+
+# Record keys that name the add-on that made the run (key == add-on key).
+_RECORD_ADDON_KEYS = ("boq", "gerber", "step", "email", "reel")
 
 
 def _when(path: str) -> tuple[str, str]:
@@ -421,7 +427,16 @@ class HistoryDialog(PrismDialog):
                     f"{e}</p>"))
                 return
         record["_path"] = path
-        self.view.setHtml(self._page(self._render(record, os.path.basename(path))))
+        # Read-only for a run whose add-on this build does not contain
+        # (never true in the complete build): shown, not continued.
+        gone = [k for k in _RECORD_ADDON_KEYS
+                if record.get(k) and registry.is_absent(k)]
+        page = self._render(record, os.path.basename(path))
+        if gone:
+            page = ("<p style='color:%s'>%s</p>" % (
+                theme.MUTE, _esc(entitlement_copy.read_only_note(gone[0])))
+                + page)
+        self.view.setHtml(self._page(page))
         # A follow-up needs something to follow up: a run that saved stage
         # output, links, or add-on details. NOT `record.get("query")` --
         # that is the user's original request, present on every saved run
@@ -436,13 +451,13 @@ class HistoryDialog(PrismDialog):
             or record.get("boq")
             or record.get("gerber")
             or record.get("email")
-        )
+        ) and not gone
         self._current_record = record if has_output else None
         self.follow_up_btn.setVisible(has_output)
 
         # Detect editable reel from reel, artifacts, or links
         self._current_reel = self._find_reel(record)
-        self.edit_reel_btn.setVisible(bool(self._current_reel))
+        self.edit_reel_btn.setVisible(bool(self._current_reel) and not gone)
 
     @staticmethod
     def _find_reel(record: dict) -> str:
