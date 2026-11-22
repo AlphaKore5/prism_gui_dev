@@ -10,6 +10,8 @@ venv/
 # build ignores the matching public key entirely — licensing/keys.py.)
 devtools/dev-signing-key.hex
 *-signing-key.hex
+# dated local backups of it (devtools/dev-signing-key.hex.old-2026-11-23)
+*-signing-key.hex.old-*
 
 # sign_manifest.py's local, per-machine downgrade-protection bookkeeping —
 # not shared state, and meaningless on any machine but the one that signed.

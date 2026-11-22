@@ -14,6 +14,7 @@ trusted when Prism runs from source (see licensing/keys.py).
     python3 devtools/mint.py key
     python3 devtools/mint.py token --days 10 --features core,boq
     python3 devtools/mint.py vector
+    python3 devtools/mint.py flavour --flavour sales    # run_flavour.sh calls this
 """
 from __future__ import annotations
 
@@ -46,15 +47,33 @@ from licensing import device, keyformat, lease as L, token as T
 import workspace as W
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-KEY_PATH = os.path.join(HERE, "dev-signing-key.hex")
+# PRISM_DEV_SIGNING_KEY lets a git worktree use the one key file kept in the
+# main checkout (devtools/run_flavour.sh sets it) instead of a second copy.
+KEY_PATH = (os.environ.get("PRISM_DEV_SIGNING_KEY")
+            or os.path.join(HERE, "dev-signing-key.hex"))
+# The DEVELOPMENT kid in licensing/keys.py whose public half matches
+# KEY_PATH. Signing under any other kid produces a token every build rejects
+# (bad_signature), which is what happened with dev1.
+DEV_KID = "dev2"
 VECTOR_PATH = os.path.join(os.path.dirname(HERE), "licensing", "testdata",
                            "vector.json")
 DAY = 86400
 
 
-def load_private() -> Ed25519PrivateKey:
+def load_private(kid: str | None = None) -> Ed25519PrivateKey:
+    """The dev private key. With `kid`, also refuse unless its public half is
+    the one licensing/keys.py holds for that kid, so a mismatch fails here
+    and not as bad_signature inside the app."""
     with open(KEY_PATH, "r", encoding="utf-8") as f:
-        return Ed25519PrivateKey.from_private_bytes(bytes.fromhex(f.read().strip()))
+        private = Ed25519PrivateKey.from_private_bytes(bytes.fromhex(f.read().strip()))
+    if kid is not None:
+        from licensing import keys
+        if keys.DEVELOPMENT.get(kid) != public_hex(private):
+            raise SystemExit(
+                f"mint: {KEY_PATH} is not the private half of DEVELOPMENT "
+                f"kid {kid!r} in licensing/keys.py, so the app would reject "
+                f"the token. Sign with --kid {DEV_KID}.")
+    return private
 
 
 def public_hex(private: Ed25519PrivateKey) -> str:
@@ -195,7 +214,7 @@ def cmd_key(args) -> int:
 
 
 def cmd_token(args) -> int:
-    private = load_private()
+    private = load_private(args.kid)
     device_fp = args.device or device.fingerprint(
         os.path.join(os.path.expanduser("~"), ".prism"))[0]
     claims = build_claims(args, device_fp)
@@ -210,7 +229,7 @@ def cmd_install(args) -> int:
     build behaves as though it had been activated."""
     from licensing import store
 
-    private = load_private()
+    private = load_private(args.kid)
     user_dir = os.path.join(os.path.expanduser("~"), ".prism")
     device_fp = device.fingerprint(user_dir)[0]
     claims = build_claims(args, device_fp)
@@ -221,6 +240,78 @@ def cmd_install(args) -> int:
     store.touch_clock(user_dir)
     print(f"Installed a {args.days}-day {args.kind} licence for "
           f"{claims['feat']} → {store.path(user_dir)}")
+    return 0
+
+
+def flavour_features(name: str) -> list[str]:
+    """`core` plus the licence feature of every add-on in flavour `name`.
+
+    Read from addons/flavours/<name>.py, the modules the registry loads, so
+    it cannot drift from what that flavour contains. Feature keys are not
+    add-on keys (inquiry rides `inbox`, whatsapp `marketing`, motion `reel`,
+    bom `boq`); the manifests are where that mapping lives.
+    """
+    import importlib
+
+    import flavour as F
+
+    if name not in F.FLAVOURS:
+        raise SystemExit(f"unknown flavour {name!r}. Known: {', '.join(F.FLAVOURS)}")
+    module = importlib.import_module(f"addons.flavours.{name}")
+    return ["core", *sorted({m.feature for m in module.MANIFESTS if m.feature} - {"core"})]
+
+
+def cmd_flavour(args) -> int:
+    """For devtools/run_flavour.sh: make sure this sandbox holds a licence for
+    flavour `--flavour`, minting a dev one only if it does not.
+
+    Run it with the launcher's HOME and PRISM_HOME: isolate_home() then gives
+    the same licence folder and device fingerprint the app will use. Prints
+    ONE word on stdout for the script:
+
+      minted  a new dev licence was written
+      dev     a dev-key licence already covers this flavour; left alone
+      real    a licence signed by a PRODUCTION key is here; left alone
+    """
+    import channel
+    import paths
+    from licensing import keys, store, status as S
+
+    channel.isolate_home()
+    user_dir = paths.user_dir()
+    wanted = flavour_features(args.flavour)
+    device_fp = device.fingerprint(user_dir)[0]
+    data = store.load(user_dir)
+    raw = (data.get("token") or "").strip()
+    if raw:
+        try:
+            claims = T.verify(raw, device_fp=device_fp,
+                              public_keys=keys.public_keys())
+        except T.TokenError:
+            claims = None
+        if claims is not None and claims.get("kid") not in keys.DEVELOPMENT:
+            print("real")
+            return 0
+        if (claims is not None
+                and S.resolve(claims).status == S.VALID
+                and set(wanted) <= set(claims.get("feat") or ())
+                and not S.clock_rolled_back(int(data.get("last_seen_utc") or 0))):
+            print("dev")
+            return 0
+
+    private = load_private(DEV_KID)
+    mint_args = argparse.Namespace(
+        now=0, days=args.days, ttl=args.days, kid=DEV_KID,
+        license_id="lic_dev", customer=f"Dev Build ({args.flavour})",
+        plan="dev", kind="paid", features=",".join(wanted), seats=1, grace=0)
+    claims = build_claims(mint_args, device_fp)
+    data["token"] = sign(claims, private)
+    data["license_id"] = mint_args.license_id
+    store.save(user_dir, data)
+    store.touch_clock(user_dir)
+    print(f"mint: {args.days}-day dev licence ({DEV_KID}) for "
+          f"{', '.join(claims['feat'])} -> {store.path(user_dir)}", file=sys.stderr)
+    print("minted")
     return 0
 
 
@@ -248,7 +339,7 @@ def cmd_lease(args) -> int:
     from licensing import authorization as A
     from licensing import store
 
-    private = load_private()
+    private = load_private(args.kid)
     user_dir = os.path.join(os.path.expanduser("~"), ".prism")
     device_fp = args.device or device.fingerprint(user_dir)[0]
     now = int(args.now or time.time())
@@ -338,7 +429,7 @@ def cmd_designation(args) -> int:
               file=sys.stderr)
         return 2
 
-    private = load_private()
+    private = load_private(args.kid)
     mid = args.mid or W.member_id(args.role, args.name)
     claims = D.build_claims(org=args.license_id, mid=mid, role=args.role,
                             name=args.name, kid=args.kid,
@@ -377,7 +468,7 @@ def main() -> int:
         p.add_argument("--license-id", default="lic_dev")
         p.add_argument("--seats", type=int, default=1)
         p.add_argument("--grace", type=int, default=3)
-        p.add_argument("--kid", default="dev1")
+        p.add_argument("--kid", default=DEV_KID)
         p.add_argument("--now", type=int, default=0)
         p.add_argument("--device", default="")
         p.add_argument("--verbose", action="store_true")
@@ -399,7 +490,7 @@ def main() -> int:
     lease_parser.add_argument("--offline", type=int, default=3600,
                               help="offline grace after expiry, seconds")
     lease_parser.add_argument("--jti", default="lse_dev00000001")
-    lease_parser.add_argument("--kid", default="dev1")
+    lease_parser.add_argument("--kid", default=DEV_KID)
     lease_parser.add_argument("--now", type=int, default=0)
     lease_parser.add_argument("--device", default="")
     lease_parser.add_argument("--install", action="store_true",
@@ -414,8 +505,13 @@ def main() -> int:
     des.add_argument("--name", default="", help="the person's name")
     des.add_argument("--mid", default="",
                      help="member id / folder name (default: role-name)")
-    des.add_argument("--kid", default="dev1")
+    des.add_argument("--kid", default=DEV_KID)
     des.add_argument("--now", type=int, default=0)
+
+    fl = sub.add_parser("flavour", help="ensure this sandbox has a dev licence "
+                                        "for a flavour (devtools/run_flavour.sh)")
+    fl.add_argument("--flavour", required=True)
+    fl.add_argument("--days", type=int, default=30)
 
     sub.add_parser("vector", help="regenerate the committed test vector")
 
@@ -424,6 +520,7 @@ def main() -> int:
         "keygen": cmd_keygen, "key": cmd_key, "token": cmd_token,
         "install": cmd_install, "vector": cmd_vector,
         "designation": cmd_designation, "lease": cmd_lease,
+        "flavour": cmd_flavour,
     }[args.cmd](args)
 
 

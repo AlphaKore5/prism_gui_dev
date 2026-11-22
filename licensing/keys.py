@@ -32,8 +32,14 @@ PRODUCTION: dict[str, str] = {
 # private key lives in a working tree and gets copied around, so a release
 # build that honoured it would ship a universal skeleton key for the whole
 # product. The exclusion is the only thing making it safe for this to exist.
+#
+# dev2 (2026-11-23) is what devtools/mint.py signs with. The
+# devtools/dev-signing-key.hex that was on the dev machine did not match dev1,
+# so mint.py's tokens were rejected (bad_signature); dev1 stays so any token
+# that was signed with its real private half still verifies from source.
 DEVELOPMENT: dict[str, str] = {
     "dev1": "4d9841e8c8d8f133c6789f0afa1eab2b7eac395e94404d0a662c68622880dbb0",
+    "dev2": "4fd56ed3410109adad842990894bed91ad51965b7b8886980296ae96904bda6f",
 }
 
 

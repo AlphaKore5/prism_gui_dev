@@ -151,6 +151,21 @@ something you did not run.
 
 ## Issue log (newest first)
 
+### ISS-027 — `run_flavour.sh` and RUN_A_FLAVOUR.md claimed a "minted licence" that never existed (2026-11-23) — FIXED in code
+- **What happened:** the flavour launcher said `PRISM_LICENSE_OFFLINE_DEV=1` gave "minted licence, no licence server". It mints
+  nothing: it only changes the answer when the licence server cannot be reached. A fresh sandbox therefore had no licence and
+  showed the licence screen. **PROVEN** (licensing/__init__.py `_offline_dev()` / `_unreachable_answer()`).
+- **Second cause:** `devtools/mint.py install` could not have helped either. The private key in `devtools/dev-signing-key.hex`
+  did not match the `dev1` public key in `licensing/keys.py`, so every minted token failed with `bad_signature`. **PROVEN**.
+- **Fix:** new dev key `dev2` (public half in `keys.DEVELOPMENT`, private half only in the gitignored key file; old file kept as
+  `dev-signing-key.hex.old-2026-11-23`, also ignored). `mint.py` signs with `dev2` and refuses a key that does not match its
+  kid. `run_flavour.sh` runs `mint.py flavour`, which writes a 30-day dev licence for the flavour's features (from
+  `addons/flavours/<f>.py`) into the sandbox when it has no valid one, and only then points `PRISM_LICENSE_SERVER` at
+  `127.0.0.1:9`. Frozen builds still trust PRODUCTION keys only.
+- **Check:** `tests/test_dev_licence.py` (kid/key match, flavour features, nothing tracked) and
+  `test_licensing.py::FrozenBuildSafety::test_dev2_and_every_development_key_rejected_when_frozen`. Rule: a comment or doc that
+  says what an environment variable does is checked against the code that reads it, before it is written.
+
 ### ISS-026 — Dev 1.8.7 and 1.8.8 never published: four different CI failures (2026-11-19) — runner fixed, two flakes UNEXPLAINED
 - **1.8.7, `Tests · Windows`:** two new test files did `import pwd` (Unix only) at module level. **PROVEN** (collection error).
   **Fix:** `_real_home()` falls back to `expanduser("~")`. Rule: never import `pwd`/`fcntl`/`termios` at test module level.

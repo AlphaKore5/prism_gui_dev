@@ -347,6 +347,18 @@ class FrozenBuildSafety(unittest.TestCase):
             self.assertNotIn("dev1", keys.public_keys())
         self.assertIn("dev1", keys.public_keys())      # trusted from source
 
+    def test_dev2_and_every_development_key_rejected_when_frozen(self):
+        """dev2 is the kid devtools/mint.py signs with (2026-11-23). A frozen
+        build must hold the PRODUCTION keys and nothing else."""
+        self.assertIn("dev2", keys.DEVELOPMENT)
+        with mock.patch.object(keys.paths, "is_frozen", return_value=True):
+            frozen = keys.public_keys()
+        self.assertNotIn("dev2", frozen)
+        self.assertEqual(frozen, keys.PRODUCTION)
+        self.assertFalse(set(frozen) & set(keys.DEVELOPMENT))
+        self.assertFalse(set(frozen.values()) & set(keys.DEVELOPMENT.values()))
+        self.assertIn("dev2", keys.public_keys())      # trusted from source
+
     def test_server_override_ignored_when_frozen(self):
         from licensing import client
         with mock.patch.dict(os.environ, {"PRISM_LICENSE_SERVER": "http://evil"}):
