@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 # Before any import below reads "~": a dev build must not touch the real ~/.prism.
 import channel
 import flavour
+channel.apply_flavour_override()   # PRISM_FLAVOUR, source runs only
 channel.isolate_home()
 
 from PySide6.QtGui import QFontDatabase
