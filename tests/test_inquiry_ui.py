@@ -839,7 +839,12 @@ class ItIsOnTheShelf(unittest.TestCase):
         """It is the only add-on used every day, so it goes where the eye
         lands. BOQ is occasional; this is the reason the app gets opened."""
         keys = [item[0] for item in sidebar.ADDONS]
-        self.assertLess(keys.index("inquiry"), keys.index("boq"))
+        self.assertIn("inquiry", keys)
+        if "boq" in keys:     # a build without BOQ (Sales) has nothing to sit above
+            self.assertLess(keys.index("inquiry"), keys.index("boq"))
+        else:
+            import flavour
+            self.assertNotIn("boq", flavour.addon_keys())
 
     def test_the_icon_exists(self):
         """A name with no glyph behind it draws nothing — an invisible button

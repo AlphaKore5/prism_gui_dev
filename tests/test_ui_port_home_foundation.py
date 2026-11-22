@@ -107,7 +107,9 @@ class TheRailFitsAt1366x768(unittest.TestCase):
         # add-on on the rail shelf.
         from addons import manifest, registry
         self.assertEqual(len(rows), len(registry.shelf(manifest.RAIL)))
-        self.assertGreaterEqual(len(rows), 7)
+        # A smaller build (Sales: 4 add-ons) has fewer rows; complete keeps 7.
+        import flavour
+        self.assertGreaterEqual(len(rows), min(7, len(flavour.addon_keys())))
         for r in rows:
             # stage 4b: 38 or 37 so tops follow the preview's 39.7px pitch
             self.assertIn(r.sizeHint().height(), (37, 38))

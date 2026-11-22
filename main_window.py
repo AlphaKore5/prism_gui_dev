@@ -30,7 +30,6 @@ import chatlog
 import core_bridge as CB
 import docexport
 import flavour
-import email_config
 import diagnostics
 import i18n
 from widgets.loader import LoadingDialog
@@ -2034,6 +2033,7 @@ class MainWindow(QMainWindow):
         compose_cls = self._need_addon("email", "addons.email.dialog:EmailComposeDialog")
         if setup_cls is None or compose_cls is None:
             return
+        import email_config   # lazy: a build without the Email add-on need not ship it
         if not email_config.can_send(self.cfg):
             dlg = setup_cls(self.cfg, self)
             if dlg.exec() != QDialog.Accepted:

@@ -280,6 +280,16 @@ def feature_name(key: str) -> str:
     return key.replace("_", " ").replace("-", " ").title()
 
 
+def _verifier_card_wanted() -> bool:
+    """Show the e-mail verifier card only when the Leads gateway is in this
+    build and not pooled. A build without prospector has no Leads, so no card."""
+    try:
+        from prospector import gateway
+    except ImportError:
+        return False
+    return not gateway.pooled()
+
+
 class SettingsPanel(QDialog):
     login_tabs = Signal()
     navigate = Signal(str)           # a rail command key — see MORE_LINKS
@@ -1309,8 +1319,7 @@ class SettingsPanel(QDialog):
             # seven "skip this category" dropdowns told the customer the
             # opposite of what happens. Show what runs each step instead.
             col.addWidget(self._server_steps_card())
-            from prospector import gateway
-            if not gateway.pooled():
+            if _verifier_card_wanted():
                 col.addWidget(self._verifier_card())
             return
         else:
@@ -1347,8 +1356,7 @@ class SettingsPanel(QDialog):
         # Leads & Outreach runs on the credit pool: the licence server holds every
         # e-mail verifier and finder key, so a customer has none to bring
         # (prospector/gateway.py). The card stays for the developer's direct mode.
-        from prospector import gateway
-        if not gateway.pooled():
+        if _verifier_card_wanted():
             col.addWidget(self._verifier_card())
 
         picked = [(stage, chosen.get(stage))

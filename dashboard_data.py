@@ -271,13 +271,17 @@ def runs_per_day(cfg: dict, days: int = 7) -> list[int]:
 
 # ── the inquiry register ─────────────────────────────────────────────────────
 def register_rows(cfg: dict) -> list[dict]:
-    """Every row of the inquiry register, or [] if the add-on isn't set up.
+    """Every row of the inquiry register, or [] if the add-on isn't set up
+    (or isn't in this build).
 
     Swallows failure on purpose: the register is a CSV on a shared drive that
     may be open in Excel, missing, or on a disconnected mount. None of those
     should stop Home from drawing — they just mean there is nothing to show.
     """
     try:
+        from addons import registry
+        if registry.by_key("inquiry") is None:
+            return []     # this build has no Inquiry add-on: never read its register
         from inquiry_config import settings_of
         folder = (settings_of(cfg) or {}).get("folder", "")
         if not folder:
