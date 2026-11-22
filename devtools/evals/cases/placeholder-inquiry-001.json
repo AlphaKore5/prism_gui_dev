@@ -1,0 +1,42 @@
+{
+  "id": "placeholder-inquiry-001",
+  "area": "inquiry",
+  "weight": 1,
+  "must_not_break": false,
+  "source": "PLACEHOLDER synthetic (not owner data)",
+  "added": "2026-11-22",
+  "placeholder": true,
+  "input": {
+    "task": "PLACEHOLDER: Classify this synthetic email: 'Please quote 40 units of Widget A.'",
+    "files": [],
+    "role": "classify"
+  },
+  "accepted": {
+    "fields": {
+      "intent": "quote_request"
+    }
+  },
+  "checks": [
+    {
+      "type": "json_keys",
+      "keys": [
+        "intent"
+      ]
+    },
+    {
+      "type": "one_of",
+      "path": "intent",
+      "values": [
+        "quote_request",
+        "order",
+        "complaint",
+        "other"
+      ]
+    }
+  ],
+  "recorded_runs": [
+    "{\"intent\": \"quote_request\", \"confidence\": \"high\"}",
+    "{\"intent\": \"quote_request\", \"confidence\": \"high\"}",
+    "{\"intent\": \"quote_request\", \"confidence\": \"high\"}"
+  ]
+}

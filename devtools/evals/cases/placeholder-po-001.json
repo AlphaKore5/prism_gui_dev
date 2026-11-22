@@ -1,0 +1,44 @@
+{
+  "id": "placeholder-po-001",
+  "area": "po",
+  "weight": 1,
+  "must_not_break": false,
+  "source": "PLACEHOLDER synthetic (not owner data)",
+  "added": "2026-11-22",
+  "placeholder": true,
+  "input": {
+    "task": "PLACEHOLDER: Read this synthetic purchase order text: PO-0001 Sample Supplier WA-1 x 25.",
+    "files": [],
+    "role": "reasoner"
+  },
+  "accepted": {
+    "fields": {
+      "po_number": "PO-0001"
+    }
+  },
+  "checks": [
+    {
+      "type": "json_keys",
+      "keys": [
+        "po_number",
+        "supplier",
+        "lines"
+      ]
+    },
+    {
+      "type": "equals",
+      "path": "po_number",
+      "value": "PO-0001"
+    },
+    {
+      "type": "equals",
+      "path": "lines.0.qty",
+      "value": 25
+    }
+  ],
+  "recorded_runs": [
+    "{\"po_number\": \"PO-0001\", \"supplier\": \"Sample Supplier\", \"lines\": [{\"sku\": \"WA-1\", \"qty\": 25}]}",
+    "{\"po_number\": \"PO-0001\", \"supplier\": \"Sample Supplier\", \"lines\": [{\"sku\": \"WA-1\", \"qty\": 25}]}",
+    "{\"po_number\": \"PO-0001\", \"supplier\": \"Sample Supplier\", \"lines\": [{\"sku\": \"WA-1\", \"qty\": 25}]}"
+  ]
+}

@@ -106,6 +106,7 @@ something you did not run.
       run and its *removals* read.
 - [ ] Full app tests and `QT_QPA_PLATFORM=offscreen PRISM_SELFTEST=1 python3 main.py` run against a
       throwaway `PRISM_HOME`, with `~/.prism/config.json` hashed before and after.
+- [ ] Accuracy gate: `python devtools/evals/run.py` prints GATE PASS on the exact release commit (replay of recorded answers; live-model run is not built yet); no case that passed before now fails and a lower score blocks. Any override, and any change to `devtools/evals/baseline.json`, is an explicit commit with the reason written in it.
 
 **What a dev build must never do**
 - [ ] It must not change `HOME` or `USERPROFILE` for the whole process (ISS-009). Windows

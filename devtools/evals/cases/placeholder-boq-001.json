@@ -1,0 +1,47 @@
+{
+  "id": "placeholder-boq-001",
+  "area": "boq",
+  "weight": 1,
+  "must_not_break": false,
+  "source": "PLACEHOLDER synthetic (not owner data)",
+  "added": "2026-11-22",
+  "placeholder": true,
+  "input": {
+    "task": "PLACEHOLDER: Make a BOQ for 10 of Widget A at 5.00 each (synthetic).",
+    "files": [],
+    "role": "boq.agent_a"
+  },
+  "accepted": {
+    "fields": {
+      "total": "50.00"
+    }
+  },
+  "checks": [
+    {
+      "type": "json_keys",
+      "keys": [
+        "rows",
+        "total"
+      ]
+    },
+    {
+      "type": "equals",
+      "path": "total",
+      "value": "50.00"
+    },
+    {
+      "type": "one_of",
+      "path": "rows.0.unit",
+      "values": [
+        "nos",
+        "m",
+        "m2"
+      ]
+    }
+  ],
+  "recorded_runs": [
+    "{\"rows\": [{\"item\": \"Widget A\", \"unit\": \"nos\", \"qty\": 10, \"rate\": \"5.00\"}], \"total\": \"50.00\"}",
+    "{\"rows\": [{\"item\": \"Widget A\", \"unit\": \"nos\", \"qty\": 10, \"rate\": \"5.00\"}], \"total\": \"50.00\"}",
+    "{\"rows\": [{\"item\": \"Widget A\", \"unit\": \"nos\", \"qty\": 10, \"rate\": \"5.00\"}], \"total\": \"50.00\"}"
+  ]
+}

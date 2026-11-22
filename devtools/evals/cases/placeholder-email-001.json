@@ -1,0 +1,40 @@
+{
+  "id": "placeholder-email-001",
+  "area": "email",
+  "weight": 1,
+  "must_not_break": false,
+  "source": "PLACEHOLDER synthetic (not owner data)",
+  "added": "2026-11-22",
+  "placeholder": true,
+  "input": {
+    "task": "PLACEHOLDER: Reply to Sample Buyer who asks for a discount on 100 Widget A (synthetic).",
+    "files": [],
+    "role": "writer"
+  },
+  "accepted": {
+    "text": "Dear Sample Buyer, thank you for your note. We can offer the 5 percent reduction on 100 units of Widget A, supply and fix. Kind regards, Sample Seller."
+  },
+  "checks": [
+    {
+      "type": "must_contain",
+      "text": "Dear Sample Buyer"
+    },
+    {
+      "type": "must_contain",
+      "text": "supply and fix"
+    },
+    {
+      "type": "must_not_contain",
+      "text": "as an AI"
+    },
+    {
+      "type": "max_length",
+      "chars": 600
+    }
+  ],
+  "recorded_runs": [
+    "Dear Sample Buyer, thank you for your note. We can offer the 5 percent reduction on 100 units of Widget A, supply and fix. Kind regards, Sample Seller.",
+    "Dear Sample Buyer, thank you for your note. We can offer the 5 percent reduction on 100 units of Widget A, supply and fix. Kind regards, Sample Seller.",
+    "Dear Sample Buyer, thank you for your note. We can offer the 5 percent reduction on 100 units of Widget A, supply and fix. Kind regards, Sample Seller. as an AI language model I cannot promise this."
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "cases": {
+    "placeholder-boq-001": {
+      "score": 1.0,
+      "passed": true
+    },
+    "placeholder-email-001": {
+      "score": 0.75,
+      "passed": false
+    },
+    "placeholder-inquiry-001": {
+      "score": 1.0,
+      "passed": true
+    },
+    "placeholder-planner-001": {
+      "score": 1.0,
+      "passed": true
+    },
+    "placeholder-po-001": {
+      "score": 1.0,
+      "passed": true
+    }
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "id": "placeholder-planner-001",
+  "area": "planner",
+  "weight": 1,
+  "must_not_break": false,
+  "source": "PLACEHOLDER synthetic (not owner data)",
+  "added": "2026-11-22",
+  "placeholder": true,
+  "input": {
+    "task": "PLACEHOLDER: Plan: produce a quote document for a synthetic customer.",
+    "files": [],
+    "role": "planner"
+  },
+  "accepted": {
+    "fields": {
+      "deliverable": "quote.pdf"
+    }
+  },
+  "checks": [
+    {
+      "type": "json_keys",
+      "keys": [
+        "plan",
+        "deliverable"
+      ]
+    },
+    {
+      "type": "not_empty",
+      "path": "deliverable"
+    }
+  ],
+  "recorded_runs": [
+    "{\"plan\": \"Write a one-page quote\", \"deliverable\": \"quote.pdf\"}",
+    "{\"plan\": \"Write a one-page quote\", \"deliverable\": \"quote.pdf\"}",
+    "{\"plan\": \"Write a one-page quote\", \"deliverable\": \"quote.pdf\"}"
+  ]
+}
