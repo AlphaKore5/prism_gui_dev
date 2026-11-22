@@ -116,6 +116,16 @@ class AnUnlicensedAddOnDoesNotOpen(GateTest):
         import main_window
         self.grant(EVERYTHING)
         win = self._window()
+        if "boq" not in flavour.addon_keys():
+            # Not in this build: the answer is G6's box, never a screen.
+            with mock.patch.object(main_window.QMessageBox,
+                                   "information") as info, \
+                 mock.patch.object(main_window.MainWindow,
+                                   "_show_screen") as shown:
+                win._handle_command("boq")
+            self.assertEqual(info.call_count, 1)
+            self.assertFalse(shown.called)
+            return
         with mock.patch.object(main_window.MainWindow,
                                "_authorized_then",
                                lambda self, feature, action, then: then()), \

@@ -122,6 +122,21 @@ class GateTest(unittest.TestCase):
         ]
         for p in self.patches:
             p.start()
+        # A real QMessageBox.exec in an offscreen run waits forever (the
+        # sales/engineering hang of 2026-11-22: G6's "not in this build"
+        # box). A test that expects a box patches it itself; one that did not
+        # expect it fails here instead of blocking.
+        from PySide6.QtWidgets import QMessageBox
+
+        def _no_real_modal(name):
+            def _raise(*args, **kwargs):
+                raise AssertionError(
+                    f"QMessageBox.{name} opened for real: {args[1:3]!r}")
+            return _raise
+        for name in ("information", "warning", "question", "critical"):
+            p = mock.patch.object(QMessageBox, name, _no_real_modal(name))
+            self.patches.append(p)
+            p.start()
         self.paywalled: list[str] = []
         licensing.set_paywall_handler(
             lambda feature, parent, state: self.paywalled.append(feature))
@@ -1024,6 +1039,7 @@ class UnpromptedStepGate(GateTest):
         asked.assert_not_called()
         self.assertTrue(worker.called)
 
+    @needs_addon("reel", agents=("Prism Studio",))
     def test_what_was_left_out_reaches_the_engine_by_name(self):
         """Unticking "Make the images" has to reach the engine, which inserts
         that stage itself — or the run puts it straight back (2026-09-07)."""
@@ -1052,6 +1068,30 @@ class UnpromptedStepGate(GateTest):
         asked, worker = self._run(win, QMessageBox.Yes)
         self.assertNotIn("leads", worker.call_args.kwargs["skip_stages"])
 
+
+
+class NoRealModalInTests(GateTest):
+    """The harness makes a real message box fail the test, never block it."""
+
+    def test_an_unpatched_message_box_raises_instead_of_waiting(self):
+        from PySide6.QtWidgets import QMessageBox
+        for name in ("information", "warning", "question", "critical"):
+            with self.subTest(box=name):
+                with self.assertRaises(AssertionError):
+                    getattr(QMessageBox, name)(None, "Prism", "text")
+
+    def test_a_routed_step_for_an_absent_add_on_reaches_no_real_box(self):
+        """The sales/engineering hang: _run_pipeline -> _not_in_build opened
+        QMessageBox.information for a Studio step in a build without Studio."""
+        import main_window
+        from addons import registry
+        if not registry.is_absent("reel"):
+            self.skipTest("this build has Reel / Studio; nothing is absent")
+        self.grant(["core"])
+        win = self._window()
+        with mock.patch.object(main_window.QMessageBox, "information") as info:
+            self.assertTrue(win._not_in_build("reel"))
+        self.assertEqual(info.call_count, 1)
 
 
 class EnterMovesTheTaskOn(GateTest):

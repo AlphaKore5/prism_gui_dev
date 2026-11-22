@@ -188,10 +188,24 @@ class NothingDrawsAWayToBom(unittest.TestCase):
 
 
 class AskingAnywayOpensNothing(GateTest):
+    def _absent_from_this_build(self, win):
+        """A build without BOM answers "not in this build" (gate G6) before
+        any licence check; the box is patched, a real one would block."""
+        import main_window
+        with mock.patch.object(main_window.QMessageBox, "information") as info, \
+             mock.patch.object(main_window.MainWindow, "_show_screen") as shown:
+            win._handle_command("bom")
+        self.assertEqual(info.call_count, 1)
+        self.assertIn("not in this build", info.call_args[0][2])
+        self.assertFalse(shown.called)
+        self.assertEqual(self.paywalled, [])
+
     def test_the_command_and_the_screen_stay_put_with_a_note(self):
         import main_window
         self.grant(EVERYTHING)
         win = self._window()
+        if not HAS_BOM:
+            return self._absent_from_this_build(win)
         win._show_screen("home")
         with mock.patch.object(main_window.MainWindow, "_authorized_then",
                                lambda self, f, a, then: then()), \
@@ -207,6 +221,8 @@ class AskingAnywayOpensNothing(GateTest):
         import main_window
         self.grant([f for f in EVERYTHING if f != "boq"])
         win = self._window()
+        if not HAS_BOM:
+            return self._absent_from_this_build(win)
         with mock.patch.object(main_window.MainWindow, "_show_screen") as shown:
             win._handle_command("bom")
         self.assertIn("boq", self.paywalled)
