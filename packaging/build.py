@@ -97,7 +97,36 @@ def _arch() -> str:
 
 
 ARCH = _arch()
-STEM = f"{app_meta.NAME}-{app_meta.VERSION}-{OS_TAG}-{ARCH}"
+
+
+def requested_flavour() -> str:
+    """The flavour to build, from PRISM_BUILD_FLAVOUR (empty or unset: complete).
+
+    Not PRISM_FLAVOUR: that one is the developer's source-run switch and a frozen
+    build ignores it. This one only decides what build() stamps into flavour.py.
+    """
+    import flavour
+    value = os.environ.get("PRISM_BUILD_FLAVOUR", "").strip().lower() or "complete"
+    if value not in flavour.FLAVOURS:
+        sys.exit(f"packaging: PRISM_BUILD_FLAVOUR must be one of "
+                 f"{', '.join(flavour.FLAVOURS)}, got {value!r}")
+    return value
+
+
+def patch_flavour(flavour_src: str, name: str) -> str:
+    """Return flavour.py's source with FLAVOUR set to `name` (a build-time constant)."""
+    old = 'FLAVOUR = "complete"'
+    if flavour_src.count(old) != 1:
+        sys.exit('packaging: flavour.py no longer has exactly one FLAVOUR = "complete" '
+                 "-- refusing to build a flavour that is not baked.")
+    return flavour_src.replace(old, f'FLAVOUR = "{name}"', 1)
+
+
+FLAVOUR_BUILT = requested_flavour()
+# "complete" keeps today's file names; any other flavour says so in its name, so
+# a Sales archive can never be mistaken for the product.
+STEM = (f"{app_meta.NAME}-{app_meta.VERSION}-{OS_TAG}-{ARCH}" if FLAVOUR_BUILT == "complete"
+        else f"{app_meta.NAME}-{FLAVOUR_BUILT}-{app_meta.VERSION}-{OS_TAG}-{ARCH}")
 
 
 def run(cmd: list[str], **kw):
@@ -175,6 +204,15 @@ def build(engine: str = "pyinstaller"):
             with open(path, "w", encoding="utf-8") as f:
                 f.write(text)
         print("[prism] DEV channel baked in -- do not ship this build to customers")
+    # A non-complete flavour is baked into flavour.py the same way, and the
+    # working tree is restored afterwards (prism.spec reads flavour.FLAVOUR).
+    if FLAVOUR_BUILT != "complete":
+        flavour_py = os.path.join(GUI, "flavour.py")
+        with open(flavour_py, "r", encoding="utf-8") as f:
+            restore[flavour_py] = f.read()
+        with open(flavour_py, "w", encoding="utf-8") as f:
+            f.write(patch_flavour(restore[flavour_py], FLAVOUR_BUILT))
+        print(f"[prism] FLAVOUR {FLAVOUR_BUILT} baked in")
     try:
         if engine == "nuitka":
             _bake_server_url(client_py)

@@ -12,10 +12,24 @@ on:
     # found while shipping 1.4.1) and burned three runners per platform.
     tags: ["v*", "!v*-assets-*"]
   pull_request:
+  # A manual run builds ONE flavour (flavour.py) for testing and nothing else:
+  # it never publishes. The release job runs on a pushed tag only, and the
+  # update manifest / per-file update assets are made for "complete" only.
   workflow_dispatch:
+    inputs:
+      flavour:
+        description: "Which Prism build to make (artifacts only, nothing is published)"
+        type: choice
+        options: [complete, studio, sales, engineering]
+        default: complete
 
 permissions:
   contents: write   # needed only by the release job
+
+env:
+  # Read by packaging/build.py, which bakes it into flavour.py for the build.
+  # Push, pull_request and tag runs have no inputs, so they stay "complete".
+  PRISM_BUILD_FLAVOUR: ${{ inputs.flavour || 'complete' }}
 
 jobs:
   # ~1,500 tests that had never run in CI once. The workflow built the app on
@@ -114,7 +128,12 @@ jobs:
       # names its file and is retried once; everything else still reports.
       # Known, explained failures live in devtools/ci_known_failures.txt;
       # anything else fails the job.
+      # PRISM_TEST_FLAVOUR runs the suite as the chosen flavour (tests/conftest.py
+      # sets flavour.FLAVOUR and skips tests of add-ons that flavour lacks). Empty
+      # on push, pull_request and tag runs, which changes nothing.
       - name: Run the test suite
+        env:
+          PRISM_TEST_FLAVOUR: ${{ inputs.flavour }}
         run: python devtools/suite_runner.py --timeout 300
 
       - name: Scenario checks
@@ -330,7 +349,10 @@ jobs:
       # os-arch string it uses to build the URLs it fetches) so the human
       # signing this knows which of the three unsigned manifests in the
       # release corresponds to which client platform.
+      # Only for the complete build: a flavour build from a manual run is for
+      # testing and never feeds the update channel.
       - name: Generate the (unsigned) update manifest
+        if: env.PRISM_BUILD_FLAVOUR == 'complete'
         shell: bash
         run: |
           set -e
@@ -363,14 +385,18 @@ jobs:
       # possible: a code-only release only needs the handful of files that
       # actually changed uploaded/downloaded, not the whole archive again.
       - name: Flatten update assets for hosting
+        if: env.PRISM_BUILD_FLAVOUR == 'complete'
         shell: bash
         run: |
           set -e
           python packaging/flatten_update_assets.py "$UPDATE_ROOT" dist/update-assets "$PLATFORM_TAG"
 
+      # "complete" keeps the name it always had (prism-<os>); a flavour adds
+      # itself (prism-sales-<os>). The release job only ever runs on a tag, and
+      # a tag run is always "complete".
       - uses: actions/upload-artifact@v4
         with:
-          name: prism-${{ matrix.os }}
+          name: ${{ env.PRISM_BUILD_FLAVOUR == 'complete' && format('prism-{0}', matrix.os) || format('prism-{0}-{1}', env.PRISM_BUILD_FLAVOUR, matrix.os) }}
           path: |
             dist/*.tar.gz
             dist/*.zip
@@ -389,7 +415,8 @@ jobs:
       # RELEASING-UPDATES.md. (Getting this naming wrong would mean every
       # tagged push silently attaches ~1300+ unsigned files per platform to
       # a public release — check this if you ever touch the naming here.)
-      - uses: actions/upload-artifact@v4
+      - if: env.PRISM_BUILD_FLAVOUR == 'complete'
+        uses: actions/upload-artifact@v4
         with:
           name: update-assets-${{ matrix.os }}
           path: dist/update-assets/
@@ -399,7 +426,9 @@ jobs:
   release:
     name: Publish release
     needs: [build, tests]
-    if: startsWith(github.ref, 'refs/tags/v')
+    # A pushed tag only. `github.event_name == 'push'` matters: a manual run
+    # started with `--ref v1.2.3` has a tag ref too, and must not publish.
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
       # `pattern: prism-*` deliberately excludes the `update-assets-*`
