@@ -525,3 +525,12 @@ something you did not run.
 - macOS lists include symlink entries with no `size` and no file on the release; skip them when sampling.
 - A push to the licence-server repo deploys production; the assistant's push there needs the owner's explicit word.
 - Windows tests in `ci_known_failures.txt` (quotation PDF has no readable text) still fail and are a customer risk.
+
+## 2026-11-23 — Sales/Studio build failed the packaged self-test: `No module named 'shapely'`
+
+- Cause: `flavour.PACKAGE_NEEDS` excluded `shapely` (Gerber) from Sales and Studio, but `rapidocr_onnxruntime` and
+  `rapidocr` import it unconditionally, and OCR is in every build. Same class as `av` (faster_whisper). CI run 45068377735.
+- Fix: `shapely` moved to `flavour.ALWAYS_BUNDLED`. `tests/test_spec_flavours.py` now holds `RUNTIME_DEPENDENTS`
+  (package -> bundled dependents) and fails if an exclusion has a dependent that stays bundled.
+- Rule: before adding a package to `PACKAGE_NEEDS`, add its row to `RUNTIME_DEPENDENTS` from the installed metadata
+  (`importlib.metadata` requires) plus a grep of site-packages. Unproven until a real CI build passes the packaged-app self-test.

@@ -91,15 +91,16 @@ def excluded_addon_keys(flavour: str | None = None) -> tuple[str, ...]:
 # Studio and Engineering because Motion rendering and the BOQ PDF quotation
 # need it; Sales has neither. Video encoding (imageio_ffmpeg) is Reel and
 # Motion only. The Engineering-only stack is STEP (cadquery with its OCP, vtk,
-# casadi, numba/llvmlite, nlopt), Gerber (shapely, gerbonara) and BOQ's
-# pdfplumber.
+# casadi, numba/llvmlite, nlopt), Gerber's gerbonara and BOQ's pdfplumber.
+# shapely is NOT here although Gerber uses it: the OCR engine imports it in
+# every build (see ALWAYS_BUNDLED).
 PACKAGE_NEEDS: dict[str, tuple[str, ...]] = {
     "playwright": ("reel", "motion", "boq"),
     "imageio_ffmpeg": ("reel", "motion"),
     "cadquery": ("step",), "OCP": ("step",), "vtk": ("step",),
     "vtkmodules": ("step",), "casadi": ("step",), "llvmlite": ("step",),
     "numba": ("step",), "nlopt": ("step",),
-    "shapely": ("gerber",), "gerbonara": ("gerber",),
+    "gerbonara": ("gerber",),
     "pdfplumber": ("boq",),
 }
 
@@ -109,12 +110,16 @@ PACKAGE_NEEDS: dict[str, tuple[str, ...]] = {
 # those; OCR, Google Drive and voice are shared features. `av` is here although
 # the decision named it with the video libraries: `import faster_whisper` imports
 # `av` unconditionally (faster_whisper/audio.py), so a build without it has no
-# voice input.
+# voice input. `shapely` is here for the same reason: rapidocr_onnxruntime and
+# rapidocr import it unconditionally (ch_ppocr_det/utils.py), so Sales and
+# Studio builds that dropped it failed the packaged-app self-test with
+# "No module named 'shapely'" (CI run 45068377735). tests/test_spec_flavours.py
+# holds RUNTIME_DEPENDENTS, the table that proves every exclusion safe.
 ALWAYS_BUNDLED: tuple[str, ...] = (
     "ezdxf", "matplotlib", "pypdfium2", "numpy", "PIL",
     "rapidocr", "rapidocr_onnxruntime", "onnxruntime", "cv2",
     "googleapiclient", "google_auth_oauthlib",
-    "faster_whisper", "ctranslate2", "av",
+    "faster_whisper", "ctranslate2", "av", "shapely",
 )
 
 

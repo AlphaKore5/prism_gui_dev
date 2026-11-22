@@ -84,6 +84,62 @@ def _collected(out, pkg):
     return pkg in out["collected"] or pkg in out["submodules"]
 
 
+# Audited 2026-11-23 with importlib.metadata requires plus a grep of
+# site-packages and of Prism's own sources. package -> things that stay bundled
+# in a build and import it at runtime. An excluded package may only be needed
+# by add-ons that are excluded with it, or by other packages excluded with it.
+# `addons` entries are add-on keys; `packages` entries are import names.
+# Add a row here BEFORE adding a package to flavour.PACKAGE_NEEDS.
+RUNTIME_DEPENDENTS = {
+    "shapely": {"packages": ("rapidocr_onnxruntime", "rapidocr"), "addons": ("gerber",)},
+    "gerbonara": {"packages": (), "addons": ("gerber",)},
+    "pdfplumber": {"packages": (), "addons": ("boq",)},
+    "playwright": {"packages": (), "addons": ("reel", "motion", "boq")},
+    "imageio_ffmpeg": {"packages": (), "addons": ("reel", "motion")},
+    "cadquery": {"packages": (), "addons": ("step",)},
+    "OCP": {"packages": ("cadquery",), "addons": ("step",)},
+    "vtk": {"packages": ("OCP",), "addons": ("step",)},
+    "vtkmodules": {"packages": ("OCP",), "addons": ("step",)},
+    "casadi": {"packages": ("cadquery",), "addons": ("step",)},
+    "numba": {"packages": ("cadquery",), "addons": ("step",)},
+    "llvmlite": {"packages": ("numba",), "addons": ("step",)},
+    "nlopt": {"packages": ("cadquery",), "addons": ("step",)},
+}
+
+
+class EveryExclusionIsProvenSafe(unittest.TestCase):
+
+    def test_every_excluded_package_has_an_audited_row(self):
+        self.assertLessEqual(set(flavour.PACKAGE_NEEDS), set(RUNTIME_DEPENDENTS))
+
+    def test_a_package_a_bundled_package_imports_is_always_bundled(self):
+        # shapely: rapidocr_onnxruntime (ALWAYS_BUNDLED) imports it.
+        for pkg, row in RUNTIME_DEPENDENTS.items():
+            if set(row["packages"]) & set(flavour.ALWAYS_BUNDLED):
+                self.assertIn(pkg, flavour.ALWAYS_BUNDLED, pkg)
+                self.assertNotIn(pkg, flavour.PACKAGE_NEEDS, pkg)
+
+    def test_a_bundled_dependent_blocks_the_exclusion(self):
+        for flav in flavour.FLAVOURS:
+            ex = set(flavour.package_excludes(flav))
+            keep = set(flavour.addon_keys(flav))
+            for pkg in ex:
+                row = RUNTIME_DEPENDENTS[pkg]
+                with self.subTest(flavour=flav, package=pkg):
+                    for dep in row["packages"]:
+                        self.assertIn(dep, ex, "%s drops %s but keeps %s which imports it"
+                                      % (flav, pkg, dep))
+                    self.assertFalse(keep & set(row["addons"]),
+                                     "%s drops %s but keeps add-on %s"
+                                     % (flav, pkg, keep & set(row["addons"])))
+
+    def test_shapely_is_never_excluded(self):
+        for flav in flavour.FLAVOURS:
+            self.assertNotIn("shapely", flavour.package_excludes(flav))
+            self.assertNotIn("shapely", flavour.spec_excludes(flav))
+            self.assertTrue(flavour.bundles("shapely", flav))
+
+
 class DataIsConsistent(unittest.TestCase):
 
     def test_complete_excludes_nothing_new(self):
@@ -114,13 +170,19 @@ class DataIsConsistent(unittest.TestCase):
         self.assertIn("imageio_ffmpeg", pe["engineering"])
         self.assertNotIn("imageio_ffmpeg", pe["studio"])
         # Engineering-only libraries: dropped from Sales and Studio only.
-        eng_only = {"cadquery", "OCP", "vtkmodules", "llvmlite", "numba", "shapely"}
+        eng_only = {"cadquery", "OCP", "vtkmodules", "llvmlite", "numba"}
         self.assertTrue(eng_only <= pe["sales"])
         self.assertTrue(eng_only <= pe["studio"])
         self.assertFalse(eng_only & pe["engineering"])
-        # av stays everywhere: faster_whisper imports it.
+        # av stays everywhere: faster_whisper imports it. shapely too: the
+        # OCR engine imports it (CI run 45068377735 failed the self-test).
         for f in flavour.FLAVOURS:
             self.assertNotIn("av", pe[f])
+            self.assertNotIn("shapely", pe[f])
+            self.assertIn("shapely", flavour.ALWAYS_BUNDLED)
+        # ...while Gerber's own library is still dropped where Gerber is not.
+        self.assertIn("gerbonara", pe["sales"])
+        self.assertIn("gerbonara", pe["studio"])
 
 
 class TheSpecFollowsTheData(unittest.TestCase):
