@@ -28,6 +28,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))), "prism_terminal"))
 
 import core_bridge as CB  # noqa: E402
+import flavour  # noqa: E402
 import plans  # noqa: E402
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import sample_jobs  # noqa: E402
@@ -1494,11 +1495,17 @@ class KnowingARealFlatSizeSolvesTheKFactor(unittest.TestCase):
         self.assertIsNone(self.dlg._kfit_solved)
 
 
+HAS_STEP = "step" in flavour.addon_keys()
+needs_step = unittest.skipUnless(
+    HAS_STEP, "STEP is not in this build (see TheAbsentStepAnswersNotInThisBuild)")
+
+
 class ItIsOnTheShelfAndInHistory(unittest.TestCase):
     """Everything the shell knows about STEP it reads off the manifest --
     the rail row, the Home card, History's run attribution and the licence
     gate. These pin that the manifest says what the dialog does."""
 
+    @needs_step
     def test_it_is_registered_and_gated_on_its_own_key(self):
         from addons import registry
         a = registry.by_key("step")
@@ -1508,6 +1515,7 @@ class ItIsOnTheShelfAndInHistory(unittest.TestCase):
         self.assertEqual(a.screen, "step")
         self.assertEqual(a.engine, ("stepfile",))
 
+    @needs_step
     def test_it_is_on_the_rail_with_a_real_icon(self):
         from widgets import icons, sidebar
         entry = next(e for e in sidebar.ADDONS if e[0] == "step")
@@ -1515,6 +1523,7 @@ class ItIsOnTheShelfAndInHistory(unittest.TestCase):
         self.assertEqual(entry[4], "step")
         self.assertIn(entry[2], set(icons._STROKED) | set(icons._FILLED))
 
+    @needs_step
     def test_history_recognises_its_runs(self):
         from addons import registry
         from widgets.panel_base import _kind_of, ADDONS
@@ -1532,6 +1541,7 @@ class ItIsOnTheShelfAndInHistory(unittest.TestCase):
                          ["Prism AI", "Haiku 5.5"])      # "HAIKU 5.5 not claude HAIKU"
         self.assertEqual(panel.KIND, "step")
 
+    @needs_step
     def test_the_offer_takes_plain_paths(self):
         """The intent contract: paths in, and the dialog does its own
         shaping -- only models are kept, and a caller by intent needs to
@@ -1559,6 +1569,7 @@ class ItIsOnTheShelfAndInHistory(unittest.TestCase):
         self.assertTrue(opened["shown"])
 
 
+@needs_step
 class TheWindowRoutesIt(GateTest):
     """The route from the rail to the screen, and from the screen's button
     to the dialog, asserted on a real window -- not by reading source."""
@@ -1642,6 +1653,25 @@ class TheWindowRoutesIt(GateTest):
             win._handle_command("step")
         self.assertIn("step", self.paywalled)
         shown.assert_not_called()
+
+
+class TheAbsentStepAnswersNotInThisBuild(GateTest):
+    """A build without STEP says so once (gate G6) and opens no screen. The
+    box is patched: a real one would block the run. In a build that has STEP
+    the routes are TheWindowRoutesIt's."""
+
+    @unittest.skipIf(HAS_STEP, "STEP is in this build")
+    def test_the_command_says_not_in_this_build_and_opens_nothing(self):
+        import main_window
+        self.grant(EVERYTHING)
+        win = self._window()
+        with mock.patch.object(main_window.QMessageBox, "information") as info, \
+                mock.patch.object(main_window.MainWindow, "_show_screen") as shown:
+            win._handle_command("step")
+        self.assertEqual(info.call_count, 1)
+        self.assertIn("not in this build", info.call_args[0][2])
+        self.assertFalse(shown.called)
+        self.assertEqual(self.paywalled, [])
 
 
 class TheWorkbenchLayout(unittest.TestCase):

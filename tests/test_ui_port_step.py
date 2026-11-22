@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (                                    # noqa: E402
 _app = QApplication.instance() or QApplication([])
 
 import core_bridge as CB                                           # noqa: E402
+import flavour                                                     # noqa: E402
 import plans                                                       # noqa: E402
 from addons.step import dialog as SD                               # noqa: E402
 from addons.step import workbench as WB                            # noqa: E402
@@ -74,6 +75,10 @@ def _right_edge(widget, host) -> int:
     return widget.mapTo(host, QPoint(widget.width(), 0)).x()
 
 
+HAS_STEP = "step" in flavour.addon_keys()
+
+
+@unittest.skipUnless(HAS_STEP, "STEP is not in this build (see TheAbsentStep)")
 class TheRealEntryPath(GateTest):
     def test_the_step_command_lands_on_the_embedded_workbench(self):
         import main_window
@@ -94,6 +99,23 @@ class TheRealEntryPath(GateTest):
         win._handle_command("step")
         self.assertIn("step", self.paywalled)
         self.assertNotEqual(win.screens.currentIndex(), main_window.STEP_WORK)
+
+
+class TheAbsentStep(GateTest):
+    """No STEP in this build: G6's box once, no screen. The box is patched."""
+
+    @unittest.skipIf(HAS_STEP, "STEP is in this build")
+    def test_the_step_command_says_not_in_this_build(self):
+        import main_window
+        self.grant(EVERYTHING)
+        win = self._window()
+        with mock.patch.object(main_window.QMessageBox, "information") as info, \
+                mock.patch.object(main_window.MainWindow, "_show_screen") as shown:
+            win._handle_command("step")
+        self.assertEqual(info.call_count, 1)
+        self.assertIn("not in this build", info.call_args[0][2])
+        self.assertFalse(shown.called)
+        self.assertEqual(self.paywalled, [])
 
 
 class TheLayout(unittest.TestCase):
