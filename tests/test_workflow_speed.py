@@ -25,7 +25,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 import yaml
 
@@ -240,6 +240,36 @@ class ShardResultsMergeIntoOneVerdict(unittest.TestCase):
         (out / "s1.json").write_text(json.dumps(s1))
         rc, _ = self._run(*files, "--merge", str(out), "--shards", "2")
         self.assertEqual(rc, 1)
+
+
+class AFailureIdIsTheSameOnEveryOS(unittest.TestCase):
+    """The junit classname pytest writes depends on where the file sits. On
+    Windows CI a file outside the checkout (temp dir on C:, repo on D:) gave
+    `test_beta.py::py::test_known`, so a listed failure in such a file never matched."""
+
+    def key(self, classname, name="test_known", file=r"C:\Users\RUNNER~1\AppData\Local\Temp\tmp.a1\test_beta.py"):
+        return suite_runner.case_key(PureWindowsPath(file), classname, name)
+
+    def test_a_module_level_test_is_keyed_by_the_module(self):
+        for classname in ("test_beta",
+                          "tests.test_beta",
+                          ".test_beta.py",                        # seen on Windows CI
+                          "C:.Users.RUNNER~1.AppData.Local.Temp.tmp.a1.test_beta",
+                          r"C:\Users\RUNNER~1\AppData\Local\Temp\tmp.a1\test_beta.py",
+                          r"C:\Users\RUNNER~1\AppData\Local\Temp\tmp.a1\test_beta",
+                          "C:/Users/runner/tmp.a1/test_beta.py",
+                          ""):                                    # seen on Linux, outside rootdir
+            self.assertEqual(self.key(classname), "test_beta.py::test_beta::test_known", classname)
+
+    def test_a_test_in_a_class_is_keyed_by_the_class(self):
+        for classname in ("tests.test_beta.TestThing",
+                          r"D:\a\repo\tests\test_beta.TestThing",
+                          ".test_beta.py.TestThing"):
+            self.assertEqual(self.key(classname), "test_beta.py::TestThing::test_known", classname)
+
+    def test_a_real_repo_file_keeps_its_id(self):
+        self.assertEqual(suite_runner.case_key(Path("tests/test_x.py"), "tests.test_x.Cls", "test_y[a.b]"),
+                         "test_x.py::Cls::test_y[a.b]")
 
 
 class TagRunsAndReleasesAreUntouched(unittest.TestCase):

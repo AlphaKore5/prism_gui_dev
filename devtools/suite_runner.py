@@ -243,6 +243,21 @@ def _fault_excerpt(text: str, size: int = 2500) -> str:
     return text[-1500:]
 
 
+def case_key(test_file: Path, classname: str, name: str) -> str:
+    """The id a known failure is listed under: `file.py::Class::test`, or
+    `file.py::module::test` for a test outside a class.
+
+    pytest builds the junit classname from the node id, which depends on where
+    the file sits relative to the rootdir. Under the rootdir it is
+    `tests.test_x.Class`. Outside it (Windows CI: temp dir on C:, checkout on
+    D:) the classname kept the module's `.py` and taking the text after the
+    last '.' gave `py`; on Linux it can come out empty. So drop a trailing
+    `.py`, split on '.', '/' and '\\', and fall back to the file's stem."""
+    cls = re.sub(r"\.py$", "", classname or "")
+    part = re.split(r"[./\\]", cls)[-1]
+    return f"{test_file.name}::{part or test_file.stem}::{name}"
+
+
 def run_file(test_file: Path, out_dir: Path, per_test_timeout: int, file_timeout: int):
     """One pytest process for one file. Returns (cases, died, tail) where cases
     is [(key, status, message)] and died is a string if the process produced no
@@ -278,7 +293,7 @@ def run_file(test_file: Path, out_dir: Path, per_test_timeout: int, file_timeout
         return [], f"the process died before reporting (exit {rc})", tail
     cases = []
     for case in ET.parse(xml).getroot().iter("testcase"):
-        key = f"{test_file.name}::{case.get('classname', '').split('.')[-1]}::{case.get('name')}"
+        key = case_key(test_file, case.get("classname", ""), case.get("name"))
         bad = case.find("failure")
         if bad is None:
             bad = case.find("error")
