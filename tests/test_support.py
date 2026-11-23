@@ -27,6 +27,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from PySide6.QtWidgets import QApplication, QLabel  # noqa: E402
 
+import flavour  # noqa: E402
 import plans  # noqa: E402
 import support_kb as KB  # noqa: E402
 
@@ -284,16 +285,32 @@ class SearchFindsTheRightThing(unittest.TestCase):
         ("take a tour of prism", "guided-tour"),
     ]
 
+    # An answer about an add-on the build does not contain (or that is switched
+    # off) is left out of the Help centre on purpose (support_kb._OFF), so its
+    # phrasing cannot be expected to find it there. Those cases are checked the
+    # other way round below. An id that is in no build at all is NOT filtered
+    # out, so a typo in CASES still fails.
+    def _live_cases(self):
+        return [(t, e) for t, e in self.CASES if e not in KB._OFF]
+
     def test_the_right_answer_is_in_the_top_few(self):
-        for typed, expected in self.CASES:
+        for typed, expected in self._live_cases():
             hits = [q.qid for q in KB.search(typed)]
             self.assertIn(expected, hits, f"{typed!r} -> {hits}")
 
     def test_the_best_match_is_usually_first(self):
-        first = sum(1 for typed, expected in self.CASES
+        cases = self._live_cases()
+        first = sum(1 for typed, expected in cases
                     if (h := KB.search(typed)) and h[0].qid == expected)
-        self.assertGreaterEqual(first, len(self.CASES) - 2,
+        self.assertGreaterEqual(first, len(cases) - 2,
                                 "ranking has drifted")
+
+    def test_an_answer_this_build_hides_is_never_offered(self):
+        for typed, expected in self.CASES:
+            if expected in KB._OFF:
+                self.assertIsNone(KB.question(expected), expected)
+                self.assertNotIn(expected, [q.qid for q in KB.search(typed)],
+                                 typed)
 
     def test_something_we_have_no_answer_for_returns_nothing(self):
         """This is what opens the route to a person, so it has to stay
@@ -439,7 +456,13 @@ class LocalHelpOnly(unittest.TestCase):
         p._start_ai()
         p._entry.setText("how do i edit a video in prism")
         p._on_typed()
-        self.assertIn("reel-edit", p._seen)
+        # Reel's answer when the build has Reel; otherwise the general one
+        # (the Reel article is hidden with the add-on). Either way it is local.
+        if "reel" in flavour.addon_keys():
+            self.assertIn("reel-edit", p._seen)
+        else:
+            self.assertNotIn("reel-edit", p._seen)
+            self.assertTrue(p._seen, "a local answer was still offered")
         self.assertIsNone(p._worker)
 
     def test_diagnostic_markdown_is_rendered_not_shown_as_asterisks(self):

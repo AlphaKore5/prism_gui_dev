@@ -22,6 +22,7 @@ theme.load_fonts()
 QSS = open(os.path.join(ROOT, "style.qss"), encoding="utf-8").read()
 _app.setStyleSheet(QSS.replace("%ASSETS%", os.path.join(ROOT, "assets").replace(os.sep, "/")))
 
+import flavour                                                     # noqa: E402
 from widgets import controls as C                                  # noqa: E402
 from widgets import icons                                          # noqa: E402
 from widgets.sidebar import Sidebar, AddonRow, NavButton, row_height   # noqa: E402
@@ -93,7 +94,13 @@ class TheRail(unittest.TestCase):
         tops = [rail._nav[k].mapTo(rail, rail._nav[k].rect().topLeft()).y()
                 for k in ("home", "runs", "artifacts")]
         self.assertEqual(tops[1] - tops[0], 40)
-        row = next(iter(rail.findChildren(AddonRow)))
+        # Studio (Reel, Motion) has no add-on rows on the rail, so there is no
+        # tile to measure; every other build has at least one.
+        rows = rail.findChildren(AddonRow)
+        if not rows:
+            self.assertEqual(flavour.addon_keys(), ("reel", "motion"))
+            return
+        row = rows[0]
         self.assertEqual(row._chip.width(), 26)
         self.assertEqual(row._label.styleSheet().count("font-size: 14px"), 1)
 
@@ -102,8 +109,18 @@ class TheRail(unittest.TestCase):
         names = {r._icon_name for r in rail.findChildren(AddonRow)}
         # "box" (BOM & Stock) left the rail on 2026-11-16 with BOM
         # (addons/bom/addon.py status=OFF); it comes back with BOM.
-        self.assertTrue({"inbox", "sheet", "chip", "cube", "mail", "user",
-                         "message"} <= names)
+        #
+        # Only the add-ons the build contains have a row: Sales has no sheet,
+        # chip or cube; Engineering no inbox, mail, user or message; Studio
+        # (Reel, Motion) has no rail rows at all.
+        glyph = {"inquiry": "inbox", "boq": "sheet", "gerber": "chip",
+                 "step": "cube", "email": "mail", "leads": "user",
+                 "whatsapp": "message"}
+        expected = {g for k, g in glyph.items() if k in flavour.addon_keys()}
+        missing = expected - names
+        self.assertFalse(missing, "rail is missing %s of %s" % (missing, names))
+        # and a glyph for an add-on this build lacks must not appear
+        self.assertFalse(names & (set(glyph.values()) - expected), names)
 
     def test_new_task_is_a_tall_pill_with_the_dot_at_the_left(self):
         rail = _rail()

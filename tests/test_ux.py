@@ -227,8 +227,19 @@ class Plans(unittest.TestCase):
         sale of nothing. marketing/attendance/dev/bom were exactly that."""
         from addons import registry
         gated = {a.feature for a in registry.REGISTRY if a.feature}
+        # A build without an add-on has not got its manifest, so the licence
+        # feature it carries is gated by nothing there by design (the licence
+        # keys are frozen and still sold). Which add-on carries which feature:
+        carrier = {"reel": "reel", "boq": "boq", "gerber": "gerber",
+                   "step": "step", "email": "email", "leads": "leads",
+                   "inbox": "inquiry", "marketing": "whatsapp"}
         for key in plans.FEATURES:
-            if key != "core":
+            if key == "core":
+                continue
+            self.assertIn(key, carrier, "%s: say which add-on carries it" % key)
+            if registry.is_absent(carrier[key]):
+                self.assertNotIn(key, gated, key)
+            else:
                 self.assertIn(key, gated, key)
 
     def test_complete_really_is_everything(self):

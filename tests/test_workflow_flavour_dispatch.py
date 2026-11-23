@@ -148,7 +148,12 @@ class BuildStampsTheFlavour(unittest.TestCase):
                 os.environ["PRISM_BUILD_FLAVOUR"] = old
 
     def test_the_repo_file_is_complete_and_the_archive_name_is_unchanged_for_it(self):
-        self.assertEqual(flavour.FLAVOUR, "complete")
+        # The FILE in the repo, not the module constant: tests/conftest.py sets
+        # flavour.FLAVOUR from PRISM_TEST_FLAVOUR, so the constant says "sales"
+        # in a Sales test run while the file on disk must still say complete.
+        with open(os.path.join(ROOT, "flavour.py"), encoding="utf-8") as f:
+            stamped = re.search(r'^FLAVOUR = "(\w+)"', f.read(), re.M).group(1)
+        self.assertEqual(stamped, "complete")
         if self.build.FLAVOUR_BUILT == "complete":
             self.assertNotIn("complete", self.build.STEM)
 

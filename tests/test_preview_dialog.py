@@ -307,10 +307,17 @@ class TheBuildShipsThePlayer(unittest.TestCase):
     def test_prism_spec_keeps_qtmultimedia(self):
         spec = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                                  "packaging", "prism.spec"), encoding="utf-8").read()
-        excludes = spec[spec.index("excludes = ["):]
+        # The list is `excludes = _other_addons + [ ... ]` since the spec
+        # became flavour-aware, so find the literal after the assignment.
+        start = spec.index("\nexcludes = ")
+        excludes = spec[spec.index("[", start):]
         excludes = excludes[:excludes.index("]")]
         code = "\n".join(l.split("#", 1)[0] for l in excludes.splitlines())
         self.assertNotIn("QtMultimedia", code)
+        # ...and no flavour's computed add-on exclusions may take it either.
+        import flavour
+        for f in flavour.FLAVOURS:
+            self.assertFalse([e for e in flavour.spec_excludes(f) if "QtMultimedia" in e], f)
         self.assertIn('"PySide6.QtMultimedia", "PySide6.QtMultimediaWidgets"', spec)
 
 

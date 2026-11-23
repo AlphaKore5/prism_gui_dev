@@ -30,9 +30,19 @@ from widgets import controls as C                                  # noqa: E402
 from widgets import history_panel as HP                            # noqa: E402
 from widgets.panel_base import _RunRow, _Elided                    # noqa: E402
 
+# The first run is one an add-on wrote, so its row carries the add-on tag. BOQ
+# where the build has it; otherwise the first add-on this build does have whose
+# run records start "<name> — " (Sales: WhatsApp, Studio: Motion).
+from addons import registry as _registry                           # noqa: E402
+from widgets.panel_base import ADDONS as _TAGS                     # noqa: E402
+_TAGGED = next(a for key in ("boq", "whatsapp", "motion")
+               for a in [_registry.by_key(key)] if a is not None)
+_PREFIX = next(p for p in _TAGGED.run_prefixes if p.endswith(" — "))
+_TAG = _TAGS[_TAGGED.kind or _TAGGED.key].upper()
+
 NOW = time.time()
 RUNS = [
-    {"title": "BOQ — HVAC ductwork", "tools": ["Prism Agent Claude"], "when": "1 hour ago",
+    {"title": _PREFIX + "HVAC ductwork", "tools": ["Prism Agent Claude"], "when": "1 hour ago",
      "ok": True, "error": "", "stamp": NOW - 3600, "path": "/x/run_1.json"},
     {"title": "Research overview", "tools": ["Perplexity"], "when": "5 hours ago",
      "ok": False, "error": "no answer", "stamp": NOW - 5 * 3600, "path": "/x/run_2.json"},
@@ -67,7 +77,7 @@ class RunRowMatchesThePreview(unittest.TestCase):
 
     def test_add_on_tag_is_mono_caps_on_soft_stone_r6(self):
         tag = next(w for w in self.row.findChildren(C.Pill))
-        self.assertEqual(tag.text(), "BOQ")
+        self.assertEqual(tag.text(), _TAG)
         css = tag.styleSheet().lower()
         self.assertIn("#efeeea", css)
         self.assertIn("border-radius: 6px", css)
