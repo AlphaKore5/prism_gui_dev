@@ -143,6 +143,32 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 _OFFLINE_DEV = "PRISM_LICENSE_OFFLINE_DEV"
 
+# No test may reach a host outside this machine (tests/netguard.py). Installed
+# here, at import, so collection and every thread are covered too.
+import netguard
+netguard.install()
+
+
+@pytest.fixture(autouse=True)
+def _the_network_is_closed(request):
+    """Fail any test that tried to leave this machine, naming the host (tests/netguard.py)."""
+    netguard.begin_test(request.node.nodeid,
+                        request.node.get_closest_marker("allow_network") is not None)
+    yield
+    blocked = netguard.end_test()
+    if blocked:
+        pytest.fail("this test tried to reach outside this machine: "
+                    + ", ".join(sorted({"%s (%s)" % b for b in blocked})), pytrace=False)
+
+
+@pytest.fixture(autouse=True)
+def _the_licence_server_is_this_machine(monkeypatch):
+    """A source run honours PRISM_LICENSE_SERVER (licensing/client.py:server_url), so a call
+    the tests forgot to stub lands on a closed local port, never on the real server. A test
+    that needs another value sets its own."""
+    monkeypatch.setenv("PRISM_LICENSE_SERVER", "http://127.0.0.1:9")
+    yield
+
 # Long enough for a stub-answered thread to finish (microseconds) or a real
 # one to time out against the server, short enough that a wedged thread does
 # not read as a hung suite.
@@ -388,6 +414,13 @@ def _a_platform_call_never_reaches_the_network(monkeypatch):
         yield
         return
     monkeypatch.setattr(ui, "PlatformWorker", _NoServer)
+    # campaigns_page, templates_page, template_editor and import_dialog import the class
+    # itself, so rebinding ui.PlatformWorker never reached them (a real POST per page to
+    # the licence server, 23 Nov 2026). Their shared class is made unable to start; a test
+    # that swaps in its own fake class is untouched.
+    from addons.whatsapp import workers
+    monkeypatch.setattr(workers.PlatformWorker, "start",
+                        lambda self: self.failed.emit("There is no server in a test.", {}))
     yield
 
 

@@ -4024,7 +4024,10 @@ class TheEmailWorkerSpendsOnTheChosenPeople(unittest.TestCase):
             order.append(("find", lead))
 
         w, got = self._worker([a, b], cfg={"hunter_api_key": "h", "exa_api_key": "exa-k"})
+        # find_emails_by_domain is the Hunter domain-search pass that follows the
+        # lookup; left real it makes a live GET to api.hunter.io with the fake key.
         with mock.patch("prospector.enrich.enrich", side_effect=fake_enrich) as enriched, \
+                mock.patch("prospector.verify.find_emails_by_domain"), \
                 mock.patch("prospector.verify.find_and_verify", side_effect=fake_find):
             w.run()
         self.assertEqual(got["failed"], [])

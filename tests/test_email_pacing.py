@@ -64,8 +64,10 @@ def _people(n):
     return [{"email": f"p{i}@x.in", "name": f"P{i}"} for i in range(n)]
 
 
+# save_to_sent off: the Sent-folder copy opens a real IMAP connection to
+# imap.x.in / mail.x.in (port 993) and is its own feature, not what this file tests.
 CFG = {"email": {"address": "sales@x.in", "password": "p", "host": "h",
-                 "port": 465}}
+                 "port": 465, "save_to_sent": False}}
 
 
 class TheEngineKeepsThePace(unittest.TestCase):

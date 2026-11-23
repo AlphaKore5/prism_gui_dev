@@ -30,6 +30,8 @@ import tempfile
 import unittest
 import zipfile
 
+import pytest
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import core_bridge  # noqa: F401,E402  (puts prism_terminal/core on sys.path)
@@ -441,6 +443,7 @@ class LiveIndex(unittest.TestCase):
     """Touches PyPI. Off unless PRISM_NET_TESTS is set, so an aeroplane or a
     locked-down CI runner does not report a failure that is not one."""
 
+    @pytest.mark.allow_network
     @unittest.skipUnless(os.environ.get("PRISM_NET_TESTS"),
                          "set PRISM_NET_TESTS=1 to check against real PyPI")
     def test_there_is_a_wheel_for_this_machine(self):

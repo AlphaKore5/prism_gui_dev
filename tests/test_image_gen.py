@@ -349,7 +349,9 @@ class GenerateArtworkDrawsCutsAndKeepsGoingOnOneFailure(unittest.TestCase):
         own findings away the moment a content stage ran after it. Both
         must reach the brief-writer."""
         with mock.patch.object(IG._openrouter, "openrouter_chat",
-                              return_value="a\nb") as call:
+                              return_value="a\nb") as call, \
+                mock.patch.object(IG._openrouter, "openrouter_image",
+                                  return_value=_fake_png_bytes()):
             IG.generate_artwork(
                 "make a reel",
                 ["the script: a 15-second reel about our valves",

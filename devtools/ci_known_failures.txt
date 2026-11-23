@@ -8,8 +8,9 @@
 # QPdfWriter/QTextDocument wrote there ('Acme Springs' not found in ''), so the
 # real PDF text on Windows is unverified. Needs a Windows machine to look at the
 # PDF; do not paper over it — it is the customer-facing quotation.
-test_inquiry_files.py::TheQuotationPDF::test_a_new_pdf_replaces_an_old_one
-test_inquiry_files.py::TheQuotationPDF::test_it_reads_as_a_quotation_on_the_companys_name
+# (Both tests pass on Linux, complete flavour, 2026-11-23, and their entries were
+# removed at the owner's request. The Windows result is still unverified: if the
+# Windows runner fails them again, put the two lines back.)
 
 # Windows runner only, since at least 1.8.6 (measured 20 Nov 2026: 9-16 of 30
 # runs): the process dies with an access violation while a task's worker is
