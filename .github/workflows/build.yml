@@ -11,7 +11,15 @@ on:
     # archives INTO the assets releases (7 of the 1000 asset slots each,
     # found while shipping 1.4.1) and burned three runners per platform.
     tags: ["v*", "!v*-assets-*"]
+  # Pull requests always run the tests (Windows included); they build the
+  # installers only when packaging-relevant files change (devtools/ci_changes.py)
+  # or the PR has the `build` label. The label is read from the event, so add
+  # it before pushing (or push again after adding it).
   pull_request:
+  # The installers once a night from main, so a packaging break that no PR
+  # touched (a new import PyInstaller misses) still shows within a day.
+  schedule:
+    - cron: "30 21 * * *"   # 21:30 UTC, 03:00 IST
   # A manual run builds ONE flavour (flavour.py) for testing and nothing else:
   # it never publishes. The release job runs on a pushed tag only, and the
   # update manifest / per-file update assets are made for "complete" only.
@@ -25,6 +33,15 @@ on:
 
 permissions:
   contents: write   # needed only by the release job
+
+# A newer push to the same branch or PR cancels the run it replaces. A tag run
+# gets a group of its own (its run id) and is never cancelled: a release must
+# never be stopped half-way by anything. The event and the flavour are in the
+# group so the nightly run, a push and manual runs of different flavours on
+# the same branch never cancel each other.
+concurrency:
+  group: ${{ github.workflow }}-${{ startsWith(github.ref, 'refs/tags/') && github.run_id || github.ref }}-${{ github.event_name }}-${{ inputs.flavour }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
 env:
   # Read by packaging/build.py, which bakes it into flavour.py for the build.
@@ -52,12 +69,21 @@ jobs:
   # been green on all three platforms on every run since 2026-10-23 (the dev
   # repo's v1.6.10 and v1.6.11 tag runs included). Known, explained failures
   # live in devtools/ci_known_failures.txt and do not fail the job.
+  #
+  # Sharded: each platform's ~315 test files are split over 4 parallel jobs
+  # (devtools/suite_runner.py --shard, balanced by devtools/test_timings.json),
+  # so the slowest leg takes about a quarter of the old ~30 minutes. Every
+  # shard must pass for `release` (it needs this whole matrix), and the
+  # `tests-summary` job below gives each platform one combined verdict.
+  # The 4 appears three times: `shard` below, `--shard .../4`, `--shards 4`.
   tests:
-    name: Tests · ${{ matrix.label }}
+    name: Tests · ${{ matrix.label }} ${{ matrix.shard }}/4
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-22.04, windows-latest]
+        shard: [1, 2, 3, 4]
         include:
           - os: ubuntu-22.04
             label: Linux
@@ -69,10 +95,11 @@ jobs:
           # refuses the runner ("The configuration 'macos-14-arm64-us-default' is
           # not supported"), the job is cancelled at once, and `release` needs the
           # whole matrix, so it blocked the publish for Windows and Linux too.
-          # To switch macOS back on: uncomment the two lines below AND the macOS
-          # entry in the `build` matrix, then fix the runner. Every macOS step
-          # (`if: runner.os == 'macOS'`), packaging/codesign.py and the
-          # macos-arm64-app channel stay in the repo untouched.
+          # To switch macOS back on: add macos-14 to `os` above, uncomment the
+          # two lines below, add macOS to `tests-summary`'s labels AND uncomment
+          # the macOS entry in the `build` matrix, then fix the runner. Every
+          # macOS step (`if: runner.os == 'macOS'`), packaging/codesign.py and
+          # the macos-arm64-app channel stay in the repo untouched.
           # - os: macos-14
           #   label: macOS
 
@@ -81,10 +108,17 @@ jobs:
         with:
           submodules: recursive   # core.* lives in the engine submodule
 
+      # The key follows the exact pins, so a changed constraints file starts a
+      # fresh cache instead of growing the old one. The cache holds downloads
+      # only; the install below still runs every time, from the pinned files.
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            packaging/requirements-build.txt
+            constraints/${{ matrix.pins }}.txt
 
       # PySide6 needs these even under the offscreen platform plugin.
       - name: Install Qt's runtime libraries (Linux)
@@ -134,13 +168,83 @@ jobs:
       - name: Run the test suite
         env:
           PRISM_TEST_FLAVOUR: ${{ inputs.flavour }}
-        run: python devtools/suite_runner.py --timeout 300
+        run: >-
+          python devtools/suite_runner.py --timeout 300
+          --shard ${{ matrix.shard }}/4
+          --summary-json "${{ runner.temp }}/test-summary.json"
 
+      # For tests-summary. Not named prism-*: the release job downloads
+      # `prism-*` and publishes all of it.
+      - name: Keep this shard's result
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-summary-${{ matrix.label }}-${{ matrix.shard }}
+          path: ${{ runner.temp }}/test-summary.json
+          if-no-files-found: warn   # tests-summary reports the missing shard
+          retention-days: 7
+
+      # Once per platform; it does not depend on which test files a shard ran.
       - name: Scenario checks
+        if: matrix.shard == 1
         run: python -m devtools.scenarios
 
+  # One verdict per platform for the sharded tests above: every shard
+  # reported, every test file ran in exactly one shard, and the combined list
+  # of NEW FAILURES / crashes / known failures that now pass, in one place.
+  # Named like the old single job, so "read Tests · Windows" still works.
+  tests-summary:
+    name: Tests · ${{ matrix.label }}
+    needs: tests
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        label: [Linux, Windows]
+    steps:
+      - uses: actions/checkout@v4   # tests/ only, to know the full file list
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: test-summary-${{ matrix.label }}-*
+          path: summaries
+      - name: Combine the shards
+        run: python3 devtools/suite_runner.py --merge summaries --shards 4
+
+  # Does this pull request need the installers built? Runs on every event so
+  # that `build` (and, through it, `release`) never depends on a SKIPPED job:
+  # GitHub skips everything downstream of a skipped job, which on a tag would
+  # have skipped the release. Off a pull request its steps are skipped and
+  # `build` decides on the event alone.
+  changes:
+    name: Needs a build?
+    runs-on: ubuntu-latest
+    outputs:
+      packaging: ${{ steps.diff.outputs.packaging }}
+    steps:
+      # A pull request checks out its merge commit; parent 1 is the base
+      # branch, so HEAD^1..HEAD is exactly what the PR changes.
+      - if: github.event_name == 'pull_request'
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - id: diff
+        if: github.event_name == 'pull_request'
+        run: python3 devtools/ci_changes.py HEAD^1 HEAD >> "$GITHUB_OUTPUT"
+
+  # Tags, manual runs, pushes to main and the nightly run always build. A pull
+  # request builds when it touches packaging (see `changes`), has the `build`
+  # label, or when `changes` could not tell (its output is then empty, which
+  # is not 'false'): a wrong "no build" is the one answer never assumed.
   build:
     name: ${{ matrix.label }}
+    needs: changes
+    if: >-
+      !cancelled() && (
+        github.event_name != 'pull_request'
+        || contains(github.event.pull_request.labels.*.name, 'build')
+        || needs.changes.outputs.packaging != 'false'
+      )
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false   # a broken macOS build shouldn't hide a good Windows one
@@ -186,6 +290,10 @@ jobs:
           # word uses, and PySide6 wheels lag the newest release.
           python-version: "3.12"
           cache: pip
+          cache-dependency-path: |   # same key as the tests job (see there)
+            requirements.txt
+            packaging/requirements-build.txt
+            constraints/${{ matrix.pins }}.txt
 
       - name: Install Qt's runtime libraries (Linux)
         if: runner.os == 'Linux'
@@ -405,6 +513,10 @@ jobs:
             dist/manifest.*.unsigned.json
           if-no-files-found: error
           retention-days: 14
+          # The archives are compressed already; zipping them again only cost
+          # time. The level changes the artifact's transport zip, not the files
+          # in it, so what `release` publishes is identical.
+          compression-level: 0
 
       # Deliberately NAMED WITHOUT THE "prism-" PREFIX, and deliberately a
       # separate artifact from the one above: the `release` job below only

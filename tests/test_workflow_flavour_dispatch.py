@@ -77,9 +77,15 @@ class DispatchBuildsOneFlavourAndNeverPublishes(unittest.TestCase):
                                      f"job {name!r}, step {step.get('name')!r}: {needle}")
 
     def test_every_job_that_runs_on_dispatch_is_gated_or_publishes_nothing(self):
-        """tests and build have no `if:` (they run on dispatch); release does."""
-        for name in ("tests", "build"):
-            self.assertNotIn("if", self.wf["jobs"][name], name)
+        """tests has no `if:` and build's `if:` is true for every event that is
+        not a pull request, so both run on dispatch; release is gated.
+
+        Changed 2026-11-24 (CI speed-up): build used to have no `if:` either.
+        It now skips pull requests that touch no packaging file
+        (tests/test_workflow_speed.py pins the exact condition); a dispatch
+        still always builds, which is what this test is about."""
+        self.assertNotIn("if", self.wf["jobs"]["tests"])
+        self.assertIn("github.event_name != 'pull_request'", self.wf["jobs"]["build"]["if"])
         self.assertIn("if", self.wf["jobs"]["release"])
 
     def test_update_manifest_and_assets_are_for_the_complete_build_only(self):
