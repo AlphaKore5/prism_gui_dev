@@ -25,6 +25,7 @@ PATTERNS = (
     ".github/workflows/**",
     "main.py",
     "addons/flavours/**",
+    "prism_terminal",           # an engine bump (gitlink) changes what ships
 )
 
 

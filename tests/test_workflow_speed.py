@@ -329,12 +329,13 @@ class TestsRunEverywhereAndBuildsOnlyWhenNeeded(unittest.TestCase):
     def test_which_paths_count_as_packaging(self):
         self.assertEqual(ci_changes.PATTERNS, (
             "packaging/**", "flavour.py", "requirements*", "constraints/**",
-            ".github/workflows/**", "main.py", "addons/flavours/**"))
+            ".github/workflows/**", "main.py", "addons/flavours/**", "prism_terminal"))
         build = ["packaging/prism.spec", "packaging/requirements-build.txt", "flavour.py",
                  "requirements.txt", "constraints/windows-x64.txt", ".github/workflows/build.yml",
-                 "main.py", "addons/flavours/sales.py"]
+                 "main.py", "addons/flavours/sales.py", "prism_terminal"]
         quiet = ["main_window.py", "tests/test_x.py", "addons/boq/panel.py", "docs/main.py",
-                 "addons/flavour.py", "devtools/requirements.txt", "README.md", "packagingx/a"]
+                 "addons/flavour.py", "devtools/requirements.txt", "README.md", "packagingx/a",
+                 "prism_terminal_notes.md"]
         self.assertEqual(ci_changes.touches_packaging(build), build)
         self.assertEqual(ci_changes.touches_packaging(quiet), [])
 
