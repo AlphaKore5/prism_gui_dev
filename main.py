@@ -59,6 +59,55 @@ def _force_utf8_streams() -> None:
             pass    # None (windowed build) or a stream that can't reconfigure
 
 
+def _trimmed_bundle_checks() -> list[tuple[str, bool]]:
+    """What packaging/prism.spec trims around still works (every flavour):
+    OpenCV without its video plugin, the Drive client from its one bundled
+    discovery document, and this platform's DWG converter where core.boq
+    looks for it. Never touches the network. Fatal in a frozen build only."""
+    import importlib.metadata
+    checks = []
+    try:
+        import cv2
+        import numpy as np
+        # The operations RapidOCR runs on a picture: decode, colour, resize.
+        ok_png, png = cv2.imencode(".png", np.full((24, 32, 3), 200, np.uint8))
+        img = cv2.imdecode(png, cv2.IMREAD_COLOR)
+        gray = cv2.resize(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY), (64, 48))
+        versions = {d.metadata["Name"]: d.version
+                    for d in importlib.metadata.distributions()
+                    if (d.metadata["Name"] or "").lower().startswith("opencv")}
+        ok = ok_png and gray.shape == (48, 64) and len(set(versions.values())) == 1
+        why = "" if ok else f"one OpenCV expected, found {versions}"
+        name = f"OpenCV {cv2.__version__} (picture decode, colour, resize)"
+    except Exception as e:                              # noqa: BLE001
+        ok, why, name = False, f"{type(e).__name__}: {e}", "OpenCV"
+    checks.append((name + (f" — {why}" if why else ""), ok))
+    try:
+        from google.auth.credentials import AnonymousCredentials
+        from googleapiclient.discovery import build
+        # integrations/gdrive.py's own call; static discovery reads the
+        # bundled document and raises rather than fetching a missing one.
+        build("drive", "v3", credentials=AnonymousCredentials(),
+              cache_discovery=False).files()
+        ok, why = True, ""
+    except Exception as e:                              # noqa: BLE001
+        ok, why = False, f"{type(e).__name__}: {e}"
+    checks.append(("Google Drive client from its bundled discovery document"
+                   + (f" — {why}" if why else ""), ok))
+    import core_bridge as CB
+    boq = CB.get_boq()
+    tag = boq._dwg2dxf_platform_tag()
+    if tag:
+        # The file core.boq._ensure_bundled_dwg2dxf() copies on first use.
+        exe = os.path.join(os.path.dirname(os.path.abspath(boq.__file__)),
+                           "vendor", "dwg2dxf", tag,
+                           "dwg2dxf.exe" if tag.startswith("win") else "dwg2dxf")
+        ok = os.path.isfile(exe)
+        checks.append((f"DWG converter bundled ({tag})"
+                       + ("" if ok else f" — not at {exe}"), ok))
+    return checks
+
+
 def _selftest(app) -> int:
     """Prove a packaged build is whole: every bundled resource present, the
     engine importable, the window constructible. Run by packaging/smoke_test.py
@@ -317,6 +366,7 @@ def _selftest(app) -> int:
         for name, (ok, why) in probes:
             checks.append((f"{name} available"
                            f"{'' if ok else ' — ' + why.split(chr(10))[0]}", ok))
+        checks += _trimmed_bundle_checks()
     if _runs("Studio editor + Motion runtime files"):
         checks.append((f"Studio editor + Motion runtime files"
                        f"{'' if assets_ok else f' — {assets_err}'}", assets_ok))

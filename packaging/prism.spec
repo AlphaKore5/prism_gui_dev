@@ -145,14 +145,32 @@ _ENGINE_SKIP = {"run_prism.bat", "run_prism.command", "requirements.txt",
 # are DATA -- loaded from a path by core/skills.py, never imported -- and
 # the loop below drops every .py as code.
 _ENGINE_SKIP_DIRS = ("__pycache__", ".git", ".venv", "demo", "tests", "skills")
+# core/vendor/dwg2dxf has its own entry below: one platform's copy, not all.
+_DWG2DXF_DIR = os.path.join(ENGINE_DIR, "core", "vendor", "dwg2dxf")
 for root, dirs, files in os.walk(ENGINE_DIR):
-    dirs[:] = [d for d in dirs if d not in _ENGINE_SKIP_DIRS]
+    dirs[:] = [d for d in dirs if d not in _ENGINE_SKIP_DIRS
+               and os.path.join(root, d) != _DWG2DXF_DIR]
     for name in files:
         if name.endswith((".py", ".pyc", ".pyo")) or name in _ENGINE_SKIP:
             continue
         src = os.path.join(root, name)
         rel = os.path.relpath(root, GUI_DIR)
         datas.append((src, rel))
+
+# The bundled DWG converter (GNU LibreDWG, core/vendor/dwg2dxf/README.md).
+# The loop above used to ship every platform's copy, so a Windows build
+# carried the 22 MB macOS libredwg.0.dylib and a Linux build both (60 MB),
+# though core/boq.py's _dwg2dxf_platform_tag() only ever uses this machine's.
+# It also put them under prism_terminal/, while core/boq.py looks next to its
+# own __file__, which in a frozen build is <bundle>/core/ (the same reason as
+# studio_assets below). Linux has no bundled copy. The README goes with the
+# binaries: it is the GPL source offer for them.
+_DWG2DXF_TAG = {"win32": "win64", "darwin": "macos-arm64"}.get(sys.platform)
+if _DWG2DXF_TAG and os.path.isdir(os.path.join(_DWG2DXF_DIR, _DWG2DXF_TAG)):
+    _dest = os.path.join("core", "vendor", "dwg2dxf")
+    datas.append((os.path.join(_DWG2DXF_DIR, _DWG2DXF_TAG),
+                  os.path.join(_dest, _DWG2DXF_TAG)))
+    datas.append((os.path.join(_DWG2DXF_DIR, "README.md"), _dest))
 
 # The skills: house doctrine, and the checkers that enforce it. Shipped as a
 # whole tree INCLUDING the .py files, which the engine-data loop above has to
@@ -685,6 +703,37 @@ if _pw_dropped_data or _pw_dropped_bin:
     print(f"[prism] trimmed {_pw_dropped_data + _pw_dropped_bin} unused "
           f"playwright headless-shell/ffmpeg files from the bundle "
           f"({_pw_dropped_data} data, {_pw_dropped_bin} binaries)")
+
+# Two more things nothing in Prism reads, measured on the 1.8.9 Windows build.
+# Filtered here, after Analysis(), for the playwright reason above: the hooks
+# (hooks-contrib's hook-cv2 and hook-googleapiclient.model) add them on their
+# own, so trimming `datas`/`binaries` beforehand would not remove them.
+#   · cv2/opencv_videoio_ffmpeg*.dll: OpenCV's video I/O plugin (28-41 MB
+#     each; 1.8.9 had two, from two OpenCV versions -- see requirements.txt).
+#     cv2 loads it only for VideoCapture/VideoWriter, and nothing in Prism,
+#     the engine or RapidOCR calls them: OCR decodes still pictures.
+#   · googleapiclient's discovery documents: 611 JSON files, 114 MB. Prism
+#     builds one client, Drive v3 (integrations/gdrive.py), and build() reads
+#     it from this folder with no network (static discovery). An API missing
+#     here raises UnknownApiNameOrVersion; it is never fetched instead.
+#     tests/test_spec_slim.py fails if the code builds an API not listed.
+_KEEP_DISCOVERY_DOCS = ("drive.v3.json",)
+
+
+def _unused(t):
+    dest = "/" + t[0].replace("\\", "/")
+    name = dest.rsplit("/", 1)[-1]
+    if "/cv2/" in dest and name.startswith("opencv_videoio_ffmpeg"):
+        return True
+    return ("/googleapiclient/discovery_cache/documents/" in dest
+            and name not in _KEEP_DISCOVERY_DOCS)
+
+
+_n = len(a.datas) + len(a.binaries)
+a.datas = [t for t in a.datas if not _unused(t)]
+a.binaries = [t for t in a.binaries if not _unused(t)]
+print(f"[prism] trimmed {_n - len(a.datas) - len(a.binaries)} unused OpenCV "
+      "video plugins / Google API discovery documents")
 
 if IS_MAC:
     # Chromium's macOS build is "Google Chrome for Testing.app" — a full
