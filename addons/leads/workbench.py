@@ -103,6 +103,11 @@ def _apollo_tip() -> str:
                   "Apollo for you. Exa needs only its own key.")
 
 
+# What revealing one person costs through a Monid wallet: Apollo's match is $0.026, at the Rs 96 to the dollar
+# the rest of Leads uses. A figure for the owner's own wallet (a Monid key and no Apollo key), not a credit.
+_REVEAL_RS = 2.5
+
+
 def _monid_ready(cfg) -> bool:
     """The owner has a Monid key (the config, or MONID_API_KEY): Apollo's people
     search and the phone sources can be bought through it."""
@@ -854,6 +859,10 @@ class LeadsWorkbench(QWidget):
         self._target.setToolTip(tip)
         self._refresh_prepare()             # what Find new people now costs
 
+    def _apollo_via_monid(self) -> bool:
+        """Apollo is reached through the owner's Monid wallet, not an Apollo account of their own."""
+        return not self._key("apollo_api_key") and _monid_ready(self.cfg)
+
     def _source_name(self) -> str:
         return i18n.t("Apollo") if self._source == "apollo" else i18n.t("Exa")
 
@@ -1021,6 +1030,9 @@ class LeadsWorkbench(QWidget):
             return
         if self._pooled():
             text = self._pool_search_meta(spec, _companies)
+        elif self._source == "apollo" and self._apollo_via_monid():
+            text = i18n.t("Searches Apollo, free — about ₹{p} from your Monid wallet for each person "
+                          "revealed").format(p=f"{_REVEAL_RS:g}")
         elif self._source == "apollo":
             text = i18n.t("Searches Apollo — about a credit per person revealed")
         else:
@@ -2356,7 +2368,12 @@ class LeadsWorkbench(QWidget):
         makers. Tests patch this."""
         if self._pooled():
             return self._confirm_pool_search(spec, companies, note)
-        if self._source == "apollo":
+        if self._source == "apollo" and self._apollo_via_monid():
+            n = self._target.value()
+            cost = i18n.t("It searches Apollo, which is free, and reveals each person's name and e-mail "
+                          "from your Monid wallet — about ₹{p} each, for up to {n} people — up to "
+                          "₹{c}.").format(p=f"{_REVEAL_RS:g}", n=n, c=f"{n * _REVEAL_RS:g}")
+        elif self._source == "apollo":
             cost = i18n.t("It searches Apollo — about one Apollo credit for each "
                           "person revealed, up to {n}.").format(n=self._target.value())
         else:

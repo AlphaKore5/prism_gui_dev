@@ -1402,6 +1402,33 @@ class ApolloIsTheOtherDatabase(_Workbench):
         self.assertIsNotNone(self._prepared(wb))
         self.assertEqual(wb._jobs, 1)
 
+    def test_with_only_a_monid_key_apollo_is_priced_in_rupees_not_in_apollo_credits(self):
+        # 24-Nov-2026: found by rendering the screen. With a Monid key and no Apollo account a reveal is about
+        # Rs 2.5 from the owner's wallet; "a credit" is the wording for an Apollo key of their own.
+        from unittest import mock
+        with mock.patch.dict(os.environ, {"MONID_API_KEY": ""}):
+            wb = self._WB.LeadsWorkbench({"monid_api_key": "mk"})
+            wb._set_source("apollo")
+            wb._filters.set_spec(self._WB.SearchSpec.from_dict({"job_titles": {"include": ["Head of Automation"]}}))
+            wb._refresh_prepare()
+            self.assertIn("from your Monid wallet", wb._find_meta.text())
+            self.assertIn("₹2.5", wb._find_meta.text())
+            self.assertNotIn("credit", wb._find_meta.text())
+            said = []
+            with mock.patch.object(self._WB.QMessageBox, "question",
+                                   lambda *a, **k: (said.append(a[2]), self._WB.QMessageBox.StandardButton.No)[1]):
+                self._saved_attrs["_confirm_search"](wb, wb._filters.spec(), [], "")
+            self.assertIn("Monid wallet", said[0])
+            self.assertIn("up to ₹%g" % (wb._target.value() * 2.5), said[0])
+            self.assertNotIn("Apollo credit", said[0])
+
+    def test_with_an_apollo_key_of_their_own_it_is_still_priced_in_apollo_credits(self):
+        wb = self._WB.LeadsWorkbench({"apollo_api_key": "ap-k", "monid_api_key": "mk"})
+        wb._set_source("apollo")
+        wb._filters.set_spec(self._WB.SearchSpec.from_dict({"job_titles": {"include": ["Head of Automation"]}}))
+        wb._refresh_prepare()
+        self.assertEqual(wb._find_meta.text(), "Searches Apollo — about a credit per person revealed")
+
     def test_with_only_a_monid_key_the_keys_box_stays_folded(self):
         wb = self._WB.LeadsWorkbench({"monid_api_key": "mk"})
         self.assertTrue(wb._keys_box.isHidden())
