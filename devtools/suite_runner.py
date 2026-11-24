@@ -40,6 +40,7 @@ import argparse
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
 import tempfile
@@ -196,9 +197,13 @@ def load_known(path: Path = KNOWN) -> set[str]:
     return out
 
 
-def _env(file_timeout: int = 0, hang_log: Path | None = None) -> dict:
+def _env(file_timeout: int = 0, hang_log: Path | None = None, done_log: Path | None = None) -> dict:
     env = dict(os.environ, QT_QPA_PLATFORM=os.environ.get("QT_QPA_PLATFORM", "offscreen"),
                PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
+    if done_log is not None:
+        # tests/conftest.py writes the stage it reached here (tests finished /
+        # about to exit), so a file that timed out says where it was stuck.
+        env["PRISM_FILE_DONE_LOG"] = str(done_log)
     if file_timeout > 120:
         # tests/conftest.py arms faulthandler with this: one minute before the
         # runner would kill the file silently, the process prints every
@@ -258,13 +263,42 @@ def case_key(test_file: Path, classname: str, name: str) -> str:
     return f"{test_file.name}::{part or test_file.stem}::{name}"
 
 
+def _kill_tree(p: subprocess.Popen) -> None:
+    """End the pytest process and everything it started. Killing only the
+    child leaves a grandchild (a browser, a helper) running, and on Windows
+    it can hold the runner's job open."""
+    if sys.platform.startswith("win"):
+        subprocess.run(["taskkill", "/PID", str(p.pid), "/T", "/F"], capture_output=True)
+    else:
+        try:
+            os.killpg(p.pid, signal.SIGKILL)         # started in its own session below
+        except OSError:
+            pass
+    try:
+        p.kill()
+    except OSError:
+        pass
+    p.wait()
+
+
+def _read(path: Path) -> str:
+    return path.read_text(encoding="utf-8", errors="replace") if path.exists() else ""
+
+
 def run_file(test_file: Path, out_dir: Path, per_test_timeout: int, file_timeout: int):
     """One pytest process for one file. Returns (cases, died, tail) where cases
     is [(key, status, message)] and died is a string if the process produced no
-    report."""
+    report.
+
+    Its output goes to a file, not a pipe. With a pipe, a child process that
+    inherits it keeps `subprocess.run` waiting after the pytest process is
+    gone, and on a timeout the output and the watchdog's stack were thrown
+    away (test_gates.py on Windows, 23 Nov 2026: 480 s, no stack in the log)."""
     xml = out_dir / f"{test_file.stem}.xml"
     hang_log = out_dir / f"{test_file.stem}.hang.txt"
-    for old in (xml, hang_log):
+    done_log = out_dir / f"{test_file.stem}.done.txt"
+    out_log = out_dir / f"{test_file.stem}.out.txt"
+    for old in (xml, hang_log, done_log, out_log):
         if old.exists():
             old.unlink()
     cmd = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
@@ -276,19 +310,40 @@ def run_file(test_file: Path, out_dir: Path, per_test_timeout: int, file_timeout
         # retry). The thread method dumps every thread's stack and ends the
         # process, which is what names the hung test.
         cmd[3:3] = [f"--timeout={per_test_timeout}", "--timeout-method=thread"]
-    try:
-        p = subprocess.run(cmd, cwd=ROOT, env=_env(file_timeout, hang_log), capture_output=True, text=True,
-                           encoding="utf-8", errors="replace", timeout=file_timeout)
-        rc, tail = p.returncode, _fault_excerpt(p.stdout + p.stderr)
-    except subprocess.TimeoutExpired as e:
-        out = e.stdout.decode("utf-8", "replace") if isinstance(e.stdout, bytes) else (e.stdout or "")
-        return [], f"timed out after {file_timeout}s", _fault_excerpt(out)
-    hang = hang_log.read_text(encoding="utf-8", errors="replace") if hang_log.exists() else ""
+    with open(out_log, "wb") as sink:
+        p = subprocess.Popen(cmd, cwd=ROOT, env=_env(file_timeout, hang_log, done_log),
+                             stdout=sink, stderr=subprocess.STDOUT,
+                             start_new_session=not sys.platform.startswith("win"))
+        try:
+            rc = p.wait(timeout=file_timeout)
+        except subprocess.TimeoutExpired:
+            _kill_tree(p)
+            rc = None
+    out = _read(out_log)
+    hang = _read(hang_log)
+    if rc is None:
+        # The runner's kill ended it; say where it was. The watchdog (conftest)
+        # is cancelled when the interpreter finalises, so a hang in shutdown
+        # leaves no stack: the marker file is then the only evidence.
+        stage = _read(done_log).strip().splitlines()
+        if hang.strip():
+            return [], (f"timed out after {file_timeout}s: the watchdog dumped every thread's stack "
+                        f"but the process still did not end, so the runner killed it and its children; "
+                        f"the stack follows"), _fault_excerpt(hang, 4000)
+        if stage:
+            return [], (f"timed out after {file_timeout}s: the tests all finished (last stage: "
+                        f"{stage[-1]!r}) and the process then never exited. No watchdog stack exists "
+                        f"(it is cancelled during interpreter shutdown), so this is a hang in shutdown "
+                        f"or native exit; the runner killed it and its children"), _fault_excerpt(out)
+        return [], (f"timed out after {file_timeout}s before the tests finished and with no "
+                    f"watchdog dump; the runner killed it and its children"), _fault_excerpt(out)
+    tail = _fault_excerpt(out)
     if hang.strip():
-        # The watchdog fired: the file hung outside any single test. Even if
-        # every test passed (it hung on the way out), that is a failure.
+        # The watchdog fired and ended the process: the file hung outside any
+        # single test. Even if every test passed (it hung on the way out), that
+        # is a failure.
         return [], (f"hung for {file_timeout - 60}s outside any test (import, class setup "
-                    f"or exit); every thread's stack follows"), _fault_excerpt(hang, 4000)
+                    f"or exit); ended by the watchdog, every thread's stack follows"), _fault_excerpt(hang, 4000)
     if not xml.exists():
         return [], f"the process died before reporting (exit {rc})", tail
     cases = []

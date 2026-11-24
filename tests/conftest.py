@@ -434,15 +434,31 @@ def _a_platform_call_never_reaches_the_network(monkeypatch):
 _EXIT_STATUS = None
 
 
+def _stage(text: str) -> None:
+    """devtools/suite_runner.py sets PRISM_FILE_DONE_LOG. If the file later
+    times out, the last line says whether the tests had finished and how far
+    shutdown got; the watchdog above is cancelled when the interpreter
+    finalises, so a hang in exit leaves no other trace."""
+    path = os.environ.get("PRISM_FILE_DONE_LOG")
+    if path:
+        try:
+            with open(path, "a", encoding="utf-8") as fh:
+                fh.write(text + "\n")
+        except OSError:
+            pass
+
+
 def pytest_sessionfinish(session, exitstatus):
     global _EXIT_STATUS
     _EXIT_STATUS = int(exitstatus)
+    _stage(f"pytest session finished (exit status {_EXIT_STATUS})")
 
 
 @pytest.hookimpl(trylast=True)
 def pytest_unconfigure(config):
     if _EXIT_STATUS is None or os.environ.get("PRISM_TEST_NORMAL_EXIT"):
         return
+    _stage("pytest unconfigured; calling os._exit")
     import sys as _sys
     for stream in (_sys.stdout, _sys.stderr):
         try:
