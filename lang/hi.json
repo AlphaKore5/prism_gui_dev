@@ -1913,7 +1913,6 @@
   "Find their phone…": "उनका फ़ोन खोजें…",
   "Find them in the address": "पते में उन्हें खोजें",
   "Find, qualify and reach the right people — Prism drafts, you send.": "सही लोगों को खोजें, जाँचें और उनसे संपर्क करें — ड्राफ़्ट Prism बनाता है, भेजते आप हैं।",
-  "Finding a person's mobile number runs on Prism's credits, so it isn't available with your own provider keys.": "किसी व्यक्ति का मोबाइल नंबर खोजना Prism के credits से चलता है, इसलिए यह आपकी अपनी provider keys से उपलब्ध नहीं है।",
   "Finding and qualifying people is charged to your Prism credits — you hold no API keys; every message leaves from your own mailbox.": "लोगों को खोजने और जाँचने का शुल्क आपके Prism credits से लिया जाता है — आपके पास कोई API key नहीं है; हर संदेश आपके अपने मेलबॉक्स से जाता है।",
   "Finding e-mail domains…": "ई-मेल डोमेन खोजे जा रहे हैं…",
   "Finding e-mails for {n} selected…": "चुने गए {n} के लिए ई-मेल खोजे जा रहे हैं…",
@@ -4414,8 +4413,6 @@
   "Searches Apollo — about a credit per person revealed": "Apollo में खोजता है — हर दिखाए गए व्यक्ति पर लगभग एक क्रेडिट",
   "Searches Exa": "Exa में खोजता है",
   "Searches for new people": "नए लोगों को खोजता है",
-  "Searching Apollo needs a PAID Apollo plan — the free plan has no API access. Exa needs only its own key.": "Apollo में खोजने के लिए PAID Apollo प्लान चाहिए — फ्री प्लान में API एक्सेस नहीं है। Exa के लिए सिर्फ़ उसकी अपनी की चाहिए।",
-  "Searching Apollo needs an Apollo API key — add it under Keys & claims, or search with Exa instead.": "Apollo में खोजने के लिए Apollo API key चाहिए — इसे Keys & claims के तहत जोड़ें, या इसकी जगह Exa से खोजें।",
   "Searching for mentioned folder(s) and file(s)…": "बताए गए फ़ोल्डर और फ़ाइलें खोजी जा रही हैं…",
   "Searching with Exa needs an Exa API key — add it under Keys & claims, or search with Apollo instead.": "Exa से खोजने के लिए Exa API key चाहिए — इसे Keys & claims के तहत जोड़ें, या इसकी जगह Apollo से खोजें।",
   "Searching with {tool}…": "{tool} से खोजा जा रहा है…",
@@ -6458,7 +6455,6 @@
   "Prism AI is writing your BOQ from the figures. Only the numbers are sent.": "Prism AI आंकड़ों से आपका BOQ लिख रहा है। सिर्फ़ नंबर भेजे जाते हैं।",
   "Prism AI read the drawing and wrote the BOQ.{cost}": "Prism AI ने ड्रॉइंग पढ़ी और BOQ लिख दिया।{cost}",
   "Prism AI was used.": "Prism AI का इस्तेमाल हुआ।",
-  "Prism asks Apollo for each person's own mobile number. It can take a few minutes. A credit is used only for a number found. Nothing is called or checked beyond its format.": "Prism हर व्यक्ति का अपना मोबाइल नंबर Apollo से माँगता है। इसमें कुछ मिनट लग सकते हैं। क्रेडिट सिर्फ़ तब इस्तेमाल होता है जब नंबर मिल जाए। फ़ॉर्मैट के अलावा किसी को कॉल या जाँच नहीं की जाती।",
   "Prism asks for the number each company publishes on its own website or a business directory. A credit is used only for a number found. It is the company's number, published — not a direct dial, and not called or checked.": "Prism हर कंपनी का वह नंबर माँगता है जो वह अपनी वेबसाइट या बिज़नेस डायरेक्टरी पर छापती है। क्रेडिट सिर्फ़ तब इस्तेमाल होता है जब नंबर मिल जाए। यह कंपनी का प्रकाशित नंबर है — सीधा डायल नंबर नहीं, और इस पर कॉल या जाँच नहीं होती।",
   "Prism can measure the ducts straight off the PDF. You set the scale, map the line colours, then extract.": "Prism PDF से सीधे डक्ट नाप सकता है। आप स्केल सेट करते हैं, लाइन के रंग मैप करते हैं, फिर निकालते हैं।",
   "Prism can read .txt, .md, .csv, .docx and .pdf files here. For anything else, paste the text.": "Prism यहाँ .txt, .md, .csv, .docx और .pdf फ़ाइलें पढ़ सकता है। बाकी के लिए टेक्स्ट पेस्ट करें।",
@@ -6478,5 +6474,5 @@
   "Prism could not write that file. Try another folder or another format.": "Prism वह फ़ाइल नहीं लिख सका। कोई दूसरा फ़ोल्डर या दूसरा फ़ॉर्मैट आज़माएँ।",
   "Prism couldn't open the login tabs.\n\n{error}\n\nThe details are in Prism's log.": "Prism लॉगिन टैब नहीं खोल सका।\n\n{error}\n\nविवरण Prism के log में हैं।"
  },
- "count": 6475
+ "count": 6471
 }
