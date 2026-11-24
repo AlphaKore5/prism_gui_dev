@@ -192,6 +192,84 @@ class TheScreenOnThePool(_Workbench):
             self.assertEqual(wb._missing_key(), "")                 # "people" (Exa) is off, Apollo is on
 
 
+    # Search settings says what each setting costs on THIS route, in the unit the customer pays in (24-Nov-2026).
+
+    def test_the_source_line_says_search_is_free_a_reveal_costs_credits_and_exa_is_behind_it(self):
+        wb = self.bench()
+        wb._set_source("apollo")
+        said = wb._settings_hints()
+        self.assertIn("free", said["source"])
+        self.assertIn("2 credits", said["source"])
+        self.assertIn("Exa takes over", said["source"])
+
+    def test_the_reveal_ceiling_is_priced_in_credits(self):
+        wb = self.bench()
+        wb._set_source("apollo")
+        wb._target.setValue(300)
+        self.assertEqual(wb._settings_hints()["target"], "Up to 600 credits.")
+
+    def test_exa_only_names_its_own_price(self):
+        wb = self.bench()
+        wb._set_source("exa")
+        said = wb._settings_hints()
+        self.assertIn("A search that finds nobody is not charged", said["source"])
+        self.assertEqual(said["target"], "")
+
+    def test_the_email_and_mobile_lines_use_the_rate_card_not_a_rupee_guess(self):
+        said = self.bench()._settings_hints()
+        self.assertIn("2 credits for each address found", said["verify"])
+        self.assertIn("10 credits for each number found", said["mobiles"])
+        self.assertNotIn("\u20b9", " ".join(said.values()))
+
+    def test_the_hints_are_written_on_the_labels_and_follow_the_ceiling(self):
+        wb = self.bench()
+        wb._set_source("apollo")
+        wb._target.setValue(50)
+        self.assertEqual(wb._target_meta.text(), "Up to 100 credits.")
+
+
+class TheSettingsWindowOnYourOwnKeys(_Workbench):
+    def setUp(self):
+        super().setUp()
+        env = mock.patch.dict(os.environ, {"MONID_API_KEY": "", "APOLLO_API_KEY": ""})
+        env.start()
+        self.addCleanup(env.stop)
+
+    def hints(self, cfg, source=None):
+        wb = self._WB.LeadsWorkbench(cfg)
+        if source:
+            wb._set_source(source)
+        return wb, wb._settings_hints()
+
+    def test_a_monid_wallet_prices_a_reveal_and_the_phone_lookup_in_rupees(self):
+        wb, said = self.hints({"monid_api_key": "mk", "exa_api_key": "ek"}, "apollo")
+        self.assertIn("Monid wallet", said["source"])
+        self.assertIn("Exa takes over", said["source"])
+        self.assertIn("\u20b9", said["target"])
+        self.assertIn("Monid wallet", said["mobiles"])
+
+    def test_without_an_exa_key_it_does_not_promise_a_backup(self):
+        _wb, said = self.hints({"monid_api_key": "mk"}, "apollo")
+        self.assertNotIn("Exa", said["source"])
+
+    def test_an_own_apollo_account_is_counted_in_apollo_credits(self):
+        _wb, said = self.hints({"apollo_api_key": "ap"}, "apollo")
+        self.assertIn("Apollo credit", said["source"])
+        self.assertEqual(said["mobiles"], "")                         # no Monid wallet, no mobile lookup to price
+
+    def test_a_monid_wallet_without_a_hunter_key_renames_verify_because_it_finds(self):
+        wb, said = self.hints({"monid_api_key": "mk"})
+        wb._refresh_settings_hints()
+        self.assertEqual(wb._verify_row.name.text(), "Find e-mails")
+        self.assertIn("Hunter", said["verify"])
+
+    def test_a_hunter_key_keeps_the_verify_name_and_adds_no_line(self):
+        wb, said = self.hints({"monid_api_key": "mk", "hunter_api_key": "hk"})
+        wb._refresh_settings_hints()
+        self.assertEqual(said["verify"], "")
+        self.assertNotEqual(wb._verify_row.name.text(), "Find e-mails")
+
+
 class TheStartingSourceOnYourOwnKeys(_Workbench):
     """Apollo first, Exa behind it (the owner's plan, 24-Nov-2026): the screen starts on Apollo where its search is
     free and cannot be refused — a Monid wallet and no Apollo account — and on Exa everywhere else."""

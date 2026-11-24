@@ -681,8 +681,10 @@ class LeadsWorkbench(QWidget):
         # fallback: Apollo's search endpoints are not in its FREE plan, so an
         # owner who has only pasted a key would meet a 403, not a list.
         src = _segment("sourceSeg")
-        self._src_apollo = QPushButton(i18n.t("Apollo"))
-        self._src_exa = QPushButton(i18n.t("Exa"))
+        # Apollo first, Exa behind it: if Apollo finds nobody (or cannot be asked) the run moves to Exa by itself,
+        # so the two buttons say that — "Apollo, then Exa" or "Exa only" — and not a bare either/or.
+        self._src_apollo = QPushButton(i18n.t("Apollo, then Exa"))
+        self._src_exa = QPushButton(i18n.t("Exa only"))
         for b, name in ((self._src_apollo, "apollo"), (self._src_exa, "exa")):
             b.setCheckable(True)
             b.setCursor(Qt.PointingHandCursor)
@@ -696,6 +698,8 @@ class LeadsWorkbench(QWidget):
         # licence server holds the key — so the switch is built (the
         # walkthrough and the tests address it) but not shown.
         self._source_row.setVisible(not self._pooled())
+        self._source_meta = C.label("", level="META", wrap=True)
+        body.addWidget(self._source_meta)
 
         body.addWidget(_kick(i18n.t("Run settings")))
         self._target = QSpinBox()
@@ -704,6 +708,9 @@ class LeadsWorkbench(QWidget):
         # Its name and tooltip belong to the source — _set_source writes both.
         self._target_row = _setting(i18n.t("Source up to"), self._target)
         body.addWidget(self._target_row)
+        self._target_meta = C.label("", level="META", wrap=True)
+        body.addWidget(self._target_meta)
+        self._target.valueChanged.connect(lambda _v: self._refresh_settings_hints())
         self._limit = QSpinBox()
         self._limit.setRange(1, 500)
         self._limit.setValue(25)
@@ -724,6 +731,10 @@ class LeadsWorkbench(QWidget):
                 "~50 credits a month, so keep this modest — 0 skips verification."))
             self._verify_row = _setting(i18n.t("Verify (Hunter)"), self._verify_limit)
         body.addWidget(self._verify_row)
+        self._verify_meta = C.label("", level="META", wrap=True)
+        body.addWidget(self._verify_meta)
+        self._mobiles_meta = C.label("", level="META", wrap=True)
+        body.addWidget(self._mobiles_meta)
 
         body.addWidget(_field(i18n.t("What you sell")))
         self._offer = QPlainTextEdit()
@@ -858,6 +869,69 @@ class LeadsWorkbench(QWidget):
         self._target_row.setToolTip(tip)
         self._target.setToolTip(tip)
         self._refresh_prepare()             # what Find new people now costs
+
+    def _settings_hints(self) -> dict:
+        """The line under each setting in Search settings, said in what it costs on THIS route: Prism's credits on
+        the pool, rupees from the owner's Monid wallet, or the owner's own Apollo / Exa account. Pure: it only reads
+        the screen's state and the price list, so it can be tested without drawing anything."""
+        from prospector import mobiles
+        from prospector import phone_waterfall as W
+        usd = 96                                                    # rupees to the dollar, as everywhere in Leads
+        out = {"source": "", "target": "", "verify": "", "mobiles": ""}
+        apollo, n = self._source == "apollo", self._target.value()
+        if self._pooled():
+            reveal = gateway.rate("apollo_reveal", 2)
+            if apollo:
+                out["source"] = " ".join((
+                    i18n.t("Searching Apollo is free. Each person revealed costs {p}.").format(p=self._cr(reveal)),
+                    i18n.t("If Apollo finds nobody, Exa takes over.")))
+                out["target"] = i18n.t("Up to {c}.").format(c=self._cr(reveal * n))
+            else:
+                out["source"] = i18n.t("Each search costs {p}. A search that finds nobody is not charged.").format(
+                    p=self._cr(gateway.rate("people_search", 3)))
+            out["verify"] = i18n.t("Hot and warm leads. {c} for each address found.").format(
+                c=self._cr(gateway.rate("email_find", 2)))
+            out["mobiles"] = i18n.t("Find mobiles: up to {n} people a press, {c} for each number found.").format(
+                n=mobiles.LIMIT, c=self._cr(gateway.rate("phone_mobile", 10)))
+            return out
+        monid = _monid_ready(self.cfg)
+        backup = bool(self._key("exa_api_key"))
+        if apollo and self._apollo_via_monid():
+            parts = [i18n.t("Searching Apollo is free. Each person revealed is about ₹{p} from your Monid wallet.").format(
+                p=f"{_REVEAL_RS:g}")]
+            if backup:
+                parts.append(i18n.t("If Apollo finds nobody, Exa takes over."))
+            out["source"] = " ".join(parts)
+            out["target"] = i18n.t("Up to about ₹{c}.").format(c=f"{n * _REVEAL_RS:g}")
+        elif apollo:
+            parts = [i18n.t("Searching Apollo is free. Revealing a person uses about one Apollo credit.")]
+            if backup:
+                parts.append(i18n.t("If Apollo finds nobody, Exa takes over."))
+            out["source"] = " ".join(parts)
+            out["target"] = i18n.t("Up to {n} Apollo credits.").format(n=n)
+        else:
+            out["source"] = i18n.t("Each Exa search uses your Exa balance.")
+        if monid:
+            if not self._key("hunter_api_key"):
+                out["verify"] = i18n.t("Hot and warm leads — about ₹{c} for each address found, from your Monid "
+                                       "wallet (Hunter).").format(c=f"{0.0245 * usd:.1f}")
+            out["mobiles"] = i18n.t("Find mobiles: up to {n} people a press, about ₹{c} for each number found, from "
+                                    "your Monid wallet.").format(n=mobiles.LIMIT, c=round(W.TYPICAL_PER_NUMBER * usd))
+        return out
+
+    def _refresh_settings_hints(self) -> None:
+        """Write the hints under the settings, and name the Verify setting for what it now does."""
+        if not hasattr(self, "_mobiles_meta"):
+            return                                                 # called while the window is still being built
+        hints = self._settings_hints()
+        for label, key in ((self._source_meta, "source"), (self._target_meta, "target"),
+                           (self._verify_meta, "verify"), (self._mobiles_meta, "mobiles")):
+            label.setText(hints[key])
+            label.setVisible(bool(hints[key]))
+        # With a Monid wallet and no Hunter key the addresses are found through Monid: it finds, it does not
+        # just verify. Everyone else keeps the name they know.
+        if not self._pooled() and _monid_ready(self.cfg) and not self._key("hunter_api_key"):
+            self._verify_row.name.setText(i18n.t("Find e-mails"))
 
     def _default_source(self) -> str:
         """Apollo first, Exa behind it (the owner's plan, 24-Nov-2026) — but only where Apollo's search is free
@@ -1030,6 +1104,7 @@ class LeadsWorkbench(QWidget):
     def _refresh_prepare(self):
         """Find new people: armed when the filters ask for somebody, with what
         it will cost under it — the owner approves every credit (23-Sep-2026)."""
+        self._refresh_settings_hints()
         spec, _companies, note, _marks = self._search_spec()
         ok = spec is not None
         # Never re-armed mid-run: the filters stay live while a search runs,
