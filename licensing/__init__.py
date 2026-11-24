@@ -765,11 +765,13 @@ def apply_cached_payload() -> int:
     return len(selectors) + len(models) + len(profiles)
 
 
-def _refresh_lease_once() -> bool:
+def _refresh_lease_once(*, clear_if_too_old: bool = False) -> bool:
     """Renew the authorisation lease. True if a fresh one was cached.
 
     Free — /v1/lease records no usage and consumes no daily allowance — so
     this can run on a timer without billing anybody for the question.
+    `clear_if_too_old` is for the background renewal started by authorize()
+    only; see the CLIENT_TOO_OLD branch below.
     """
     license_id = store.load(user_dir()).get("license_id") or state().license_id
     if not license_id or state().status in (NONE, TAMPERED):
@@ -783,15 +785,19 @@ def _refresh_lease_once() -> bool:
         # get once it is below the floor — and it names the floor. Keep it,
         # so the banner can say "update" rather than "can't reach the server".
         _store_versions(e.detail)
-        if e.code in ("LICENSE_REVOKED", "LICENSE_EXPIRED",
-                      "DEVICE_NOT_ACTIVATED", "CLIENT_TOO_OLD"):
+        if (e.code in ("LICENSE_REVOKED", "LICENSE_EXPIRED",
+                       "DEVICE_NOT_ACTIVATED")
+                or (clear_if_too_old and e.code == "CLIENT_TOO_OLD")):
             # A definite withdrawal. Drop the cached lease so protected work
             # stops at the end of this call rather than at the end of the
-            # offline window — this is what makes revocation bite. A build
-            # below the version floor is withdrawn the same way: authorize()
-            # opens an add-on from a lease in its offline window without
-            # waiting for this answer, so the floor has to land on the lease
-            # for it to refuse the NEXT open.
+            # offline window — this is what makes revocation bite.
+            # CLIENT_TOO_OLD clears only for the background renewal:
+            # authorize() opens an add-on from a lease in its offline window
+            # without waiting for this answer, so the floor has to land on
+            # the lease for it to refuse the NEXT open. The 10-minute licence
+            # timer does not clear: if the floor were raised by mistake,
+            # customers on older builds must lose add-ons when their lease
+            # ends, not mid-session within 10 minutes.
             authorization.clear(user_dir())
         else:
             authorization.note_attempt(user_dir())
@@ -832,7 +838,7 @@ def _renew_in_background() -> None:
 
 def _renew_worker() -> None:
     try:
-        _refresh_lease_once()
+        _refresh_lease_once(clear_if_too_old=True)
     except Exception:                               # noqa: BLE001
         pass
     finally:

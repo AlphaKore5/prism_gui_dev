@@ -719,6 +719,22 @@ class GraceOpensAtOnce(LeaseHarness):
         self.assertEqual(store.load(self.tmp).get("min_supported_version"),
                          "99.0.0")
 
+    def test_the_timer_path_keeps_the_lease_on_client_too_old(self):
+        """Only the background renewal clears on CLIENT_TOO_OLD. The 10-minute
+        timer calls _refresh_lease_once() with no argument: a floor raised by
+        mistake must not take add-ons away mid-session, only at lease end."""
+        self.install_lease(ttl=-60, offline=3600)
+        A.save(self.tmp, {**A.load(self.tmp), "last_attempt": 1})
+        refusal = client.ServerError(
+            "CLIENT_TOO_OLD", "Please update Prism.",
+            {"min_supported_version": "99.0.0"})
+        with mock.patch.object(client, "lease", side_effect=refusal):
+            self.assertFalse(licensing._refresh_lease_once())
+        self.assertTrue(os.path.exists(A.path(self.tmp)))
+        self.assertGreater(A.load(self.tmp)["last_attempt"], 1)
+        self.assertEqual(store.load(self.tmp).get("min_supported_version"),
+                         "99.0.0")
+
     def test_renewed_lease_without_the_scope_is_refused(self):
         """A plan downgrade arrives as a narrower lease. The old lease that
         let this call through must not be the last word."""
