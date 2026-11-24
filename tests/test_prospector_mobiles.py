@@ -260,6 +260,36 @@ class FindingMobiles(unittest.TestCase):
         self.assertIn("Monid key", out["why"][0])
 
 
+class AMobileTheDigitsCannotTell(unittest.TestCase):
+    """24-Nov-2026, found with a real lookup: a number starting 6-8 is recorded "unknown" when the source does not
+    say it is a mobile. It IS the person's number, and counting only "mobile" asked for it again and charged again."""
+
+    def test_an_unknown_kind_still_counts_as_the_persons_mobile_and_is_not_asked_for_again(self):
+        a = lead()
+        self.assertTrue(M.apply(a, "+917123450304", "unknown", "contactout"))
+        self.assertTrue(M.has_mobile(a))
+        self.assertFalse(M.needs_mobile(a))
+        self.assertEqual(M.entry_of(a)["provider"], "contactout")
+
+    def test_a_landline_or_toll_free_number_is_not_the_persons_mobile(self):
+        for kind in ("landline", "toll_free"):
+            a = lead()
+            M.apply(a, "+912265551234", kind, "contactout")
+            self.assertFalse(M.has_mobile(a), kind)
+
+    def test_the_direct_lookup_does_not_ask_twice_for_the_same_person(self):
+        asked = []
+
+        def find_one(first, last, domain, *, key, company="", title=""):
+            asked.append(first)
+            return {"number": "+917123450304", "kind": "unknown", "provider": "contactout",
+                    "tried": [("contactout", "found")]}
+        a = lead()
+        M.find_direct([a], {"monid_api_key": "K"}, find_one=find_one)
+        M.find_direct([a], {"monid_api_key": "K"}, find_one=find_one)
+        self.assertEqual(asked, ["Asha"])                                   # the second press found nobody to ask for
+
+
 class FindingMobilesDirect(unittest.TestCase):
     """The same job on the owner's OWN Monid wallet (24-Nov-2026): three sources asked in turn, cheapest
     first, each charging only for a number it returns (prospector/phone_waterfall.py). The engine is

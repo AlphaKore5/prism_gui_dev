@@ -41,9 +41,15 @@ def _who(lead) -> tuple | None:
     return (first, last, domain) if first and last and domain else None
 
 
+# A person's own number, as recorded: "mobile", or "unknown" when the digits cannot tell (a number that starts
+# 6-8, or an international one) and the source did not say. Both are the person's number, and both stop a
+# second lookup: counting only "mobile" asked for the same person again and charged again (24-Nov-2026).
+_OWN_KINDS = ("mobile", "unknown")
+
+
 def has_mobile(lead) -> bool:
     """A mobile of the person's own is already on the lead."""
-    return any(isinstance(p, dict) and p.get("scope") == "person" and p.get("kind") == "mobile"
+    return any(isinstance(p, dict) and p.get("scope") == "person" and p.get("kind") in _OWN_KINDS
                for p in (getattr(lead, "extra", None) or {}).get("phones") or ())
 
 
@@ -51,7 +57,7 @@ def entry_of(lead) -> dict | None:
     """The record of the person's own mobile (`extra["phones"]`, scope "person"), or None.
     It can sit beside a number the person came with, which `lead.phone` keeps."""
     for p in (getattr(lead, "extra", None) or {}).get("phones") or ():
-        if isinstance(p, dict) and p.get("scope") == "person" and p.get("kind") == "mobile":
+        if isinstance(p, dict) and p.get("scope") == "person" and p.get("kind") in _OWN_KINDS:
             return p
     return None
 

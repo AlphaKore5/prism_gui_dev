@@ -56,21 +56,26 @@ def _list(node) -> list:
 
 
 def candidates(source: str, output) -> list:
-    """The numbers a source's answer holds, as written, best first. Nothing here raises: an answer that is
-    not the shape this was read from (24-Nov-2026) gives nothing, which reads as "not found"."""
+    """[(number as written, the source's own word for it)], best first. The word ("mobile", "landline" or "")
+    matters: a number that starts 6-8 cannot be told from its digits (Indian mobiles and STD codes share
+    them), so without it a perfectly good mobile is read as "unknown". ai_ark's endpoint is a MOBILE finder,
+    ReverseContact labels every number, ContactOut does not. Nothing here raises: an answer that is not the
+    shape this was read from (24-Nov-2026) gives nothing, which reads as "not found"."""
     out = output if isinstance(output, dict) else {}
     if source == "ai_ark":
         data = out.get("data") if out.get("found") else None
         data = data if isinstance(data, dict) else {}
-        return [x for x in _list(data.get("phones")) + [data.get("phone")] if isinstance(x, str) and x.strip()]
+        return [(x, "mobile") for x in _list(data.get("phones")) + [data.get("phone")]
+                if isinstance(x, str) and x.strip()]
     if source == "reversecontact":
         data = out.get("data") if isinstance(out.get("data"), dict) else {}
         rows = [r for r in _list(data.get("result")) if isinstance(r, dict) and isinstance(r.get("value"), str)]
         rows.sort(key=lambda r: 0 if str(r.get("type")).lower() == "mobile" else 1)
-        return [r["value"] for r in rows if r["value"].strip()]
+        return [(r["value"], str(r.get("type") or "").lower() if str(r.get("type") or "").lower()
+                 in ("mobile", "landline") else "") for r in rows if r["value"].strip()]
     if source == "contactout":
         profile = out.get("profile") if isinstance(out.get("profile"), dict) else {}
-        return [x for x in _list(profile.get("phone")) if isinstance(x, str) and x.strip()]
+        return [(x, "") for x in _list(profile.get("phone")) if isinstance(x, str) and x.strip()]
     return []
 
 
@@ -80,8 +85,8 @@ def number_from(source: str, run) -> tuple | None:
     ("unknown", an international one) does."""
     if not isinstance(run, dict) or run.get("output") is None or monid_run.http_status(run) not in (0, 200):
         return None
-    for raw in candidates(source, run.get("output")):
-        got = phones.normal_phone(raw)
+    for raw, hint in candidates(source, run.get("output")):
+        got = phones.normal_phone(raw, hint)
         if got and got[1] in ("mobile", "unknown"):
             return got
     return None

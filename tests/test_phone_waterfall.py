@@ -92,7 +92,7 @@ class ReadingAnAnswer(unittest.TestCase):
             self.assertIsNone(W.number_from(source, ANSWERS[f"{source}_miss"]), source)
 
     def test_reversecontact_puts_the_mobile_before_a_landline(self):
-        self.assertEqual(W.candidates("reversecontact", ANSWERS["reversecontact_hit"]["output"])[0], MOBILE)
+        self.assertEqual(W.candidates("reversecontact", ANSWERS["reversecontact_hit"]["output"])[0], (MOBILE, "mobile"))
 
     def test_a_landline_alone_is_not_a_persons_mobile(self):
         run = {"output": {"success": True, "data": {"result": [{"value": "+91 79 2658 1234", "type": "landline"}]}},
@@ -117,6 +117,29 @@ class ReadingAnAnswer(unittest.TestCase):
     def test_a_provider_error_status_is_not_a_number(self):
         run = dict(ANSWERS["ai_ark_hit"], providerResponse={"httpStatus": 500})
         self.assertIsNone(W.number_from("ai_ark", run))
+
+
+class AMobileTheDigitsCannotTell(unittest.TestCase):
+    """Found with a real lookup (24-Nov-2026): ai_ark returned a mobile starting 6-8, which `normal_phone` can only
+    call "unknown" without the source's word — and an "unknown" number was not counted as the person's mobile, so
+    the screen asked for it again and charged again."""
+
+    def run_of(self, output):
+        return {"output": output, "providerResponse": {"httpStatus": 200}}
+
+    def test_ai_ark_numbers_are_read_as_mobiles_because_the_endpoint_is_a_mobile_finder(self):
+        run = self.run_of({"found": True, "data": {"phones": ["+917123450304"]}})
+        self.assertEqual(W.number_from("ai_ark", run), ("+917123450304", "mobile"))
+
+    def test_reversecontact_numbers_are_read_by_the_type_it_labels_them_with(self):
+        mobile = self.run_of({"data": {"result": [{"value": "+918123450304", "type": "mobile"}]}})
+        landline = self.run_of({"data": {"result": [{"value": "+917123450304", "type": "landline"}]}})
+        self.assertEqual(W.number_from("reversecontact", mobile), ("+918123450304", "mobile"))
+        self.assertIsNone(W.number_from("reversecontact", landline))      # labelled a landline: a desk, not a mobile
+
+    def test_contactout_says_nothing_so_the_number_is_kept_as_unknown(self):
+        run = self.run_of({"profile": {"phone": ["+91 71234 50304"]}})
+        self.assertEqual(W.number_from("contactout", run), ("+917123450304", "unknown"))
 
 
 class TheWaterfall(unittest.TestCase):
