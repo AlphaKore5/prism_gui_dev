@@ -18,7 +18,7 @@ attachment. The server scrubs again; this scrubs first.
 
 Rules this module keeps:
   * it NEVER raises and NEVER blocks the app: every public function swallows its
-    own failures, sending is on a daemon thread with a short timeout;
+    own failures, sending is on a daemon thread, so a slow server cannot hold the app;
   * events wait in ~/.prism/pulse/queue.jsonl, so an error that happened right
     before a crash is still sent on the next start;
   * the queue is capped (300) and old events (7 days) are dropped;
@@ -43,6 +43,10 @@ MAX_AGE = 7 * 86400
 BATCH = 50
 SLOW_MS = 2000
 MIN_FLUSH_GAP = 60.0                       # seconds between sends
+# The licence server sleeps when idle; the first request after idle took 38-43 s
+# to first byte (measured 2026-11-24). With 8 s the first send always timed out.
+# Safe to wait: flush() runs only on the daemon thread from flush_async().
+FLUSH_TIMEOUT = 75
 
 _lock = threading.Lock()
 _launch = time.perf_counter()
@@ -373,7 +377,7 @@ def flush() -> int:
             batch = pending[:BATCH]
             try:
                 client.call("/v1/pulse", {"license_id": license_id, "device_fp": fp, "events": batch},
-                            app_version=app_meta.VERSION, timeout=8)
+                            app_version=app_meta.VERSION, timeout=FLUSH_TIMEOUT)
             except client.ServerError as e:
                 if e.code != "INVALID_REQUEST":
                     break
