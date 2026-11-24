@@ -208,5 +208,18 @@ class TheGate(unittest.TestCase):
             run.run_live()
 
 
+class TheGateIsWiredIntoCI(unittest.TestCase):
+    def test_replay_runs_once_per_platform_in_the_tests_job(self):
+        import yaml
+        with open(ROOT / ".github" / "workflows" / "build.yml", encoding="utf-8") as f:
+            steps = yaml.safe_load(f)["jobs"]["tests"]["steps"]
+        step = [s for s in steps if s.get("name") == "Accuracy gate (replay)"]
+        self.assertEqual(len(step), 1)
+        self.assertEqual(step[0]["if"], "matrix.shard == 1")
+        self.assertEqual(step[0]["run"], "python devtools/evals/run.py")
+        self.assertNotIn("env", step[0])   # no secrets, no live mode
+        self.assertTrue((ROOT / step[0]["run"].split()[1]).is_file())
+
+
 if __name__ == "__main__":
     unittest.main()

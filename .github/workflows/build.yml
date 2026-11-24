@@ -189,6 +189,20 @@ jobs:
         if: matrix.shard == 1
         run: python -m devtools.scenarios
 
+      # Replay only: it re-scores the answers recorded in devtools/evals/cases
+      # against their rule checks and compares with devtools/evals/baseline.json.
+      # Free, deterministic, opens no socket. Exits 1 on a blocking regression and
+      # 2 on a bad case or baseline file, which fails this job and so `release`.
+      # It proves the checks still work; it does not ask a model anything. The
+      # committed cases are all placeholders (they never block), so today this
+      # step can only fail on a broken case or baseline file. The real cases will
+      # live in a private place not chosen yet: the runner already reads another
+      # folder with `--cases <dir>`, and this job will need a step to fetch them
+      # first. No live mode and no secrets here until the owner decides.
+      - name: Accuracy gate (replay)
+        if: matrix.shard == 1
+        run: python devtools/evals/run.py
+
   # One verdict per platform for the sharded tests above: every shard
   # reported, every test file ran in exactly one shard, and the combined list
   # of NEW FAILURES / crashes / known failures that now pass, in one place.
