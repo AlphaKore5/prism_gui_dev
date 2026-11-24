@@ -192,5 +192,57 @@ class TheScreenOnThePool(_Workbench):
             self.assertEqual(wb._missing_key(), "")                 # "people" (Exa) is off, Apollo is on
 
 
+class TheStartingSourceOnYourOwnKeys(_Workbench):
+    """Apollo first, Exa behind it (the owner's plan, 24-Nov-2026): the screen starts on Apollo where its search is
+    free and cannot be refused — a Monid wallet and no Apollo account — and on Exa everywhere else."""
+
+    def setUp(self):
+        super().setUp()
+        env = mock.patch.dict(os.environ, {"MONID_API_KEY": "", "APOLLO_API_KEY": ""})
+        env.start()
+        self.addCleanup(env.stop)
+
+    def starts_on(self, cfg):
+        return self._WB.LeadsWorkbench(cfg)._source
+
+    def test_a_monid_key_alone_starts_on_apollo(self):
+        self.assertEqual(self.starts_on({"monid_api_key": "mk"}), "apollo")
+
+    def test_a_monid_key_from_the_environment_starts_on_apollo_too(self):
+        with mock.patch.dict(os.environ, {"MONID_API_KEY": "from-env"}):
+            self.assertEqual(self.starts_on({}), "apollo")
+
+    def test_an_apollo_key_of_their_own_keeps_exa_first_because_a_free_plan_is_refused(self):
+        self.assertEqual(self.starts_on({"apollo_api_key": "ap", "monid_api_key": "mk"}), "exa")
+        self.assertEqual(self.starts_on({"apollo_api_key": "ap"}), "exa")
+
+    def test_no_key_at_all_starts_on_exa(self):
+        self.assertEqual(self.starts_on({}), "exa")
+        self.assertEqual(self.starts_on({"exa_api_key": "ek"}), "exa")
+
+    def test_an_apollo_that_already_refused_this_owner_is_not_the_start(self):
+        self.assertEqual(self.starts_on({"monid_api_key": "mk", "apollo_api_blocked": True}), "exa")
+
+    def test_they_can_still_pick_exa(self):
+        wb = self._WB.LeadsWorkbench({"monid_api_key": "mk", "exa_api_key": "ek"})
+        wb._set_source("exa")
+        self.assertEqual(wb._source, "exa")
+
+
+@pytest.mark.pooled
+class TheStartingSourceOnTheCreditPool(_Workbench):
+    def start(self, ready):
+        gate = mock.patch.object(G, "ready", lambda op: ready if op == "apollo" else True)
+        gate.start()
+        self.addCleanup(gate.stop)
+        return self._WB.LeadsWorkbench({})._source
+
+    def test_it_starts_on_apollo_where_the_server_has_it(self):
+        self.assertEqual(self.start(True), "apollo")
+
+    def test_it_starts_on_exa_where_the_server_does_not(self):
+        self.assertEqual(self.start(False), "exa")
+
+
 if __name__ == "__main__":
     unittest.main()

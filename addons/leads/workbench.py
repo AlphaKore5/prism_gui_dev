@@ -813,7 +813,7 @@ class LeadsWorkbench(QWidget):
         if self.cfg.get("apollo_api_blocked"):
             self._blocked_key = self._key("apollo_api_key")
             self._apollo_blocked = _apollo_blocked_text()
-        self._set_source("exa")
+        self._set_source(self._default_source())
 
     def _open_settings(self, keys: bool = False) -> None:
         """Search settings — the toolbar's button. `keys` unfolds the keys box
@@ -858,6 +858,17 @@ class LeadsWorkbench(QWidget):
         self._target_row.setToolTip(tip)
         self._target.setToolTip(tip)
         self._refresh_prepare()             # what Find new people now costs
+
+    def _default_source(self) -> str:
+        """Apollo first, Exa behind it (the owner's plan, 24-Nov-2026) — but only where Apollo's search is free
+        and will not be refused: through Prism's credits (the server asks Apollo) or a Monid wallet with no
+        Apollo account of the owner's own. An Apollo key of their own keeps Exa as the start, because a FREE
+        Apollo plan answers its API with a 403; they can still pick Apollo in Search settings."""
+        if self._apollo_blocked:
+            return "exa"
+        if self._pooled():
+            return "apollo" if gateway.ready("apollo") else "exa"
+        return "apollo" if self._apollo_via_monid() else "exa"
 
     def _apollo_via_monid(self) -> bool:
         """Apollo is reached through the owner's Monid wallet, not an Apollo account of their own."""
