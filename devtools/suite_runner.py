@@ -200,6 +200,8 @@ def load_known(path: Path = KNOWN) -> set[str]:
 def _env(file_timeout: int = 0, hang_log: Path | None = None, done_log: Path | None = None) -> dict:
     env = dict(os.environ, QT_QPA_PLATFORM=os.environ.get("QT_QPA_PLATFORM", "offscreen"),
                PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
+    for k in ("PRISM_FILE_WATCHDOG", "PRISM_FILE_WATCHDOG_LOG", "PRISM_FILE_DONE_LOG"):
+        env.pop(k, None)    # a runner started inside a test must not reuse its parent's files
     if done_log is not None:
         # tests/conftest.py writes the stage it reached here (tests finished /
         # about to exit), so a file that timed out says where it was stuck.

@@ -325,8 +325,7 @@ class ATimedOutFileSaysWhereItWasStuck(unittest.TestCase):
     def test_the_watchdog_stack_is_reported_when_the_process_still_did_not_end(self):
         body = ("import os, time\n"
                 "def teardown_module(m):\n"
-                "    open(os.environ['PRISM_FILE_WATCHDOG_LOG'] if 'PRISM_FILE_WATCHDOG_LOG' in os.environ\n"
-                "         else %r, 'w').write('Thread 0x1 (most recent call first):\\n  File \"x.py\", line 9 in stuck_here\\n')\n"
+                "    open(%r, 'w').write('Thread 0x1 (most recent call first):\\n  File \"x.py\", line 9 in stuck_here\\n')\n"
                 "    time.sleep(600)\n") % str(self.dir / "test_hang.hang.txt")
         (cases, died, tail), _ = self.run_hanging(body)
         self.assertIn("watchdog dumped every thread's stack", died)

@@ -59,6 +59,23 @@ class TheCheckSeesWhatIsStillRunning(unittest.TestCase):
             release.set()
             t.join(10)
 
+    def test_pytest_timeouts_own_thread_is_not_a_leak_but_a_stray_one_is(self):
+        """CI runs with --timeout 300 (thread method): its watcher thread is
+        non-daemon and named "pytest_timeout <nodeid>". Only that name is ignored."""
+        release = threading.Event()
+        watcher = threading.Thread(target=release.wait, args=(30,), name="pytest_timeout tests/x.py::t")
+        stray = threading.Thread(target=release.wait, args=(30,), name="stray")
+        watcher.start()
+        try:
+            self.assertEqual(leakcheck.leaks(wait=0), [])
+            stray.start()
+            self.assertEqual(leakcheck.leaks(wait=0), ["thread 'stray' daemon=False"])
+        finally:
+            release.set()
+            watcher.join(10)
+            if stray.is_alive():
+                stray.join(10)
+
     @unittest.skipUnless(sys.platform.startswith("linux"),
                          "child processes are read from /proc, which only Linux has")
     def test_a_child_process_is_named(self):

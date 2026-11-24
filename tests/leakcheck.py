@@ -36,7 +36,10 @@ def _threads() -> list[str]:
     (non-daemon), and any thread of ours (the licensing refresh) still alive."""
     me = threading.current_thread()
     return [f"thread {t.name!r} daemon={t.daemon}" for t in threading.enumerate()
-            if t is not me and t.is_alive() and (not t.daemon or t.name.startswith("prism-"))]
+            if t is not me and t.is_alive() and (not t.daemon or t.name.startswith("prism-"))
+            # pytest-timeout's thread method (CI runs --timeout 300) keeps one
+            # non-daemon watcher per test, named "pytest_timeout <nodeid>".
+            and not t.name.startswith("pytest_timeout")]
 
 
 def _children() -> list[str]:
