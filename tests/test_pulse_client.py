@@ -147,6 +147,13 @@ class Sending(Base):
         self.assertEqual(("lic_abc12345", "f" * 16, 3), (body["license_id"], body["device_fp"], len(body["events"])))
         self.assertEqual([], self.queued())
 
+    def test_flush_waits_long_enough_for_a_sleeping_server(self):
+        # The server's cold start measured 38-43 s; 8 s made the first send always time out.
+        timeouts = []
+        self._send(lambda ep, body, **kw: timeouts.append(kw.get("timeout")) or {})
+        self.assertEqual(1, len(timeouts))
+        self.assertGreaterEqual(timeouts[0] or 0, 60)
+
     def test_an_unreachable_server_keeps_the_queue(self):
         def down(*a, **k):
             raise OSError("no network")
