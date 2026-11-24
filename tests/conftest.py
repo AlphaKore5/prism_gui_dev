@@ -344,6 +344,22 @@ def _leads_run_direct_by_default(request, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_real_library_imports_on_background_threads(monkeypatch):
+    """Every MainWindow arms a 4 s timer that imports cadquery (OpenCascade) on a
+    QThread (main_window._warm_heavy_imports). A test that spins the event loop
+    lets it fire: test_gates.py started 31 of them in one run, each loading a
+    ~100 MB native library and leaving 15 OpenCascade pool threads alive. The
+    windows are never closed, so the timers outlive their tests, and a slow
+    machine can still be mid-import when the process exits. On the Windows CI
+    runner test_gates.py then sat 480 s after its last test (run 45266305406,
+    1 run in about 3; the cause of that hang is LIKELY this, not proven). No test
+    needs the warm-up; the one that checks it is scheduled calls the worker
+    itself (tests/test_home_and_speed.py)."""
+    monkeypatch.setenv("PRISM_NO_WARM_IMPORTS", "1")
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _the_os_keyring_is_never_the_real_one(monkeypatch):
     """No test reads or writes the developer's real Keychain / Credential
     Manager / Secret Service. The licence key lives there, and the start-up
