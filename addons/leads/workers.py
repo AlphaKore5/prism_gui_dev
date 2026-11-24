@@ -810,14 +810,31 @@ class SourceWorker(_Worker):
                             target=room, skip=skip, stats=got,
                             on_progress=self._apollo_progress, transport=transport)
                     except apollo.ApolloError as exc:
-                        if transport is not None:
+                        if transport is None and monid_run.available(self.cfg) and (
+                                str(exc) == apollo.BAD_KEY or _plan_refusal(exc, apollo)):
+                            # The owner's own Apollo key is refused (wrong, or a free plan) but a Monid
+                            # wallet is attached: ask Apollo through it instead, once, and say so.
+                            self.progress.emit("Your Apollo key was refused — asking Apollo through "
+                                               "your Monid wallet instead…")
+                            transport, key = apollo.monid_transport(monid_run.api_key(self.cfg)), ""
+                            got = {}
+                            try:
+                                leads += apollo.search_people(
+                                    part if part is not None else (self.spec or {}), key,
+                                    target=room, skip=skip, stats=got,
+                                    on_progress=self._apollo_progress, transport=transport)
+                            except apollo.ApolloError as again:
+                                lost = again
+                                break
+                        elif transport is not None:
                             lost = exc          # Monid's own words; Exa is tried below
                             break
-                        why = _plan_refusal(exc, apollo)
-                        if not why:
-                            raise
-                        self.blocked.emit(why)
-                        return
+                        else:
+                            why = _plan_refusal(exc, apollo)
+                            if not why:
+                                raise
+                            self.blocked.emit(why)
+                            return
                     _add_stats(stats, got)
                     asked = self._asked(part, asked)
                 if transport is not None and not leads:

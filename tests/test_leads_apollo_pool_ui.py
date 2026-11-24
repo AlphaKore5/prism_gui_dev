@@ -215,6 +215,18 @@ class TheScreenOnThePool(_Workbench):
         self.assertIn("A search that finds nobody is not charged", said["source"])
         self.assertEqual(said["target"], "")
 
+    def test_exa_by_default_says_why_apollo_is_not_the_one_in_use(self):
+        wb = self.bench(ready=False)
+        wb._set_source("apollo")                                    # falls back to Exa: the server has no Apollo
+        said = wb._settings_hints()
+        self.assertIn("Apollo isn't switched on for your account yet", said["source"])
+        self.assertIn("Each Exa search costs 3 credits", said["source"])
+
+    def test_exa_picked_on_purpose_does_not_claim_apollo_is_off(self):
+        wb = self.bench(ready=True)
+        wb._set_source("exa")
+        self.assertNotIn("switched on", wb._settings_hints()["source"])
+
     def test_the_email_and_mobile_lines_use_the_rate_card_not_a_rupee_guess(self):
         said = self.bench()._settings_hints()
         self.assertIn("2 credits for each address found", said["verify"])

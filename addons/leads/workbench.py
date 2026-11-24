@@ -401,7 +401,6 @@ class LeadsWorkbench(QWidget):
         self._apollo_blocked = ""
         self._blocked_key = ""
         self._announce_export = False
-        self._opened_autosave = False
         # How many background jobs (prepare / verify / send / export) are running.
         # A count, not a flag: an export finishing must not re-enable Send while a
         # send started from the bulk bar is still going — two sends would mail the
@@ -887,8 +886,12 @@ class LeadsWorkbench(QWidget):
                     i18n.t("If Apollo finds nobody, Exa takes over.")))
                 out["target"] = i18n.t("Up to {c}.").format(c=self._cr(reveal * n))
             else:
-                out["source"] = i18n.t("Each search costs {p}. A search that finds nobody is not charged.").format(
+                out["source"] = i18n.t("Each Exa search costs {p}. A search that finds nobody is not charged.").format(
                     p=self._cr(gateway.rate("people_search", 3)))
+                if not gateway.ready("apollo"):
+                    # Said outright: without it the page reads like Exa is the plan, when it is only what is left.
+                    out["source"] = i18n.t("Apollo isn't switched on for your account yet, so people are found "
+                                           "with Exa.") + " " + out["source"]
             out["verify"] = i18n.t("Hot and warm leads. {c} for each address found.").format(
                 c=self._cr(gateway.rate("email_find", 2)))
             out["mobiles"] = i18n.t("Find mobiles: up to {n} people a press, {c} for each number found.").format(
@@ -3505,10 +3508,12 @@ class LeadsWorkbench(QWidget):
         self._status.setText(
             i18n.t("Leads sheet + hot list saved to {f}").format(f=folder)
             if folder else i18n.t("Sheets written."))
-        if folder and (self._announce_export or not self._opened_autosave):
+        # The folder opens only when the owner pressed Export. A search saves its sheets by itself (the status
+        # line says where, and they are on Lists); throwing a file-browser window over the page after the first
+        # search of a session was a dialog nobody asked for (the owner, 24-Nov-2026: "we don't need this").
+        if folder and self._announce_export:
             import paths
             paths.open_file(folder, self)
-            self._opened_autosave = True
         if self._announce_export:
             QMessageBox.information(
                 self, i18n.t("Leads & Outreach"),
