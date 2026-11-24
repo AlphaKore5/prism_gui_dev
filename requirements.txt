@@ -198,6 +198,15 @@ faster-whisper>=1.0
 # in packaging/prism.spec.
 opencv-python>=4.5,<4.12
 
+# ...and rapidocr (3.x, above) asks for opencv-python-headless instead. Both
+# packages install into the SAME cv2/ folder, so whichever pip installs last
+# overwrites the other's binary and leaves its other files behind. Unpinned,
+# headless floated to 5.1.0.95: the 1.8.9 Windows build had the 4.11 cv2.pyd
+# plus a stray 5.1 video plugin (41 MB), and on a runner where headless wins
+# the build would ship the 5.x OpenCV the line above forbids. Same bound, and
+# the constraints pin both to the same version, so there is one OpenCV.
+opencv-python-headless>=4.5,<4.12
+
 # macOS reads pictures with Apple's own Vision framework (core/ocr.py's
 # second backend). RapidOCR is first in line but its OpenCV does not load in
 # the macOS arm64 bundle (see above), so on a Mac Vision is what actually

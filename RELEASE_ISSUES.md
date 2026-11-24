@@ -534,3 +534,16 @@ something you did not run.
   (package -> bundled dependents) and fails if an exclusion has a dependent that stays bundled.
 - Rule: before adding a package to `PACKAGE_NEEDS`, add its row to `RUNTIME_DEPENDENTS` from the installed metadata
   (`importlib.metadata` requires) plus a grep of site-packages. Unproven until a real CI build passes the packaged-app self-test.
+
+## 2026-11-24 — Frozen builds never found their own bundled `dwg2dxf` (found during the bundle clean-up) — FIXED in code, not yet in a build
+
+- Cause (LIKELY, from code, not run on a customer machine): `packaging/prism.spec` shipped `core/vendor/dwg2dxf/` under
+  `prism_terminal/core/vendor/`, but `core/boq.py` looks next to its own `__file__`, which in a frozen build is
+  `<bundle>/core/`. The 1.8.9 Windows zip has no `_internal/core/vendor/`, so `_ensure_bundled_dwg2dxf()` would say
+  "missing from this copy of Prism" and DWG fell through to ODA / PATH / the install dialog. Every platform's copy also
+  shipped in every build (the macOS 22 MB dylib in Windows, both in Linux).
+- Fix: the spec ships only this platform's folder, at `core/vendor/dwg2dxf/<tag>` with its README (GPL source offer);
+  Linux ships none. Behaviour change for customers: Windows and Apple Silicon builds now convert DWG with the bundled
+  copy when ODA is absent.
+- Check: `tests/test_spec_slim.py` (per-platform collection) and `main._trimmed_bundle_checks()` in the frozen self-test
+  ("DWG converter bundled (<tag>)"), which proves the path inside the real build. Unproven until a CI build passes it.
