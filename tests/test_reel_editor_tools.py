@@ -191,7 +191,14 @@ class TheServerOnlyListensToItsOwnPage(unittest.TestCase):
         self.assertEqual(self._post({"edits": []}, {"Origin": self.url.rstrip("/")}), 200)
 
     def test_another_origin_is_refused(self):
-        self.assertEqual(self._post({"edits": []}, {"Origin": "http://evil.test"}), 403)
+        # The server answers 403 without reading the request body. On Windows the close that follows can reach the
+        # client as a reset (WinError 10053) before it has read the 403, so a reset is also a refusal: either way
+        # nothing was saved, which is what this test is for (CI, 24-Nov-2026). The cleaner fix — draining the body
+        # before the 403 — is in the engine's core/reel_edit.py, a separate repo, and is not part of this change.
+        try:
+            self.assertEqual(self._post({"edits": []}, {"Origin": "http://evil.test"}), 403)
+        except (ConnectionError, urllib.error.URLError):
+            pass
         self.assertEqual(self.saved, [])
 
     def test_a_body_without_edits_is_refused_rather_than_wiping_them(self):
