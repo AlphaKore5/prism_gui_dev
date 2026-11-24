@@ -1050,8 +1050,8 @@ class RunHeader(Card):
 
         # One segment per step: finished ones filled, the live one moving.
         self.progress = Loader("stages", bare=True)
+        col.addWidget(self.progress)               # in the layout first: shown with no parent it is a window of its own
         self.progress.setVisible(True)
-        col.addWidget(self.progress)
 
     def set_task(self, text: str):
         self.task.setText(text or i18n.t("Untitled task"))

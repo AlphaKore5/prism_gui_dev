@@ -225,7 +225,7 @@ class TheDueTouches(unittest.TestCase):
 class TheWorkspace(unittest.TestCase):
     def test_the_sequences_tab_is_the_editor(self):
         w = CK.LeadsWorkspace(leads_folder=tempfile.mkdtemp())
-        self.assertIs(w._stack.widget(5), w._sequences)
+        self.assertIs(w._stack.widget(CK._TABS.index("Sequences")), w._sequences)
         self.assertIsInstance(w._sequences, SP.SequencesPage)
 
 

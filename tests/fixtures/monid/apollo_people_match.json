@@ -1,0 +1,32 @@
+{
+ "runId": "run_fake",
+ "status": "COMPLETED",
+ "provider": "x",
+ "endpoint": "/x",
+ "billedUnits": 1,
+ "providerResponse": {
+  "httpStatus": 200
+ },
+ "output": {
+  "person": {
+   "id": "apid-0001",
+   "first_name": "Asha",
+   "last_name": "Rao",
+   "name": "Asha Rao",
+   "title": "Head of Automation",
+   "email": "asha.rao@acme.example",
+   "email_status": "verified",
+   "linkedin_url": "https://www.linkedin.com/in/asha-rao-fake",
+   "city": "Pune",
+   "state": "Maharashtra",
+   "country": "India",
+   "organization": {
+    "name": "Acme Motors",
+    "primary_domain": "acme.example",
+    "website_url": "http://www.acme.example",
+    "estimated_num_employees": 4200,
+    "industry": "automotive"
+   }
+  }
+ }
+}

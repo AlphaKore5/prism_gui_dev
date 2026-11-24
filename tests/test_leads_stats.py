@@ -120,7 +120,7 @@ class TheWorkspace(unittest.TestCase):
     def test_stats_is_the_last_tab(self):
         w = CK.LeadsWorkspace(leads_folder=tempfile.mkdtemp())
         self.assertEqual(w._tabs[-1].text(), "Stats")
-        self.assertIs(w._stack.widget(9), w.stats)
+        self.assertIs(w._stack.widget(CK._TABS.index("Stats")), w.stats)
 
     def test_it_reads_the_contacts_and_the_deals_folder(self):
         folder = tempfile.mkdtemp()

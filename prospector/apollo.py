@@ -46,9 +46,10 @@ from __future__ import annotations
 
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlsplit
 
-from . import filters, identity
+from . import filters, identity, monid_run
 from .models import Lead
 
 BASE = "https://api.apollo.io/api/v1"
@@ -491,7 +492,7 @@ def _details(card: dict) -> dict:
 
 
 def search_people(spec, api_key, *, target=25, skip=None, stats=None, on_progress=None,
-                  max_pages=20, per_page=100, budget=None) -> list:
+                  max_pages=20, per_page=100, budget=None, transport=None) -> list:
     """Up to `target` people from Apollo who pass the whole spec, for at most
     `budget` credits (the target itself unless a caller says otherwise).
 
@@ -518,11 +519,16 @@ def search_people(spec, api_key, *, target=25, skip=None, stats=None, on_progres
 
     Raises ApolloError when Apollo refuses the key, the endpoint or the filters,
     and when it is still rate-limiting after the retries. A network failure once
-    the run is under way ends it with what it has and counts stats["errors"]."""
+    the run is under way ends it with what it has and counts stats["errors"].
+
+    `transport(path, body) -> dict` replaces the call to api.apollo.io: with it no
+    Apollo key is needed (`monid_transport`: the same two calls, asked of Apollo
+    through the owner's Monid wallet — search still free, a reveal about $0.026)."""
     spec = _as_spec(spec)
     key = (api_key or "").strip()
-    if not key:
+    if not key and transport is None:
         raise ApolloError(NO_KEY)
+    send = transport or (lambda path, body: _post(path, body, key))
     counts = _counts(stats)
     target = max(0, int(target or 0))
     # The credits this run may spend. `target` counts people who PASS, and a
@@ -560,8 +566,8 @@ def search_people(spec, api_key, *, target=25, skip=None, stats=None, on_progres
         search["page"] += 1
         counts["search_calls"] += 1
         try:
-            data = _post(SEARCH, dict(search["body"], page=search["page"],
-                                      per_page=per_page), key)
+            data = send(SEARCH, dict(search["body"], page=search["page"],
+                                     per_page=per_page))
         except _Unreachable:
             counts["errors"] += 1
             # Nothing to show yet: the owner must be told, not handed an empty
@@ -595,7 +601,7 @@ def search_people(spec, api_key, *, target=25, skip=None, stats=None, on_progres
 
     def reveal(batch: list) -> None:
         counts["reveal_calls"] += 1
-        data = _post(BULK_MATCH, {"details": [_details(c) for c in batch]}, key)
+        data = send(BULK_MATCH, {"details": [_details(c) for c in batch]})
         matches = data.get("matches") if isinstance(data, dict) else None
         matches = matches if isinstance(matches, list) else []
         for card, person in zip(batch, matches):
@@ -697,3 +703,85 @@ def find_email(lead, api_key) -> tuple:
     if link and not extra.get("linkedin") and isinstance(getattr(lead, "extra", None), dict):
         lead.extra["linkedin"] = link
     return email, _check_of(person)
+
+
+# ── the same two calls, through the owner's Monid wallet ──────────────────────
+
+MONID_SEARCH_COST = 0.01        # Monid's ceiling on a search: it is listed at $0
+MONID_MATCH_COST = 0.05         # ... and on a person match: listed at $0.026
+_MONID_WORKERS = 4              # people revealed at once (Monid has no bulk match)
+
+
+def _monid_query(body: dict) -> dict:
+    """Apollo's JSON search body as Monid's query string takes it: a list is written `key[]`, which is
+    how Apollo's own people-search parameters are named (`person_titles[]`, `revenue_range[min]` already
+    carry theirs)."""
+    query = {}
+    for name, value in (body or {}).items():
+        if isinstance(value, (list, tuple)):
+            query[name if name.endswith("]") else name + "[]"] = list(value)
+        elif value is not None:
+            query[name] = value
+    return query
+
+
+def monid_transport(key: str, *, call=None):
+    """`transport` for search_people, asked through Monid instead of api.apollo.io with an Apollo key.
+
+    SEARCH is `apollo /mixed_people/api_search`, $0: the same cards, last name obfuscated, no e-mail.
+    BULK_MATCH has no Monid twin, so it is one `apollo /people/match` per person (about $0.026 each,
+    charged when Apollo attaches the name to a company) answered in the shape bulk_match has — one entry
+    per person asked, {} for nobody — which is why `search_people` needs no other change. A key or wallet
+    Monid refuses is an ApolloError in Monid's own words; a call that did not land is `_Unreachable`."""
+    call = call or monid_run.call
+
+    def one(detail) -> dict:
+        query = {k: v for k, v in (detail or {}).items() if v}
+        if not query:
+            return {}                                   # nothing identifies them: nobody to ask for
+        run = call("apollo", "/people/match", key=key, query=query, max_cost=MONID_MATCH_COST)
+        out = run.get("output") if isinstance(run, dict) else None
+        person = out.get("person") if isinstance(out, dict) else None
+        return person if isinstance(person, dict) else {}
+
+    def send(path: str, body: dict) -> dict:
+        try:
+            if path == SEARCH:
+                run = call("apollo", "/mixed_people/api_search", key=key,
+                           query=_monid_query(body), max_cost=MONID_SEARCH_COST)
+                if run is None:
+                    raise _Unreachable(UNREACHABLE)
+                out = run.get("output")
+                return out if isinstance(out, dict) else {}
+            if path == BULK_MATCH:
+                details = [d for d in (body.get("details") or []) if isinstance(d, dict)]
+                with ThreadPoolExecutor(max_workers=_MONID_WORKERS) as pool:
+                    return {"matches": list(pool.map(one, details))}
+            if path == MATCH:
+                return {"person": one(body)}
+        except monid_run.MonidError as exc:
+            raise ApolloError(str(exc)) from exc
+        raise ApolloError(REFUSED.format(code=0, path=path))
+
+    return send
+
+
+def pool_transport():
+    """`transport` for search_people on the CREDIT POOL: the same two calls, made by the licence server
+    through Prism's own Monid account (prospector.gateway.apollo_search / apollo_reveal). Search takes no
+    credit; a reveal costs the server's `apollo_reveal` price per person Apollo finds. A refusal is
+    `_Unreachable` in the server's own words: before anything was found the run says why, and once it has
+    people, a pool that runs dry ends the run with the list it has instead of throwing it away."""
+    from . import gateway
+
+    def send(path: str, body: dict) -> dict:
+        try:
+            if path == SEARCH:
+                return gateway.apollo_search(body)
+            if path == BULK_MATCH:
+                details = [d for d in (body.get("details") or []) if isinstance(d, dict)]
+                return {"matches": gateway.apollo_reveal(details)}
+        except gateway.GatewayError as exc:
+            raise _Unreachable(exc.message) from exc
+        raise ApolloError(REFUSED.format(code=0, path=path))
+    return send

@@ -75,7 +75,8 @@ _VIA_WORDS = {"import": "Imported from a CSV", "save": "Saved as a contact",
               "sequence": "Added to a sequence — saved as a contact",
               "list": "Added to a list — saved as a contact",
               "email": "E-mail looked up — saved as a contact",
-              "phone": "Phone number looked up — saved as a contact"}
+              "phone": "Phone number looked up — saved as a contact",
+              "buyers": "Accepted from Find buyers — saved as a contact"}
 _EDIT_FIELDS = (("name", "Name"), ("title", "Title"), ("company", "Company"),
                 ("email", "E-mail"), ("phone", "Phone"), ("industry", "Industry"),
                 ("location", "Location"), ("linkedin", "LinkedIn"),
@@ -752,11 +753,11 @@ class PersonPanel(QWidget):
         if found:
             # What the number IS, said every time it is shown: the company's own
             # published number, never rung, never checked against a do-not-call list.
-            line = (phones.PERSON_LINE if found.get("scope") == "person"
+            line = (phones.person_line(found) if found.get("scope") == "person"
                     else phones.SOURCE_LINE.get(found.get("source"), phones.SOURCE_LINE["other"]))
             self.phone_source = _label(
                 i18n.t(line).format(when=evidence.when(found.get("found_at") or "")
-                                    or i18n.t("recently")), "pMuted")
+                                    or i18n.t("recently"), who=phones.provider_label(found)), "pMuted")
             col.addWidget(self.phone_source)
             if evidence.safe_url(found.get("source_url") or ""):
                 col.addWidget(_link(i18n.t("Open the page it came from"),
@@ -780,8 +781,9 @@ class PersonPanel(QWidget):
                                      0, Qt.AlignVCenter)
                 col.addLayout(mobile_row)
                 self.mobile_source = _label(
-                    i18n.t(phones.PERSON_LINE).format(
-                        when=evidence.when(mobile.get("found_at") or "") or i18n.t("recently")),
+                    i18n.t(phones.person_line(mobile)).format(
+                        when=evidence.when(mobile.get("found_at") or "") or i18n.t("recently"),
+                        who=phones.provider_label(mobile)),
                     "pMuted")
                 col.addWidget(self.mobile_source)
         elif mobiles.needs_mobile(lead):

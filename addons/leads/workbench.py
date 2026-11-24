@@ -99,7 +99,15 @@ _HELP_KEYS = frozenset({"btn_find", "notice"})
 # translation must be looked up when the tooltip is set, not at import.
 def _apollo_tip() -> str:
     return i18n.t("Searching Apollo needs a PAID Apollo plan — the free plan "
-                  "has no API access. Exa needs only its own key.")
+                  "has no API access — or a Monid key (MONID_API_KEY), which asks "
+                  "Apollo for you. Exa needs only its own key.")
+
+
+def _monid_ready(cfg) -> bool:
+    """The owner has a Monid key (the config, or MONID_API_KEY): Apollo's people
+    search and the phone sources can be bought through it."""
+    from prospector import monid_run
+    return monid_run.available(cfg)
 
 
 def _apollo_blocked_text() -> str:
@@ -792,7 +800,7 @@ class LeadsWorkbench(QWidget):
         self._apollo.textEdited.connect(self._on_apollo_key_typed)
         # Either key is enough to run a search, so either folds the box away.
         self._keys_box.setVisible(False if self._pooled() else not (
-            self._key("exa_api_key") or self._key("apollo_api_key")))
+            self._key("exa_api_key") or self._key("apollo_api_key") or _monid_ready(self.cfg)))
         # Exa is the default even where an Apollo key is set: Apollo's people
         # search is not in its FREE plan (its API Keys page says so outright),
         # so offering it first sends most owners into a 403. A run that already
@@ -821,8 +829,8 @@ class LeadsWorkbench(QWidget):
     _TARGET_LABEL = {"apollo": "Reveal up to", "exa": "Source up to"}
     _TARGET_TIP = {
         "apollo": "Searching Apollo is free; revealing a person's name and "
-                  "e-mail costs about one Apollo credit each — and a run "
-                  "stops at this many, even when your filters leave it short.",
+                  "e-mail costs a little each — and a run stops at this many, "
+                  "even when your filters leave it short.",
         "exa": "How many people to find before qualifying. Everyone outside "
                "your filters is left out and does not count.",
     }
@@ -834,8 +842,9 @@ class LeadsWorkbench(QWidget):
         this plan, cannot be picked at all: not by a click, and not by a
         session that was run on it before the refusal."""
         self._source = "apollo" if source == "apollo" else "exa"
-        if self._source == "apollo" and (self._apollo_blocked or self._pooled()):
-            self._source = "exa"            # on the pool, Exa is the only database
+        if self._source == "apollo" and (self._apollo_blocked or (
+                self._pooled() and not gateway.ready("apollo"))):
+            self._source = "exa"            # on the pool, Apollo only where the server has it
         self._src_apollo.setChecked(self._source == "apollo")
         self._src_exa.setChecked(self._source == "exa")
         self._sync_apollo()
@@ -1035,6 +1044,10 @@ class LeadsWorkbench(QWidget):
         credits". Each search costs what the server's price list says (3 until
         the owner sets it), and a search that finds nobody is not charged — so
         this is a ceiling, and the words say "up to"."""
+        if self._source == "apollo":
+            price = gateway.rate("apollo_reveal", 2)
+            return i18n.t("Searches Apollo, free — {p} for each person revealed, up to {c}").format(
+                p=self._cr(price), c=self._cr(price * self._target.value()))
         n, more = self._searches(spec, companies)
         if not n:
             return i18n.t("Searches for new people")
@@ -1180,6 +1193,10 @@ class LeadsWorkbench(QWidget):
         from addons.leads.companies_controller import CompaniesController
         self._companies = CompaniesController(self, self._cockpit.companies)
         self._cockpit.companiesShown.connect(self._companies.on_shown)
+        # Find buyers: describe what you sell, get buyers with proof (buyers_controller.py).
+        from addons.leads.buyers_controller import BuyersController
+        self._buyers = BuyersController(self, self._cockpit.buyers)
+        self._cockpit.buyersShown.connect(self._buyers.on_shown)
         self._cockpit.dueOpenRequested.connect(self._due_open)
         self._cockpit.dueTaskDoneRequested.connect(self._due_task_done)
         frame = QFrame()
@@ -2378,6 +2395,8 @@ class LeadsWorkbench(QWidget):
         server's price list says and only a search that finds people is charged,
         so the figure is the most it can be — and it is exact about how many
         searches there are (source.planned_searches), not a guess."""
+        if self._source == "apollo":
+            return self._confirm_pool_apollo(companies, note)
         n, more = self._searches(spec, companies)
         price = gateway.rate("people_search", 3)
         if companies and n == 1:
@@ -2405,6 +2424,24 @@ class LeadsWorkbench(QWidget):
                 lines.append(i18n.t(
                     "With no job title or seniority set, it asks for Owners, "
                     "Founders, Chiefs and Directors."))
+        balance = self._balance()
+        if balance is not None and n * price > balance:
+            lines.append(i18n.t("That is more than you have — the search stops "
+                                "when your credits run out."))
+        return self._confirm_pool(i18n.t("Find new people"), lines)
+
+    def _confirm_pool_apollo(self, companies, note: str) -> bool:
+        """The credits version of the Apollo question: searching is free, each person revealed costs
+        what the server's price list says, and a person Apollo does not find is not charged — so the
+        figure is the most it can be."""
+        price = gateway.rate("apollo_reveal", 2)
+        n = self._target.value()
+        lines = [i18n.t("It searches Apollo, which is free, and reveals each person's name and e-mail "
+                        "— {p} each, for up to {n} people — up to {c}.").format(
+                            p=self._cr(price), n=n, c=self._cr(price * n)),
+                 i18n.t("A person Apollo does not find is not charged.")]
+        if companies:
+            lines.append(i18n.t("It looks at {what}.").format(what=note))
         balance = self._balance()
         if balance is not None and n * price > balance:
             lines.append(i18n.t("That is more than you have — the search stops "
@@ -2453,10 +2490,11 @@ class LeadsWorkbench(QWidget):
         credit pool there is no key to miss: the reason is no credits, or a
         lookup the server has not switched on."""
         if self._pooled():
-            return self._pool_blocker("people")
-        if self._source == "apollo" and not self._key("apollo_api_key"):
-            return i18n.t("Searching Apollo needs an Apollo API key — add it "
-                          "under Keys & claims, or search with Exa instead.")
+            return self._pool_blocker("apollo" if self._source == "apollo" else "people")
+        if (self._source == "apollo" and not self._key("apollo_api_key")
+                and not _monid_ready(self.cfg)):
+            return i18n.t("Searching Apollo needs an Apollo API key or a Monid key — "
+                          "add one under Keys & claims, or search with Exa instead.")
         if self._source == "exa" and not self._key("exa_api_key"):
             return i18n.t("Searching with Exa needs an Exa API key — add it "
                           "under Keys & claims, or search with Apollo instead.")
@@ -2671,7 +2709,7 @@ class LeadsWorkbench(QWidget):
         if self._pooled():
             return self._confirm_pool_emails(n)
         # Named in the order verify._FINDERS asks them.
-        hunter = self._key("hunter_api_key")
+        hunter = self._key("hunter_api_key") or _monid_ready(self.cfg)      # a Monid key buys Hunter too
         apollo = self._key("apollo_api_key") and not self.cfg.get("apollo_api_blocked")
         who = (i18n.t("Hunter, then Apollo") if hunter and apollo
                else i18n.t("Hunter") if hunter else i18n.t("Apollo"))
@@ -2848,17 +2886,20 @@ class LeadsWorkbench(QWidget):
                 "Those people already have a mobile number, or Prism has no company website "
                 "to look one up with."))
             return
-        if not self._pooled():
+        pooled = self._pooled()
+        if not pooled and not _monid_ready(self.cfg):
             self._status.setText(i18n.t(
-                "Finding a person's mobile number runs on Prism's credits, so it isn't "
-                "available with your own provider keys."))
+                "Finding a person's mobile number runs on Prism's credits, or on your own "
+                "Monid key (MONID_API_KEY) — neither is set up."))
             return
-        blocked = self._pool_blocker("mobile")
-        if blocked:
-            self._status.setText(blocked)
-            return
+        if pooled:
+            blocked = self._pool_blocker("mobile")
+            if blocked:
+                self._status.setText(blocked)
+                return
         leads = leads[:mobiles.LIMIT]
-        if not self._confirm_mobiles(len(leads)):
+        if not (self._confirm_mobiles(len(leads)) if pooled
+                else self._confirm_mobiles_direct(len(leads))):
             return
         self._set_running(True)
         self._acted = list(leads)
@@ -2880,9 +2921,23 @@ class LeadsWorkbench(QWidget):
         return self._confirm_pool(i18n.t("Find mobiles"), [
             i18n.t("Look up the mobile number for {n} people — up to {c}.").format(
                 n=n, c=self._cr(n * price)),
-            i18n.t("Prism asks Apollo for each person's own mobile number. It can take a few "
-                   "minutes. A credit is used only for a number found. Nothing is called "
-                   "or checked beyond its format.")])
+            i18n.t("Prism asks three data sources in turn for each person's own mobile number, "
+                   "cheapest first. It can take a minute or two. A credit is used only for a "
+                   "number found. Nothing is called or checked beyond its format.")])
+
+    def _confirm_mobiles_direct(self, n: int) -> bool:
+        """The same question in rupees, for the owner's own Monid wallet: three sources are
+        asked in turn, each charging only for a number it returns. Tests patch this."""
+        from prospector import phone_waterfall as W
+        usd = 96                                            # rupees to the dollar, as everywhere in Leads
+        answer = QMessageBox.question(
+            self, i18n.t("Find mobiles"),
+            i18n.t("Look up the mobile number for {n} people through your Monid wallet? Prism asks "
+                   "three sources in turn, cheapest first, and each charges only for a number it "
+                   "returns — about ₹{typ} a number, at most ₹{worst} for one person. It can take "
+                   "a few minutes. Nothing is called or checked beyond its format.").format(
+                n=n, typ=round(W.TYPICAL_PER_NUMBER * usd), worst=round(W.WORST_PER_PERSON * usd)))
+        return answer == QMessageBox.StandardButton.Yes
 
     def _on_mobiles_found(self, counts) -> None:
         """Fold the mobiles in: each person Apollo had one for now carries it (the drawer

@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QFont, QFontMetrics
 from PySide6.QtWidgets import QCheckBox, QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout, QWidget
 
@@ -105,10 +105,23 @@ class _Elided(QLabel):
         self.setStyleSheet(css)
         self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         self.setMinimumWidth(0)
-        self._refit()
+        # Not elided here: a child widget is 100px wide until a layout has placed it, so eliding now would cut every
+        # long name to ~100px before the row had any say. resizeEvent elides once the real width is known.
+        self.setText(self._full)
 
     def full_text(self) -> str:
         return self._full
+
+    def sizeHint(self):                                         # noqa: N802
+        """The width of the WHOLE text, never of what is showing now. A label asked for the width of its
+        elided text is given exactly that, shows the same elision, and is stuck short for good: a row built
+        while the list was narrow kept a name like "Gujar…" after the list widened."""
+        hint = super().sizeHint()
+        fm = QFontMetrics(self.font())
+        return QSize(fm.horizontalAdvance(self._full) + 2 * self.margin() + 2, hint.height())
+
+    def minimumSizeHint(self):                                  # noqa: N802
+        return QSize(0, super().minimumSizeHint().height())     # it can always shrink: that is what eliding is for
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -147,7 +160,9 @@ class ResultRow(QFrame):
         row.setContentsMargins(theme.SPACE_1, 10, theme.SPACE_1, 10)
         row.setSpacing(12)
 
-        self.check = QCheckBox()
+        # Parented at once: setVisible(True) on a widget with no parent makes it a window of its own, and every row of
+        # People and Companies flashed a 29x21 box on screen while it waited to be put in the row.
+        self.check = QCheckBox(self)
         self.check.setChecked(spec.checked)
         self.check.setStyleSheet("QCheckBox{border:none;background:transparent;}")
         self.check.toggled.connect(lambda on: self.toggled.emit(self.key, on))

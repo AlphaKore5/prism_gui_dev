@@ -204,7 +204,7 @@ _HELP_KEYS = frozenset({"import_menu", "views_menu", "hide_filters", "people_sea
                         "table", "select_all", "bulk_bar", "drawer"}
                        | set(_HELP_COLS) | set(_HELP_BULK))
 # The tab strip's own keys, in the order the tabs are built (_TABS).
-_HELP_TABS = ("tab_people", "tab_companies", "tab_sessions", "tab_lists", "tab_saved",
+_HELP_TABS = ("tab_people", "tab_companies", "tab_buyers", "tab_sessions", "tab_lists", "tab_saved",
               "tab_sequences", "tab_analytics", "tab_deals", "tab_due", "tab_stats")
 _REVEAL_PAD = 24       # a revealed target is scrolled this clear of the edge
 
@@ -3840,7 +3840,7 @@ class _SavedSearchesTab(QWidget):
 # ════════════════════════════════════════════════════════════════════════════
 #  The workspace — the tab strip over the five screens
 # ════════════════════════════════════════════════════════════════════════════
-_TABS = ("People", "Companies", "Sessions", "Lists", "Saved searches", "Sequences",
+_TABS = ("People", "Companies", "Find buyers", "Sessions", "Lists", "Saved searches", "Sequences",
          "Analytics", "Deals", "Due today", "Stats")
 
 
@@ -3875,6 +3875,7 @@ class LeadsWorkspace(QWidget):
     findPrepareRequested = Signal()
     starterPicked = Signal(str)
     companiesShown = Signal()               # the Companies tab was opened
+    buyersShown = Signal()                  # the Find buyers tab was opened
     dueOpenRequested = Signal(object)       # Due today: Open on a row (the lead)
     dueTaskDoneRequested = Signal(object, str, bool)   # Due today: Done on a task
 
@@ -3916,6 +3917,8 @@ class LeadsWorkspace(QWidget):
         # the top: that module reads this one's table.
         from addons.leads.companies_page import CompaniesPage
         self.companies = CompaniesPage()
+        from addons.leads.buyers_page import BuyersPage
+        self.buyers = BuyersPage()          # describe what you sell, get buyers with proof (buyers_page.py)
         from addons.leads.due_today import DueTodayPage
         from addons.leads.deals_page import DealsPage
         self.deals = DealsPage()            # the pipeline board (deals_page.py)
@@ -3937,7 +3940,7 @@ class LeadsWorkspace(QWidget):
         root.addWidget(self._tabstrip())
         self._stack = QStackedWidget()
         self._stack.setStyleSheet(f"QStackedWidget{{background:{theme.CARD};}}")
-        for w in (self.leads, self.companies, self._sessions, self._lists, self._saved,
+        for w in (self.leads, self.companies, self.buyers, self._sessions, self._lists, self._saved,
                   self._sequences, self._analytics, self.deals, self.due, self.stats):
             self._stack.addWidget(w)
         root.addWidget(self._stack, 1)
@@ -3997,6 +4000,8 @@ class LeadsWorkspace(QWidget):
         w = self._stack.widget(i)
         if w is self.companies:
             self.companiesShown.emit()
+        elif w is self.buyers:
+            self.buyersShown.emit()
         elif w is self._lists:
             self._lists.refresh()
         elif w is self._sessions:

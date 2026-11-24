@@ -1,0 +1,37 @@
+{
+ "runId": "run_fake",
+ "status": "COMPLETED",
+ "billedUnits": 1,
+ "providerResponse": {
+  "httpStatus": 200
+ },
+ "output": {
+  "data": {
+   "first_name": "Asha",
+   "last_name": "Rao",
+   "email": "asha.rao@acme.example",
+   "score": 80,
+   "domain": "acme.example",
+   "accept_all": true,
+   "position": "Head of Automation",
+   "twitter": null,
+   "linkedin_url": "https://www.linkedin.com/in/asha-rao-fake",
+   "phone_number": null,
+   "company": "Acme Motors",
+   "source_type": "generated",
+   "provenance": "inferred",
+   "sources": [],
+   "verification": {
+    "date": "2026-11-24",
+    "status": "valid"
+   }
+  },
+  "meta": {
+   "params": {
+    "first_name": "Asha",
+    "last_name": "Rao",
+    "domain": "acme.example"
+   }
+  }
+ }
+}

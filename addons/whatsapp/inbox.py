@@ -312,7 +312,18 @@ class InboxPage(QWidget):
         ui.call(self, "tags/list", done=lambda r: setattr(self, "_tag_names", [t["name"] for t in r.get("tags") or []]), failed=lambda m, _d: None)
         ui.call(self, "attributes/list", done=lambda r: setattr(self, "_defs", {a["key"]: {"type": a.get("type"), "options": a.get("options")}
                                                                                 for a in r.get("attributes") or []}), failed=lambda m, _d: None)
+        ui.call(self, "templates/list", done=self._on_templates, failed=lambda m, _d: None)
         self.quick.load()
+
+    def _on_templates(self, reply: dict):
+        """What each approved template says, so a message sent from one shows its words in the thread, not the template's name."""
+        from addons.whatsapp.thread import template_text
+        words: dict = {}
+        for t in reply.get("templates") or []:
+            name = str(t.get("name") or "")
+            if name and (name not in words or str(t.get("status") or "").upper() == "APPROVED"):   # a message already sent keeps its words even if the template is paused since
+                words[name] = template_text(t.get("components"))
+        self.thread.set_templates(words)
 
     # ── the team: who has which chat ─────────────────────────────────────────
     def _on_agents(self, reply: dict):
