@@ -742,7 +742,7 @@ def reveal_leads(leads, api_key, *, transport=None, on_progress=None) -> dict:
 
 # ── the verify waterfall's finder ─────────────────────────────────────────────
 
-def find_email(lead, api_key) -> tuple:
+def find_email(lead, api_key, *, transport=None) -> tuple:
     """Apollo's `people/match` for ONE lead — the profile link or the Apollo id
     when the lead carries one (the surest match), else the name with the company
     domain or name. Returns (email, "valid" | "unknown"), and ("", "") when
@@ -755,8 +755,9 @@ def find_email(lead, api_key) -> tuple:
     One credit, and only when Apollo finds the person — which is why verify
     calls it for the hot/warm slice alone."""
     key = (api_key or "").strip()
-    if not key:
+    if not key and transport is None:
         return "", ""
+    send = transport or (lambda path, body: _post(path, body, key))
     extra = getattr(lead, "extra", None) or {}
     # Apollo already sold us this one. people/match, asked by the id the reveal
     # left behind, would find the same person and return the same address for a
@@ -784,10 +785,10 @@ def find_email(lead, api_key) -> tuple:
             or (name and (domain or company))):
         return "", ""
     try:
-        data = _post(MATCH, body, key)
+        data = send(MATCH, body)
     except ApolloError as exc:
-        if exc.code in (401, 403):
-            raise
+        if exc.code in (401, 403) or transport is not None:
+            raise                   # a key, or a Monid wallet, refused: every other person would be too
         return "", ""
     person = data.get("person") if isinstance(data, dict) else None
     if not isinstance(person, dict):

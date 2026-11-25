@@ -733,13 +733,9 @@ class PersonPanel(QWidget):
                 src=i18n.t(email_source_of(lead))), "pMuted")
             col.addWidget(self.email_source)
         from prospector import apollo
-        if apollo.is_preview(lead):
-            # An Apollo search card: a first name and a surname's initial. Its e-mail comes WITH the reveal, so
-            # the drawer offers that, and not a lookup with half a name (the Apollo way, 25-Nov-2026).
-            self.reveal = _link(i18n.t("Reveal full name and e-mail…"),
-                                lambda: self.enrichRequested.emit(self.view.row, ["reveal"]))
-            col.addWidget(self.reveal)
-        elif tone[3] != "verified":
+        # An Apollo search card (first name, surname's initial) gets its e-mail and full name together from the
+        # same link: Find e-mails reveals it (the owner, 25-Nov-2026: "reveal should mean find the email").
+        if apollo.is_preview(lead) or tone[3] != "verified":
             self.find_email = _link(i18n.t("Find their e-mail…"),
                                     lambda: self.enrichRequested.emit(self.view.row, ["email"]))
             col.addWidget(self.find_email)

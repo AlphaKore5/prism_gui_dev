@@ -92,16 +92,17 @@ def status_of(dos, draft=None) -> str:
 def needs_email(dos) -> bool:
     """True while "Find e-mails" still has something to do for this lead: no
     address at all, or one nobody has confirmed (a guess, a catch-all, an
-    invalid). A verified address is done — asking again only spends credits. A preview row (an Apollo card
-    nobody revealed) waits for Reveal: finding an e-mail with half a name buys the wrong person's, or none."""
+    invalid). A verified address is done — asking again only spends credits. An Apollo preview row (a free
+    search card) needs one too: Find e-mails reveals it, full name and e-mail together (the owner, 25-Nov-2026)."""
     if needs_reveal(dos):
-        return False
+        return True
     return ((dos.lead.extra or {}).get("email_check") or "") != "valid"
 
 
 def needs_reveal(dos) -> bool:
     """True for an Apollo preview row: a first name and a surname's initial from the free search, revealed only
-    when the owner picks it (Reveal; the owner, 25-Nov-2026: "do it the apollo way")."""
+    when the owner picks it — Find e-mails (the owner, 25-Nov-2026: "do it the apollo way", then "reveal should
+    mean find the email for this contact")."""
     from prospector import apollo
     return apollo.is_preview(getattr(dos, "lead", None))
 
@@ -208,7 +209,7 @@ _SORTS = (("relevance", "Relevance"), ("name", "Name A–Z"),
 # keys answer with a region of the header instead (_section_rect).
 _HELP_COLS = {"col_lead": _C_LEAD, "col_focus": _C_FOCUS, "col_fit": _C_FIT,
               "col_status": _C_STATUS, "col_signal": _C_SIGNAL}
-_HELP_BULK = ("bulk_save", "bulk_remove", "bulk_reveal", "bulk_verify", "bulk_emails", "bulk_phones",
+_HELP_BULK = ("bulk_save", "bulk_remove", "bulk_verify", "bulk_emails", "bulk_phones",
               "bulk_list", "bulk_export", "bulk_stage", "bulk_qualify", "bulk_sequence")
 _HELP_KEYS = frozenset({"import_menu", "views_menu", "hide_filters", "people_search",
                         "research_menu", "save_as_search", "sort", "search_settings",
@@ -1001,8 +1002,7 @@ class LeadsCockpit(QWidget):
     ticked rows out to the workbench's workers."""
 
     verifyRequested = Signal(list)
-    revealRequested = Signal(list)          # Reveal: full names for the ticked Apollo preview rows
-    emailsRequested = Signal(list)
+    emailsRequested = Signal(list)          # Find e-mails — an Apollo preview row is revealed, anyone else found
     phonesRequested = Signal(list)          # Find phones: each company's published number
     exportRequested = Signal(list)
     saveListRequested = Signal(list)
@@ -1845,16 +1845,17 @@ class LeadsCockpit(QWidget):
                                       "credit is used for each address a "
                                       "verifier answers for.")
             self._b_emails.setToolTip("Find each selected person's real e-mail "
-                                      "and check it. A credit is used only when "
-                                      "a finder knows the person. Nothing is "
-                                      "guessed.")
+                                      "with Apollo — for someone Apollo's search "
+                                      "found, their full name comes with it. "
+                                      "Credits are used only when Apollo knows "
+                                      "the person. Nothing is guessed.")
         else:
             self._b_verify = QPushButton("Verify free")
             self._b_emails.setToolTip("Find each selected person's real e-mail "
-                                      "with Hunter, then Apollo, and check it with "
-                                      "the free verifiers. A credit is used only "
-                                      "when a finder knows the person. Nothing is "
-                                      "guessed.")
+                                      "with Apollo (their full name comes with it "
+                                      "for someone Apollo's search found). Only "
+                                      "the people Apollo knows are charged. "
+                                      "Nothing is guessed.")
         # The phone each selected person's COMPANY publishes (its website, or a
         # directory), one lookup per company. Published, not called or verified.
         self._b_phones = QPushButton("Find phones")
@@ -1863,13 +1864,6 @@ class LeadsCockpit(QWidget):
             "its own website or a business directory. It is the company's number, "
             "not a direct dial, and Prism has not called it."
             + (" A credit is used only for a number found." if gateway.pooled() else ""))
-        # Apollo's "Access email": a free search shows first names and a surname's initial; the owner ticks who
-        # is worth a full name and reveals only them (the owner, 25-Nov-2026).
-        self._b_reveal = QPushButton("Reveal")
-        self._b_reveal.setToolTip(
-            "Reveal the selected people's full names and e-mails from Apollo."
-            + (" Credits are used only for the people Apollo finds." if gateway.pooled() else
-               " Only the people Apollo finds are charged."))
         self._b_save = QPushButton("Add to list")
         self._b_export = QPushButton("Export")
         # Apollo's Edit > Set stage: where the selected contacts stand with
@@ -1897,7 +1891,6 @@ class LeadsCockpit(QWidget):
             lambda: self.saveContactsRequested.emit(self.selected()))
         self._b_remove.clicked.connect(lambda: self.removeRequested.emit(self.selected()))
         self._b_verify.clicked.connect(lambda: self.verifyRequested.emit(self.selected()))
-        self._b_reveal.clicked.connect(lambda: self.revealRequested.emit(self.selected()))
         self._b_emails.clicked.connect(lambda: self.emailsRequested.emit(self.selected()))
         self._b_phones.clicked.connect(lambda: self.phonesRequested.emit(self.selected()))
         self._b_save.clicked.connect(lambda: self.saveListRequested.emit(self.selected()))
@@ -1912,10 +1905,9 @@ class LeadsCockpit(QWidget):
         self._qualify_wanted = False        # the run holds someone Qualify can reach
         self._emails_wanted = False         # …and someone without a verified address
         self._phones_wanted = False         # …and someone with no phone at all
-        self._reveal_wanted = False         # …and an Apollo preview row nobody has revealed
         self._sel_all_wanted = False        # only some of the visible rows are ticked
         self._bulk_folded: list = []
-        for b in (self._b_contact, self._b_remove, self._b_reveal, self._b_verify, self._b_emails,
+        for b in (self._b_contact, self._b_remove, self._b_verify, self._b_emails,
                   self._b_phones, self._b_save, self._b_export, self._b_stage,
                   self._b_qualify, self._b_more, self._b_seq):
             b.setCursor(Qt.PointingHandCursor)
@@ -2002,9 +1994,9 @@ class LeadsCockpit(QWidget):
         self._toolbar_level = level
 
     def _bulk_actions(self) -> tuple:
-        """In _HELP_BULK's order: Save, Remove, Reveal, Verify, Find e-mails, Find phones,
+        """In _HELP_BULK's order: Save, Remove, Verify, Find e-mails, Find phones,
         Add to list, Export, Set stage, Qualify & draft, Add to sequence."""
-        return (self._b_contact, self._b_remove, self._b_reveal, self._b_verify, self._b_emails,
+        return (self._b_contact, self._b_remove, self._b_verify, self._b_emails,
                 self._b_phones, self._b_save, self._b_export, self._b_stage,
                 self._b_qualify, self._b_seq)
 
@@ -2017,8 +2009,6 @@ class LeadsCockpit(QWidget):
             return self._emails_wanted
         if button is self._b_phones:
             return self._phones_wanted
-        if button is self._b_reveal:
-            return self._reveal_wanted
         return True
 
     @staticmethod
@@ -2035,10 +2025,9 @@ class LeadsCockpit(QWidget):
         Remove, More and the primary need, so their labels were crushed to
         stubs ("emov", "i seq"). Folded, Remove is still in More, by name. From
         6 "Clear selection" goes too (_fit_bulk): the header tick clears as well."""
-        (_contact, remove, reveal, verify, emails, phones, add_list, export, stage, qualify,
+        (_contact, remove, verify, emails, phones, add_list, export, stage, qualify,
          _seq) = actions
-        # Reveal stays on the bar with Find e-mails as long as it fits: on an Apollo search it is THE next step.
-        every_extra = (verify, phones, add_list, stage, export, qualify, emails, reveal)
+        every_extra = (verify, phones, add_list, stage, export, qualify, emails)
         return {2: (verify, phones, add_list, stage),
                 3: (verify, phones, add_list, stage, export, qualify),
                 4: every_extra,
@@ -2805,8 +2794,7 @@ class LeadsCockpit(QWidget):
         # Find phones found) has nothing left to look up.
         self._phones_wanted = any(needs_phone(d) for d in self._dossiers + picked)
         self._b_phones.setEnabled(any(needs_phone(d) for d in picked))
-        self._reveal_wanted = any(needs_reveal(d) for d in self._dossiers + picked)
-        self._b_reveal.setEnabled(any(needs_reveal(d) for d in picked))
+
         # The header's box speaks for THIS page, as Apollo's does.
         ticked = len([i for i in self._checked if i not in self._hidden])
         self._head.set_check_state(Qt.Unchecked if ticked == 0 else
@@ -3878,7 +3866,6 @@ class LeadsWorkspace(QWidget):
     searches in step."""
 
     verifyRequested = Signal(list)
-    revealRequested = Signal(list)
     emailsRequested = Signal(list)
     phonesRequested = Signal(list)
     exportRequested = Signal(list)
@@ -3913,7 +3900,7 @@ class LeadsWorkspace(QWidget):
         import paths
         self._folder = leads_folder or paths.user_folder("Documents", "Prism Leads")
         self.leads = LeadsCockpit()
-        for name in ("verifyRequested", "revealRequested", "emailsRequested", "phonesRequested",
+        for name in ("verifyRequested", "emailsRequested", "phonesRequested",
                      "exportRequested", "saveListRequested", "sequenceRequested",
                      "qualifyRequested",
                      "saveContactsRequested", "stageRequested", "removeRequested",

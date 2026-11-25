@@ -1358,7 +1358,7 @@ class ApolloIsTheOtherDatabase(_Workbench):
         self.assertIn("Exa searches", wb._find_meta.text())  # what the press costs
         wb._src_apollo.click()
         self.assertEqual(wb._source, "apollo")
-        self.assertIn("Apollo credit for each person you reveal", wb._find_meta.text())
+        self.assertIn("Apollo credit for each e-mail you find", wb._find_meta.text())
 
     def test_the_apollo_key_is_saved_and_nothing_else_in_the_config_is(self):
         """The rail saves the key it was given by loading the config fresh and
@@ -1476,7 +1476,7 @@ class ApolloIsTheOtherDatabase(_Workbench):
         wb._filters.set_spec(self._WB.SearchSpec.from_dict({"job_titles": {"include": ["Head of Automation"]}}))
         wb._refresh_prepare()
         self.assertEqual(wb._find_meta.text(),
-                         "Searches Apollo, free — then about one Apollo credit for each person you reveal")
+                         "Searches Apollo, free — then about one Apollo credit for each e-mail you find")
 
     def test_with_only_a_monid_key_the_keys_box_stays_folded(self):
         wb = self._WB.LeadsWorkbench({"monid_api_key": "mk"})
@@ -1498,7 +1498,7 @@ class ApolloIsTheOtherDatabase(_Workbench):
         # 25-Nov-2026, the Apollo way: an Apollo search SHOWS people (free); the owner reveals whom they pick.
         self.assertEqual(wb._target_row.name.text(), "Show up to")
         self.assertIn("Searching is free", wb._target.toolTip())
-        self.assertIn("you reveal the full names and e-mails of the people you pick", " ".join(
+        self.assertIn("Find e-mails gets the e-mail and full name of the people you pick", " ".join(
             wb._target.toolTip().split()))
         wb._src_exa.click()
         self.assertEqual(wb._target_row.name.text(), "Source up to")
@@ -4073,10 +4073,11 @@ class TheEmailWorkerSpendsOnTheChosenPeople(unittest.TestCase):
             seen.append((lead, dict(keys or {})))
             if not lead.email:
                 lead.email = "ana.ruiz@acme.com"
-                lead.extra["email_source"] = "hunter"
+                lead.extra["email_source"] = "apollo"
             lead.extra["email_check"] = "valid" if "@acme" in lead.email else "catch-all"
 
-        w, got = self._worker([blank, held], cfg={"hunter_api_key": "h",
+        # 25-Nov-2026: Apollo is the finder (Hunter is out of the chain), so its key is the one collected.
+        w, got = self._worker([blank, held], cfg={"apollo_api_key": "a",
                                                   "reoon_api_key": "r"})
         with mock.patch("prospector.signals.exa_key", return_value=""), \
                 mock.patch("prospector.enrich.enrich") as enriched, \
@@ -4085,10 +4086,10 @@ class TheEmailWorkerSpendsOnTheChosenPeople(unittest.TestCase):
         self.assertEqual(got["failed"], [])
         enriched.assert_not_called()          # no Exa key: the domain step is skipped
         self.assertEqual((blank.email, blank.extra["email_source"]),
-                         ("ana.ruiz@acme.com", "hunter"))
+                         ("ana.ruiz@acme.com", "apollo"))
         self.assertEqual([l for l, _k in seen], [blank, held])
         self.assertEqual(got["done"], [(1, 1)])          # one found, one verified
-        self.assertEqual(seen[0][1], {"hunter_api_key": "h", "reoon_api_key": "r"})
+        self.assertEqual(seen[0][1], {"apollo_api_key": "a", "reoon_api_key": "r"})
 
     def test_a_refused_apollo_plan_is_not_asked_to_find_either(self):
         from unittest import mock

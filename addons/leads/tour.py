@@ -297,11 +297,6 @@ STEPS = (
      "credit is used for each address a verifier answers for, and none for "
      "one it could not reach."),
 
-    ("bulk_reveal", "Reveal",
-     "Apollo's search is free and shows first names only. Tick the people worth "
-     "contacting and Reveal buys their full name and e-mail, for them alone. "
-     "A person Apollo does not find costs nothing."),
-
     ("bulk_emails", "Find e-mails",
      "Looks up a real address for every ticked person and checks it. Credits "
      "are used for every row you ticked and not a sample of them, and an "

@@ -164,7 +164,7 @@ class TheScreenOnThePool(_Workbench):
         wb._target.setValue(40)
         text = wb._pool_search_meta(wb._filters.spec(), [])
         self.assertIn("free", text)
-        self.assertIn("2 credits for each full name you reveal", text)
+        self.assertIn("2 credits for each e-mail you find", text)
         self.assertNotIn("80 credits", text)                       # nobody is revealed by the search itself
 
     def test_the_question_before_a_search_says_it_is_free_and_that_reveals_are_picked(self):
@@ -210,7 +210,7 @@ class TheScreenOnThePool(_Workbench):
         wb._confirm_pool = lambda title, lines: (said.append((title, lines)), False)[1]
         self.assertFalse(wb._confirm_reveal(40))
         [(title, lines)] = said
-        self.assertEqual(title, "Reveal")
+        self.assertEqual(title, "Find e-mails")
         self.assertIn("up to 80 credits", lines[0])               # 40 people x the 2-credit default
         self.assertTrue(any("more than you have" in line for line in lines))
 
@@ -300,14 +300,16 @@ class TheSettingsWindowOnYourOwnKeys(_Workbench):
         self.assertIn("Apollo credit", said["source"])
         self.assertEqual(said["mobiles"], "")                         # no Monid wallet, no mobile lookup to price
 
-    def test_a_monid_wallet_without_a_hunter_key_renames_verify_because_it_finds(self):
+    # 25-Nov-2026, the owner: "no room for hunter now" — Apollo is the finder, through the Monid wallet.
+    def test_a_monid_wallet_without_an_apollo_key_renames_verify_because_it_finds(self):
         wb, said = self.hints({"monid_api_key": "mk"})
         wb._refresh_settings_hints()
         self.assertEqual(wb._verify_row.name.text(), "Find e-mails")
-        self.assertIn("Hunter", said["verify"])
+        self.assertIn("Apollo", said["verify"])
+        self.assertNotIn("Hunter", said["verify"])
 
-    def test_a_hunter_key_keeps_the_verify_name_and_adds_no_line(self):
-        wb, said = self.hints({"monid_api_key": "mk", "hunter_api_key": "hk"})
+    def test_an_apollo_key_keeps_the_verify_name_and_adds_no_line(self):
+        wb, said = self.hints({"monid_api_key": "mk", "apollo_api_key": "ak"})
         wb._refresh_settings_hints()
         self.assertEqual(said["verify"], "")
         self.assertNotEqual(wb._verify_row.name.text(), "Find e-mails")

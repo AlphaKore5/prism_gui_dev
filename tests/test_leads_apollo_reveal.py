@@ -88,13 +88,13 @@ class TheSearchIsFree(unittest.TestCase):
 
 
 class NothingIsBoughtForHalfAName(unittest.TestCase):
-    def test_email_phone_and_mobile_lookups_leave_previews_alone(self):
+    def test_phone_and_mobile_lookups_leave_previews_alone_and_find_emails_reveals_them(self):
         from addons.leads.cockpit import needs_email, needs_phone, needs_reveal
         from prospector.models import Dossier
         lead = apollo._preview_of(apollo._card(card(1), ""))
         dos = Dossier(lead=lead)
         self.assertTrue(needs_reveal(dos))
-        self.assertFalse(needs_email(dos))
+        self.assertTrue(needs_email(dos))                   # Find e-mails is what reveals a preview
         self.assertFalse(needs_phone(dos))
         self.assertFalse(mobiles.needs_mobile(lead))
 
@@ -160,35 +160,50 @@ class TheRevealButton(_Workbench):
         wb._on_prepared(res, [])
         return wb, leads
 
-    def test_the_bar_offers_reveal_while_someone_is_a_preview(self):
+    # One action (the owner, 25-Nov-2026: "reveal should mean find the email for this contact"): Find e-mails
+    # reveals an Apollo preview — its e-mail and full name together — and finds anyone else the usual way.
+    def test_find_emails_is_the_action_for_a_preview(self):
         wb, _leads = self.bench()
-        self.assertTrue(wb._cockpit.leads._reveal_wanted)
+        self.assertTrue(wb._cockpit.leads._emails_wanted)
+        self.assertFalse(hasattr(wb._cockpit.leads, "_b_reveal"))      # no second button for the same thing
 
-    def test_reveal_asks_in_credits_first_and_a_no_starts_nothing(self):
+    def test_find_emails_on_previews_asks_in_credits_first_and_a_no_starts_nothing(self):
         wb, leads = self.bench()
         said = []
         wb._confirm_pool = lambda title, lines: (said.append((title, lines)), False)[1]
         started = []
         with mock.patch.object(self._WB, "LeadsRevealWorker", lambda *a, **k: started.append(a)):
-            wb._reveal_selected([type("D", (), {"lead": l})() for l in leads])
+            wb._find_emails([type("D", (), {"lead": l})() for l in leads])
         [(title, lines)] = said
-        self.assertEqual(title, "Reveal")
+        self.assertEqual(title, "Find e-mails")
         self.assertIn("3 people", lines[0])
         self.assertIn("up to 6 credits", lines[0])
         self.assertEqual(started, [])
 
-    def test_the_drawer_reveal_link_goes_to_the_same_reveal(self):
+    def test_the_drawer_find_email_link_reveals_a_preview(self):
         wb, leads = self.bench(1)
         asked = []
         wb._reveal_selected = lambda dossiers: asked.append([d.lead for d in dossiers])
         dos = type("D", (), {"lead": leads[0]})()
-        wb._panel_enrich(dos, ["reveal"])
+        wb._panel_enrich(dos, ["email"])
         self.assertEqual(asked, [[leads[0]]])
+
+    def test_others_ticked_with_previews_are_found_after_the_reveal(self):
+        wb, leads = self.bench(2)
+        from prospector.models import Lead
+        other = Lead(name="Bo Lund", company="Globex")
+        later = []
+        wb._reveal_selected = lambda dossiers: None
+        wb._find_emails([type("D", (), {"lead": l})() for l in leads + [other]])
+        self.assertEqual([d.lead for d in wb._after_reveal], [other])
+        wb._find_emails = lambda dossiers: later.append([d.lead for d in dossiers])
+        wb._on_revealed({"asked": 2, "found": 2, "missing": 0})
+        self.assertEqual(later, [[other]])
 
 
 class TheDrawer(unittest.TestCase):
-    """A preview row's drawer offers the reveal, not an e-mail lookup with half a name; the company's published
-    number is named as the company's."""
+    """A preview row's drawer offers Find their e-mail (which reveals them), and no mobile lookup with half a
+    name."""
 
     def drawer_links(self, lead):
         from PySide6.QtWidgets import QApplication, QPushButton
@@ -200,12 +215,11 @@ class TheDrawer(unittest.TestCase):
         panel.show_person(P.PersonView(row=Dossier(lead=lead)))
         return [b.text() for b in panel.findChildren(QPushButton)]
 
-    def test_a_preview_offers_reveal_and_no_email_lookup(self):
+    def test_a_preview_offers_find_their_email_and_no_mobile_lookup(self):
         lead = apollo._preview_of(apollo._card(card(1), ""))
         texts = self.drawer_links(lead)
-        self.assertIn("Reveal full name and e-mail…", texts)
-        self.assertNotIn("Find their e-mail…", texts)
-        self.assertNotIn("Find their mobile…", texts)
+        self.assertIn("Find their e-mail…", texts)                     # it reveals them
+        self.assertNotIn("Find their mobile…", texts)                  # a mobile is bought by full name
 
 
 if __name__ == "__main__":
