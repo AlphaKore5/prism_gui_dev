@@ -126,7 +126,7 @@ def extract_old_tree(dest: str, tag: str = TAG) -> None:
     if listed.returncode != 0:
         raise SystemExit(f"git tag {tag} is not in this clone -- `git fetch --tags`")
     have = set(listed.stdout.split())
-    modules = [m for m in OLD_MODULES + ["channel.py"] if m in have]
+    modules = [m for m in OLD_MODULES + ["channel.py", "flavour.py"] if m in have]
     data = subprocess.run(["git", "archive", tag, *modules], cwd=ROOT,
                           capture_output=True, check=True).stdout
     subprocess.run(["tar", "-x", "-C", dest], input=data, check=True)

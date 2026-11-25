@@ -54,6 +54,7 @@ from typing import Any, Callable
 
 import app_meta
 import channel
+import flavour
 import licensing
 import paths
 import update_manifest
@@ -160,8 +161,15 @@ FILE_TIMEOUT = 60
 def state_path() -> str:
     """~/.prism/update_state.json. Beside license.json, through the same
     user_dir() the tests redirect, so a test can never dismiss a real
-    customer's banner."""
-    return os.path.join(licensing.user_dir(), STATE_FILENAME)
+    customer's banner.
+
+    A flavour build has its own (update_state-studio.json): flavours share
+    ~/.prism, and `ready`, `highest_seen_version` and `failed_version` are facts
+    about ONE installed app. In one shared file, Complete's "Restart to update"
+    would have applied the copy Studio had staged, and a Complete that updated
+    first would have made Studio refuse the same version as already seen."""
+    root, ext = os.path.splitext(STATE_FILENAME)
+    return os.path.join(licensing.user_dir(), f"{root}{flavour.file_suffix()}{ext}")
 
 
 def _load() -> dict[str, Any]:
@@ -495,6 +503,32 @@ def platform_tag() -> str:
     return f"{os_tag}-{arch}"
 
 
+def update_channel() -> str:
+    """The channel this BUILD updates from: platform_tag() for the complete
+    Prism, exactly as always, and `<platform_tag>-<flavour>` for a flavour.
+    Every manifest and asset name below is built from it, so a Studio never asks
+    for the complete Prism's manifest. The flavour is baked at build time
+    (flavour.FLAVOUR), like UPDATE_REPO, never read from anywhere at runtime.
+
+    platform_tag() itself stays `<os>-<arch>`: it is also what the outcome
+    reports send, and the licence server's `platform` field holds 24 characters.
+    """
+    return flavour.update_channel(platform_tag())
+
+
+def _verified(token: str) -> dict[str, Any]:
+    """update_manifest.verify() with this build's keys, and then: is it for THIS
+    build's channel? The URL alone does not say so: a genuine, signed manifest
+    of another flavour published under this one's name by mistake would
+    otherwise replace this app with that one. Raises ManifestError."""
+    payload = update_manifest.verify(
+        token, public_keys=licensing.keys.update_public_keys())
+    mine = update_channel()
+    update_manifest.check_update_channel(payload, mine,
+                                         required=mine != platform_tag())
+    return payload
+
+
 def _repos() -> list[str]:
     """Every repository to try, primary first, duplicates dropped."""
     seen: list[str] = []
@@ -511,7 +545,7 @@ def _host_for(repo: str | None) -> str:
 
 
 def _manifest_url(repo: str | None = None) -> str:
-    return f"{_host_for(repo)}/manifest.{platform_tag()}.signed"
+    return f"{_host_for(repo)}/manifest.{update_channel()}.signed"
 
 
 def _file_url(version: str, relpath: str, part: int = 1,
@@ -536,9 +570,9 @@ def _file_url(version: str, relpath: str, part: int = 1,
     # the first place. `version` comes from the manifest THIS SAME CALLER
     # already verified (see stage_update's `check.version`), never from
     # anywhere else — the tag is derived data, not a second trust input.
-    tag = _assets_release_tag(version, platform_tag(), part)
+    tag = _assets_release_tag(version, update_channel(), part)
     return (f"https://github.com/{repo or UPDATE_REPO}/releases/download/{tag}/"
-           f"{update_manifest.flat_name(platform_tag(), relpath)}")
+           f"{update_manifest.flat_name(update_channel(), relpath)}")
 
 
 def _device_fingerprint() -> str:
@@ -603,8 +637,7 @@ def check_for_update(*, running: str | None = None,
             continue
         try:
             token = raw.decode("utf-8") if isinstance(raw, (bytes, bytearray)) else raw
-            candidate = update_manifest.verify(
-                token, public_keys=licensing.keys.update_public_keys())
+            candidate = _verified(token)
         except update_manifest.ManifestError as e:
             bad = bad or e
             continue
@@ -759,7 +792,9 @@ def stage_update(check: UpdateCheck, install_dir: str, *,
 
     manifest = check.manifest
     del _served_by[:]
-    stage_dir = os.path.join(stage_root(install_dir), check.version)
+    # Flavours installed side by side stage in the same folder (stage_root).
+    stage_dir = os.path.join(stage_root(install_dir),
+                             check.version + flavour.file_suffix())
     if os.path.isdir(stage_dir):
         shutil.rmtree(stage_dir, ignore_errors=True)
     try:
@@ -1019,8 +1054,7 @@ def ready_update(running: str | None = None) -> StagedUpdate | None:
     try:
         stage, version = ready["stage_dir"], ready["version"]
         with open(_token_path(stage), encoding="utf-8") as f:
-            payload = update_manifest.verify(
-                f.read(), public_keys=licensing.keys.update_public_keys())
+            payload = _verified(f.read())
         if (payload["version"] != version or not newer(version, running)
                 or version in (payload.get("revoked") or ())
                 or version in _revoked_seen

@@ -26,6 +26,7 @@ from cryptography.hazmat.primitives import serialization as _ser
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 import apply_update
+import flavour
 import licensing
 import paths
 import update_manifest as UM
@@ -74,6 +75,9 @@ class Harness(unittest.TestCase):
             mock.patch.object(keys, "update_public_keys",
                               return_value={"u1": self.pub_hex}),
             mock.patch.object(licensing.secretstore, "_keyring", return_value=None),
+            # The manifests signed here name no update channel, as complete's
+            # never do; a flavour refuses those (tests/test_update_flavours.py).
+            mock.patch.object(flavour, "FLAVOUR", "complete"),
         ]
         for p in self.patches:
             p.start()

@@ -99,7 +99,8 @@ class Release_1_6_10_StillUpdates(unittest.TestCase):
                             "rollout": 5, "min_updater": 2,
                             "revoked": ["1.6.8"], "channel": "prod",
                             "mirrors": [{"kind": "static", "base": "https://x.example/p"}],
-                            "needs": ["swap_v2"]})
+                            "needs": ["swap_v2"],
+                            "update_channel": "windows-x64"})
         self.assertEqual(got["verify"], "ok")
         # 1.6.10 does not understand rollout, so it sees the release at once.
         # That is the known, accepted property of the bridge (docs/UPDATE-SYSTEM.md).
@@ -108,6 +109,14 @@ class Release_1_6_10_StillUpdates(unittest.TestCase):
 
     def test_old_client_is_not_confused_by_a_revoked_list_naming_itself(self):
         got = self.run_old({"version": "1.6.11", "files": [], "revoked": ["1.6.10"]})
+        self.assertEqual(got["offered"], "1.6.11")
+
+    def test_old_client_cannot_tell_a_flavours_manifest_from_its_own(self):
+        """Why a flavour's manifest must never be published under complete's
+        name: a client before 2026-11-25 ignores `update_channel`, so only the
+        file name keeps 1.6.10 away from it."""
+        got = self.run_old({"version": "1.6.11", "files": [],
+                            "update_channel": "windows-x64-studio"})
         self.assertEqual(got["offered"], "1.6.11")
 
 

@@ -475,6 +475,26 @@ def check_policy(payload: dict[str, Any]) -> None:
                                               "list of version strings.")
 
 
+def check_update_channel(payload: dict[str, Any], mine: str, *,
+                         required: bool) -> None:
+    """Raise ManifestError unless the manifest is for update channel `mine`
+    (updater.update_channel()).
+
+    `update_channel` is an optional signed field, written by packaging/manifest.py
+    for flavour builds only. A flavour's client demands it (`required`): no
+    flavour was ever released without it. The complete Prism's manifests do not
+    carry it, so its client accepts a manifest without one, as it always has,
+    and refuses one that names another channel. Clients built before this check
+    (complete, 1.8.9 and older) ignore the field: for them only the file name
+    the manifest is published under tells the builds apart.
+    """
+    if "update_channel" not in payload and not required:
+        return
+    if payload.get("update_channel") != mine:
+        raise ManifestError("wrong_channel", "This update is for a different "
+                                              "Prism build, not this one.")
+
+
 def rollout_bucket(device_fingerprint: str, version: str) -> int:
     """A stable 0..99 position for this device and this version.
 

@@ -83,6 +83,8 @@ import subprocess
 import sys
 import time
 
+import flavour
+
 PENDING_MARKER = ".prism_update_pending"
 
 
@@ -543,7 +545,9 @@ def write_windows_helper(pid_to_wait: int, install_dir: str, staged_dir: str,
     try:
         folder = _windows_helper_dir()
         os.makedirs(folder, exist_ok=True)
-        path = os.path.join(folder, "apply.bat")
+        # One script per flavour: cmd.exe reads a batch file as it runs it, so
+        # a second flavour updating at the same moment must not rewrite this one.
+        path = os.path.join(folder, f"apply{flavour.file_suffix()}.bat")
         with open(path, "w", encoding="utf-8") as f:
             f.write(_WIN_HELPER.format(
                 log=log_path(), pid=int(pid_to_wait),

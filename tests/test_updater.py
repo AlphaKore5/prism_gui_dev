@@ -25,6 +25,7 @@ from cryptography.hazmat.primitives import serialization as _ser
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 import app_meta
+import flavour
 import licensing
 import updater
 from licensing import client, device, keys, store
@@ -321,8 +322,10 @@ class Advice(Harness):
     def test_the_state_file_lives_beside_the_licence(self):
         updater.dismiss("1.4.0")
         self.assertTrue(updater.state_path().startswith(self.tmp))
+        # One file per flavour beside the shared licence; "" for complete.
+        root, ext = os.path.splitext(updater.STATE_FILENAME)
         self.assertTrue(os.path.exists(
-            os.path.join(self.tmp, updater.STATE_FILENAME)))
+            os.path.join(self.tmp, root + flavour.file_suffix() + ext)))
 
     def test_a_corrupt_state_file_is_a_fresh_one(self):
         os.makedirs(self.tmp, exist_ok=True)

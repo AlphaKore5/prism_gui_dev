@@ -203,7 +203,8 @@ def build_tree(dest: str, version: str, src: str, *, test_pub: str,
     install = os.path.join(dest, "Prism")
     internal = os.path.join(install, "_internal")
     os.makedirs(internal)
-    for name in MODULES + (["channel.py"] if os.path.exists(os.path.join(src, "channel.py")) else []):
+    newer = [n for n in ("channel.py", "flavour.py") if os.path.exists(os.path.join(src, n))]
+    for name in MODULES + newer:          # the 1.6.10 tree has neither
         s = os.path.join(src, name)
         d = os.path.join(internal, name)
         if os.path.isdir(s):

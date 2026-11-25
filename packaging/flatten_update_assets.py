@@ -66,9 +66,10 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("root_dir", help="Built app directory, e.g. dist/Prism")
     p.add_argument("out_dir", help="Where to write the flattened copies")
-    p.add_argument("platform_tag", help="e.g. linux-x64 — must match "
-                                        "updater.platform_tag() on the "
-                                        "machine that will fetch these")
+    p.add_argument("platform_tag", help="e.g. linux-x64, or windows-x64-studio "
+                                        "for a flavour — must match "
+                                        "updater.update_channel() in the "
+                                        "build that will fetch these")
     args = p.parse_args(argv)
 
     if not os.path.isdir(args.root_dir):
