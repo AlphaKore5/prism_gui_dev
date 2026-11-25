@@ -183,6 +183,51 @@ def error(exc_type, exc, tb, *, addon: str = "", screen: str = "") -> None:
         pass
 
 
+class PulseTestError(Exception):
+    """Raised on purpose by send_test_error(), and by nothing else."""
+
+
+def inactive_reason() -> str:
+    """Why Pulse is not sending: "" when it is, "setting" when the customer
+    turned it off, "source" for a source checkout without PRISM_PULSE=1."""
+    if active():
+        return ""
+    return "source" if _enabled else "setting"
+
+
+def send_test_error() -> tuple[str, int]:
+    """DEV BUILDS ONLY (channel.is_dev()): record one clearly marked test error
+    the way a real unhandled error is recorded (error()), then flush and say
+    what happened. Returns (state, delivered): "sent" only when flush()
+    delivered at least one event; "saved" when it is queued for the next send;
+    "off_setting" / "off_source" when Pulse is not active; "not_dev" when this
+    is not a dev build (nothing is recorded or sent). Blocks while flush()
+    waits on the server (up to FLUSH_TIMEOUT), so call it from a worker thread.
+    The only caller is the worker in workers.py, started from the dev-only card in
+    Settings (tests/test_pulse_test_error.py keeps it that way)."""
+    global _last_flush
+    import channel
+    if not channel.is_dev():
+        return "not_dev", 0
+    why = inactive_reason()
+    if why:
+        return "off_" + why, 0
+    try:
+        import app_meta
+        try:
+            raise PulseTestError(f"test error from a dev build ({app_meta.VERSION})")
+        except PulseTestError as e:
+            # error() starts its own background send unless one ran in the last
+            # minute. This function flushes itself to learn the answer, and two
+            # sends at once could deliver the event twice, so claim the minute.
+            _last_flush = time.time()
+            error(type(e), e, e.__traceback__, screen="settings")
+        delivered = flush()
+    except Exception:                                    # noqa: BLE001
+        return "saved", 0
+    return ("sent", delivered) if delivered >= 1 else ("saved", 0)
+
+
 def run(result: str, *, addon: str = "", title: str = "", ms: int | None = None,
         run_id: str = "") -> None:
     """How a run ended. `title` is blanked like an error message."""
