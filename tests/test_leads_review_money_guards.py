@@ -1,7 +1,8 @@
 """What PR #18's security-and-money review found (25-Nov-2026), each held by a test.
 
-  1. A lookup the server never names is not ready (apollo, mobile, hunt), and on the credit pool a Find-people run
-     never starts an Exa search the owner did not approve.
+  1. A lookup the server never names is not ready (apollo, mobile, hunt). On the credit pool the Exa backup of an
+     Apollo run is kept (the owner, 25-Nov-2026) but its cost is in the question first, and it only runs where the
+     server can search Exa.
   2. Apollo reveals over an account import stop at "Reveal up to" across every company group, not per group.
   3. A Find-buyers card keeps a website only when it is the buyer's own, never the publisher's.
   4. Reveals already paid through Monid are kept when the wallet runs dry part-way.
@@ -69,8 +70,9 @@ class ALookupTheServerNeverNamed(unittest.TestCase):
 
 
 @pytest.mark.pooled
-class NoUnapprovedExaOnThePool(unittest.TestCase):
-    """The question before a pooled Apollo run prices Apollo. An Exa search is never started in its place."""
+class TheExaBackupOnThePool(unittest.TestCase):
+    """Exa backs Apollo up on the pool — its cost is in the question (test_leads_apollo_pool_ui) — and never where
+    the server has no Exa, or no Apollo to back up."""
 
     def setUp(self):
         env = mock.patch.dict(os.environ, {"MONID_API_KEY": "", "APOLLO_API_KEY": ""})
@@ -78,7 +80,7 @@ class NoUnapprovedExaOnThePool(unittest.TestCase):
         self.addCleanup(env.stop)
         self.exa_calls: list = []
 
-    def run_worker(self, answer, ready=True):
+    def run_worker(self, answer, ready=True, people=True):
         from addons.leads.workers import SourceWorker
         from prospector.filters import SearchSpec
         spec = SearchSpec.from_dict({"seniority": {"include": ["head"]}})
@@ -99,7 +101,7 @@ class NoUnapprovedExaOnThePool(unittest.TestCase):
         patches = [mock.patch.object(apollo, "search_people", side_effect=fake_apollo),
                    mock.patch("prospector.source.source", side_effect=fake_exa),
                    mock.patch("prospector.signals.exa_key", return_value="pool"),
-                   mock.patch.object(G, "ready", lambda op: ready)]
+                   mock.patch.object(G, "ready", lambda op: people if op == "people" else ready)]
         for p in patches:
             p.start()
         try:
@@ -109,14 +111,13 @@ class NoUnapprovedExaOnThePool(unittest.TestCase):
                 p.stop()
         return got
 
-    def test_apollo_empty_ends_the_run_without_exa(self):
+    def test_apollo_empty_falls_back_to_exa(self):
         got = self.run_worker([])
-        self.assertEqual(self.exa_calls, [])
-        self.assertEqual(got["done"], [])
-        self.assertTrue(got["failed"])
+        self.assertEqual(self.exa_calls, [1])
+        self.assertTrue(got["done"])
 
-    def test_apollo_refused_is_said_in_its_words_without_exa(self):
-        got = self.run_worker(apollo.ApolloError("You've run out of credits."))
+    def test_without_exa_on_the_server_apollo_refused_is_said_in_its_words(self):
+        got = self.run_worker(apollo.ApolloError("You've run out of credits."), people=False)
         self.assertEqual(self.exa_calls, [])
         self.assertEqual(got["failed"], ["You've run out of credits."])
 

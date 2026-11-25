@@ -1157,8 +1157,12 @@ class LeadsWorkbench(QWidget):
         this is a ceiling, and the words say "up to"."""
         if self._source == "apollo":
             price = gateway.rate("apollo_reveal", 2)
-            return i18n.t("Searches Apollo, free — {p} for each full name revealed, up to {c}").format(
+            text = i18n.t("Searches Apollo, free — {p} for each full name revealed, up to {c}").format(
                 p=self._cr(price), c=self._cr(price * self._target.value()))
+            backup = self._exa_backup_cost(spec, companies)
+            if backup:
+                text += i18n.t("; if Apollo finds nobody, Exa searches up to {c}").format(c=self._cr(backup))
+            return text
         n, more = self._searches(spec, companies)
         if not n:
             return i18n.t("Searches for new people")
@@ -2518,7 +2522,7 @@ class LeadsWorkbench(QWidget):
         so the figure is the most it can be — and it is exact about how many
         searches there are (source.planned_searches), not a guess."""
         if self._source == "apollo":
-            return self._confirm_pool_apollo(companies, note)
+            return self._confirm_pool_apollo(companies, note, spec)
         n, more = self._searches(spec, companies)
         price = gateway.rate("people_search", 3)
         if companies and n == 1:
@@ -2552,7 +2556,16 @@ class LeadsWorkbench(QWidget):
                                 "when your credits run out."))
         return self._confirm_pool(i18n.t("Find new people"), lines)
 
-    def _confirm_pool_apollo(self, companies, note: str) -> bool:
+    def _exa_backup_cost(self, spec, companies) -> int:
+        """The most the Exa backup can cost, in credits, when an Apollo run on the pool finds nobody: every Exa
+        search it would run, at the server's price — 0 when the server cannot search Exa. The owner, 25-Nov-2026:
+        Exa stays Apollo's backup on credits, and its cost is said before the run, not discovered after it."""
+        if not gateway.ready("people"):
+            return 0
+        n, more = self._searches(spec, companies)
+        return (n + (more or 0)) * gateway.rate("people_search", 3)
+
+    def _confirm_pool_apollo(self, companies, note: str, spec=None) -> bool:
         """The credits version of the Apollo question: searching is free, each person revealed costs
         what the server's price list says, and a person Apollo does not find is not charged — so the
         figure is the most it can be."""
@@ -2563,6 +2576,10 @@ class LeadsWorkbench(QWidget):
                         "up to {c}.").format(
                             p=self._cr(price), n=n, c=self._cr(price * n)),
                  i18n.t("A person Apollo does not find is not charged.")]
+        backup = self._exa_backup_cost(spec if spec is not None else self._filters.spec(), companies)
+        if backup:
+            lines.append(i18n.t("If Apollo finds nobody, Exa searches instead — up to {c}. An Exa search "
+                                "that finds nobody is not charged.").format(c=self._cr(backup)))
         if companies:
             lines.append(i18n.t("It looks at {what}.").format(what=note))
         balance = self._balance()

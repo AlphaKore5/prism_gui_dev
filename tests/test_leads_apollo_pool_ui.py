@@ -89,21 +89,20 @@ class TheWorkerOnThePool(unittest.TestCase):
         self.assertTrue(callable(self.apollo_calls[0]["transport"]))
         self.assertEqual(self.exa_calls, [])
 
-    # Changed 25-Nov-2026 (PR #18 review): these three used to expect a fall-back to the pooled Exa search. That
-    # spent credits the owner never approved (the question before the run priced Apollo), so on the pool a run now
-    # ends with Apollo's own reason and no Exa search. The rule and its test changed together, as CONTRIBUTING asks.
-    def test_apollo_coming_back_empty_ends_the_run_without_an_exa_search(self):
+    # 25-Nov-2026: the PR #18 review found the Exa backup spent credits the question before the run never named.
+    # The owner kept the backup ("Keep backup, show cost"): the question now names its cost
+    # (TheQuestionNamesTheExaBackup), so the run falls back to Exa as before.
+    def test_apollo_coming_back_empty_falls_back_to_exa_and_says_so(self):
         self.apollo_answer = []
         got = self.run_worker(exa_key="pool")
-        self.assertEqual(self.exa_calls, [])
-        self.assertEqual(got["done"], [])
-        self.assertTrue(got["failed"])
+        self.assertEqual(self.names(got), ["Bo Lund"])
+        self.assertTrue(any("Exa instead" in line for line in got["progress"]))
 
-    def test_the_server_refusing_is_said_in_its_words_without_an_exa_search(self):
+    def test_the_server_refusing_falls_back_to_exa(self):
         self.apollo_answer = apollo.ApolloError("You've run out of credits.")
         got = self.run_worker(exa_key="pool")
-        self.assertEqual(self.exa_calls, [])
-        self.assertEqual(got["failed"], ["You've run out of credits."])
+        self.assertEqual(self.names(got), ["Bo Lund"])
+        self.assertTrue(any("could not be searched" in line for line in got["progress"]))
 
     def test_a_server_that_has_not_got_apollo_is_never_asked_and_exa_is_not_searched_either(self):
         self.ready = False
@@ -178,6 +177,26 @@ class TheScreenOnThePool(_Workbench):
         self.assertIn("40 people", lines[0])
         self.assertIn("up to 80 credits", lines[0])
         self.assertIn("not charged", lines[1])
+
+    def test_the_question_names_what_the_exa_backup_can_cost(self):
+        # The owner, 25-Nov-2026: "Keep backup, show cost".
+        wb = self.bench()
+        wb._set_source("apollo")
+        wb._searches = lambda spec, companies=(): (4, 2)       # the Exa searches these filters would plan
+        said = []
+        wb._confirm_pool = lambda title, lines: (said.append(lines), False)[1]
+        self._saved_attrs["_confirm_search"](wb, wb._filters.spec(), [], "")
+        backup = [line for line in said[0] if "Exa searches instead" in line]
+        self.assertEqual(len(backup), 1)
+        self.assertIn("up to 18 credits", backup[0])               # 6 searches x the 3-credit default
+        self.assertIn("Exa searches up to", wb._pool_search_meta(wb._filters.spec(), []))
+
+    def test_no_exa_on_the_server_means_no_backup_is_promised(self):
+        wb = self.bench()
+        wb._set_source("apollo")
+        with mock.patch.object(G, "ready", lambda op: op != "people"):
+            self.assertEqual(wb._exa_backup_cost(wb._filters.spec(), []), 0)
+            self.assertNotIn("Exa", wb._pool_search_meta(wb._filters.spec(), []))
 
     def test_more_than_the_balance_is_said(self):
         wb = self.bench(balance=10)

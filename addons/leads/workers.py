@@ -843,7 +843,9 @@ class SourceWorker(_Worker):
                     _add_stats(stats, got)
                     asked = self._asked(part, asked)
                 if transport is not None and not leads:
-                    if not exa_key or gateway.pooled():     # never an unapproved Exa search on the pool
+                    # On the pool the Exa backup is approved with the run: the question before it names
+                    # its cost (workbench._exa_backup_cost; the owner, 25-Nov-2026).
+                    if not exa_key or (gateway.pooled() and not gateway.ready("people")):
                         if lost is not None:
                             raise lost          # nothing to fall back on: say why
                     else:
