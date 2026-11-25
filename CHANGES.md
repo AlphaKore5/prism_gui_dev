@@ -10,6 +10,20 @@ Tests: **1966 passing** (6 skipped, 8 Sep 2026 after Round 16 landed on main —
 
 ---
 
+# 2.0.0 — Studio, Sales and Engineering as separate Prisms (DEV build, 26 Nov 2026)
+
+**Dev channel only. Windows and Linux** (no macOS build yet). 2.0.0 is the owner's number for the separate module builds; every build from this commit says 2.0.0, the complete Prism included.
+
+- **Three Prisms from one codebase.** Studio (Reel, Motion), Sales (Email Inquiries, Email Outreach, Leads, WhatsApp) and Engineering (BOQ with BOM, STEP, Gerber). The complete Prism, with all ten add-ons, is still built and is not released with 2.0.0. Why: one product for each kind of customer, a smaller download for the ones that need less.
+- **Each build updates only from its own channel** (`windows-x64-studio` and so on) and refuses another build's signed manifest, so a Studio can never update itself into the complete Prism (ISS-029). Proven on the Windows CI runner for every flavour: install, update 2.0.0 to 2.0.1, still the same Prism, uninstall keeps the data.
+- **Windows installer.** A per-user `setup.exe` (no administrator rights) beside the zip, about 30% smaller than the zip.
+- **Home** offers only the "Try:" chips for tools the build has (a Sales build no longer suggests a reel). ISS-030 records the test mistake that came with it.
+- **Pulse.** A report sent after the app has been idle waits up to 75 s for the server to wake (was 8 s). Dev builds only: Settings > Help & contact > "Send a test error".
+- **Leads** (Harsh Bhatt): Apollo's people search is free and shows people; "Reveal" buys a full name only for the ticked ones; one "Find e-mails" button, Apollo the only finder (Hunter removed); a mobile number is found through Monid and costs 4 credits; Exa stays as Apollo's backup with its cost named in the question first; fixes from the PR #18 security-and-money review.
+- **Licence.** An add-on opens at once when the lease is in grace and renews in the background.
+- **Smaller bundle.** One OpenCV, one discovery document, one `dwg2dxf`.
+- **Accuracy gate** (replay of recorded answers) runs in CI.
+
 # 1.8.9 — Straight to work, Settings without keys, video/voice inside Prism, Hindi (DEV build, 20 Nov 2026)
 
 **Dev channel only. Windows and Linux** (no macOS build: CI's macOS job is off). 1.8.8 was never published; everything in it is here too.

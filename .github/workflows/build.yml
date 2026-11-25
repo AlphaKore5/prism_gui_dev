@@ -10,7 +10,13 @@ on:
     # for the per-file update assets: a build on those published the
     # archives INTO the assets releases (7 of the 1000 asset slots each,
     # found while shipping 1.4.1) and burned three runners per platform.
-    tags: ["v*", "!v*-assets-*"]
+    # Nor the `v<version>-<flavour>` tags of a flavour's release
+    # (devtools/release_all.py --flavour): a tag run is always the complete
+    # Prism, so a build on those would attach Complete's installers to the
+    # Studio, Sales or Engineering release. Their installers come from the
+    # manual run that built and tested that flavour. (GitHub reads this file
+    # at the TAGGED commit, so the tag must be made at a commit that has it.)
+    tags: ["v*", "!v*-assets-*", "!v*-studio", "!v*-sales", "!v*-engineering"]
   # Pull requests always run the tests (Windows included); they build the
   # installers only when packaging-relevant files change (devtools/ci_changes.py)
   # or the PR has the `build` label. The label is read from the event, so add
