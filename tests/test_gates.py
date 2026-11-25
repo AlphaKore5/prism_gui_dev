@@ -1392,3 +1392,18 @@ class QuietUpdateBanner(GateTest):
              mock.patch.object(licensing, "refresh"):
             win._tick_licence()
         report.assert_called_once_with()
+
+
+class ZNothingOutlivesTheFile(unittest.TestCase):
+    """Last in the file on purpose (pytest runs a file's classes in order).
+
+    On the Windows runner this file passed all 75 tests and then did not exit
+    for 480 s (CI run 45266305406). Whatever a test leaves running -- a real
+    worker QThread, a licensing thread, a child process -- is what can hold the
+    process open, so the end of the file must find none. Windows has no
+    /proc, so the child-process part is checked on Linux only; QThreads and
+    threads are checked everywhere."""
+
+    def test_no_worker_thread_or_child_process_is_left_running(self):
+        import leakcheck
+        self.assertEqual(leakcheck.leaks(), [])

@@ -498,6 +498,8 @@ class MainWindow(QMainWindow):
     WARM_IMPORTS = ("cadquery",)            # STEP: 1.5 s of its 1.9 s first open
 
     def _warm_heavy_imports(self):
+        if os.environ.get("PRISM_NO_WARM_IMPORTS"):
+            return      # the test suite: tests/conftest.py explains why
         worker = WarmImportsWorker(self.WARM_IMPORTS)
         self._workers.append(worker)
         worker.start()

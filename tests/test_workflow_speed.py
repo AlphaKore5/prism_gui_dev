@@ -24,6 +24,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path, PureWindowsPath
 
@@ -270,6 +271,90 @@ class AFailureIdIsTheSameOnEveryOS(unittest.TestCase):
     def test_a_real_repo_file_keeps_its_id(self):
         self.assertEqual(suite_runner.case_key(Path("tests/test_x.py"), "tests.test_x.Cls", "test_y[a.b]"),
                          "test_x.py::Cls::test_y[a.b]")
+
+
+class ATimedOutFileSaysWhereItWasStuck(unittest.TestCase):
+    """test_gates.py on Windows (23 Nov 2026) printed every test passing and then
+    sat until the 480 s file timeout. The runner threw the output and the
+    watchdog's stack away, and a child holding the pipe could stall it too.
+    These run real child processes (no shell, no /bin/sh), so they run on Windows too."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.dir = Path(self._tmp.name)
+        self.addCleanup(self._tmp.cleanup)
+
+    def run_hanging(self, body: str, timeout: int = 4):
+        """Run a one-test file whose process then hangs; `body` runs after the test."""
+        f = self.dir / "test_hang.py"
+        f.write_text("def test_ok():\n    pass\n\n" + body, encoding="utf-8")
+        t0 = time.monotonic()
+        res = suite_runner.run_file(f, self.dir, 0, timeout)
+        return res, time.monotonic() - t0
+
+    @staticmethod
+    def alive(pid: int) -> bool:
+        if sys.platform.startswith("win"):
+            out = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH"],
+                                 capture_output=True, text=True).stdout
+            return str(pid) in out
+        try:
+            os.kill(pid, 0)
+        except OSError:
+            return False
+        try:                                    # a zombie is not running
+            return Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0] != "Z"
+        except OSError:
+            return True
+
+    def test_a_hang_after_the_tests_names_the_stage_and_keeps_the_output(self):
+        done = self.dir / "test_hang.done.txt"
+        body = ("import os, time\n"
+                "def teardown_module(m):\n"
+                "    open(os.environ['PRISM_FILE_DONE_LOG'], 'a').write('tests finished\\n')\n"
+                "    time.sleep(600)\n")
+        (cases, died, tail), secs = self.run_hanging(body)
+        self.assertEqual(cases, [])
+        self.assertIn("timed out after 4s", died)
+        self.assertIn("the tests all finished", died)
+        self.assertIn("'tests finished'", died)
+        self.assertIn("runner killed it", died)
+        self.assertLess(secs, 60)
+        self.assertTrue(done.exists())
+
+    def test_the_watchdog_stack_is_reported_when_the_process_still_did_not_end(self):
+        body = ("import os, time\n"
+                "def teardown_module(m):\n"
+                "    open(%r, 'w').write('Thread 0x1 (most recent call first):\\n  File \"x.py\", line 9 in stuck_here\\n')\n"
+                "    time.sleep(600)\n") % str(self.dir / "test_hang.hang.txt")
+        (cases, died, tail), _ = self.run_hanging(body)
+        self.assertIn("watchdog dumped every thread's stack", died)
+        self.assertIn("stuck_here", tail)
+
+    def test_a_child_holding_the_output_is_killed_with_the_process(self):
+        pidfile = self.dir / "child.pid"
+        body = ("import subprocess, sys, time\n"
+                "def teardown_module(m):\n"
+                "    c = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(600)'])\n"
+                "    open(%r, 'w').write(str(c.pid))\n"
+                "    time.sleep(600)\n") % str(pidfile)
+        (cases, died, tail), secs = self.run_hanging(body)
+        self.assertIn("timed out after 4s", died)
+        self.assertLess(secs, 60)                # a held pipe used to stall the runner
+        pid = int(pidfile.read_text())
+        deadline = time.monotonic() + 10
+        while self.alive(pid) and time.monotonic() < deadline:
+            time.sleep(0.2)
+        self.assertFalse(self.alive(pid), "the grandchild survived the runner's kill")
+
+    def test_a_file_that_finishes_leaves_its_stage_markers(self):
+        """The real conftest writes both stages; a clean file is not reported as hung."""
+        cases, died, _ = suite_runner.run_file(ROOT / "tests" / "test_repo_layout.py", self.dir, 0, 300)
+        self.assertEqual(died, "")
+        self.assertTrue(cases)
+        stages = (self.dir / "test_repo_layout.done.txt").read_text(encoding="utf-8")
+        self.assertIn("pytest session finished (exit status 0)", stages)
+        self.assertIn("calling os._exit", stages)
 
 
 class TagRunsAndReleasesAreUntouched(unittest.TestCase):
