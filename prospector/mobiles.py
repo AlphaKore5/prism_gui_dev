@@ -63,7 +63,10 @@ def entry_of(lead) -> dict | None:
 
 
 def needs_mobile(lead) -> bool:
-    return lead is not None and not has_mobile(lead) and _who(lead) is not None
+    # An Apollo preview row (half a name) waits for Reveal: a mobile is bought by name.
+    from . import apollo
+    return (lead is not None and not apollo.is_preview(lead) and not has_mobile(lead)
+            and _who(lead) is not None)
 
 
 def apply(lead, number: str, kind: str = "mobile", provider: str = "apollo") -> bool:

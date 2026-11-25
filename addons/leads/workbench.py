@@ -54,7 +54,7 @@ from addons.leads.filter_panel import (
 )
 from addons.leads.credits_page import CreditPopover, CreditUsageDialog, UpgradeDialog
 from addons.leads.workers import (CreditsCallWorker, CreditsWorker, LeadsEmailWorker,
-                                  LeadsExportWorker, LeadsMobileWorker, LeadsPhoneWorker,
+                                  LeadsExportWorker, LeadsMobileWorker, LeadsPhoneWorker, LeadsRevealWorker,
                                   LeadsQualifyWorker,
                                   LeadsSendWorker, LeadsSessionLoadWorker,
                                   LeadsVerifyWorker, SourceWorker, outside_filters)
@@ -845,11 +845,11 @@ class LeadsWorkbench(QWidget):
     # nothing is charged per person, Apollo charges about a credit for each one
     # it reveals — so the same spin box is a budget under one and a ceiling
     # under the other, and has to say which.
-    _TARGET_LABEL = {"apollo": "Full names up to", "exa": "Source up to"}
+    _TARGET_LABEL = {"apollo": "Show up to", "exa": "Source up to"}
     _TARGET_TIP = {
-        "apollo": "Searching Apollo is free; revealing a person's name and "
-                  "e-mail costs a little each — and a run stops at this many, "
-                  "even when your filters leave it short.",
+        "apollo": "How many people an Apollo search shows. Searching is free: "
+                  "it shows first names and titles, and you reveal the full "
+                  "names and e-mails of the people you pick.",
         "exa": "How many people to find before qualifying. Everyone outside "
                "your filters is left out and does not count.",
     }
@@ -892,9 +892,9 @@ class LeadsWorkbench(QWidget):
             reveal = gateway.rate("apollo_reveal", 2)
             if apollo:
                 out["source"] = " ".join((
-                    i18n.t("Searching Apollo is free. Each full name revealed costs {p}.").format(p=self._cr(reveal)),
+                    i18n.t("Searching Apollo is free. Revealing a full name costs {p}, only for the people "
+                           "you pick.").format(p=self._cr(reveal)),
                     i18n.t("If Apollo finds nobody, Exa takes over.")))
-                out["target"] = i18n.t("Up to {c}.").format(c=self._cr(reveal * n))
             else:
                 out["source"] = i18n.t("Each Exa search costs {p}. A search that finds nobody is not charged.").format(
                     p=self._cr(gateway.rate("people_search", 3)))
@@ -910,18 +910,17 @@ class LeadsWorkbench(QWidget):
         monid = _monid_ready(self.cfg)
         backup = bool(self._key("exa_api_key"))
         if apollo and self._apollo_via_monid():
-            parts = [i18n.t("Searching Apollo is free. Each full name revealed is about ₹{p} from your Monid wallet.").format(
-                p=f"{_REVEAL_RS:g}")]
+            parts = [i18n.t("Searching Apollo is free. Revealing a full name is about ₹{p} from your Monid "
+                            "wallet, only for the people you pick.").format(p=f"{_REVEAL_RS:g}")]
             if backup:
                 parts.append(i18n.t("If Apollo finds nobody, Exa takes over."))
             out["source"] = " ".join(parts)
-            out["target"] = i18n.t("Up to about ₹{c}.").format(c=f"{n * _REVEAL_RS:g}")
         elif apollo:
-            parts = [i18n.t("Searching Apollo is free. Revealing a person uses about one Apollo credit.")]
+            parts = [i18n.t("Searching Apollo is free. Revealing a full name uses about one Apollo credit, "
+                            "only for the people you pick.")]
             if backup:
                 parts.append(i18n.t("If Apollo finds nobody, Exa takes over."))
             out["source"] = " ".join(parts)
-            out["target"] = i18n.t("Up to {n} Apollo credits.").format(n=n)
         else:
             out["source"] = i18n.t("Each Exa search uses your Exa balance.")
         if monid:
@@ -1130,10 +1129,10 @@ class LeadsWorkbench(QWidget):
         if self._pooled():
             text = self._pool_search_meta(spec, _companies)
         elif self._source == "apollo" and self._apollo_via_monid():
-            text = i18n.t("Searches Apollo, free — about ₹{p} from your Monid wallet for each person "
-                          "revealed").format(p=f"{_REVEAL_RS:g}")
+            text = i18n.t("Searches Apollo, free — then about ₹{p} from your Monid wallet for each person "
+                          "you reveal").format(p=f"{_REVEAL_RS:g}")
         elif self._source == "apollo":
-            text = i18n.t("Searches Apollo — about a credit per full name revealed")
+            text = i18n.t("Searches Apollo, free — then about one Apollo credit for each person you reveal")
         else:
             n, more = self._searches(spec, _companies)
             if not n:
@@ -1157,8 +1156,7 @@ class LeadsWorkbench(QWidget):
         this is a ceiling, and the words say "up to"."""
         if self._source == "apollo":
             price = gateway.rate("apollo_reveal", 2)
-            text = i18n.t("Searches Apollo, free — {p} for each full name revealed, up to {c}").format(
-                p=self._cr(price), c=self._cr(price * self._target.value()))
+            text = i18n.t("Searches Apollo, free — then {p} for each full name you reveal").format(p=self._cr(price))
             backup = self._exa_backup_cost(spec, companies)
             if backup:
                 text += i18n.t("; if Apollo finds nobody, Exa searches up to {c}").format(c=self._cr(backup))
@@ -1261,6 +1259,7 @@ class LeadsWorkbench(QWidget):
         self._cockpit.verifyRequested.connect(self._verify_selected)
         self._cockpit.emailsRequested.connect(self._find_emails)
         self._cockpit.phonesRequested.connect(self._find_phones)
+        self._cockpit.revealRequested.connect(self._reveal_selected)
         self._cockpit.saveListRequested.connect(self._save_list)
         self._cockpit.exportRequested.connect(self._export_selected)
         self._cockpit.sequenceRequested.connect(self._add_to_sequence)
@@ -2473,13 +2472,13 @@ class LeadsWorkbench(QWidget):
         if self._pooled():
             return self._confirm_pool_search(spec, companies, note)
         if self._source == "apollo" and self._apollo_via_monid():
-            n = self._target.value()
-            cost = i18n.t("It searches Apollo, which is free, and reveals each person's full name (and "
-                          "e-mail, when Apollo has it) from your Monid wallet — about ₹{p} for each full "
-                          "name, for up to {n} people — up to ₹{c}.").format(p=f"{_REVEAL_RS:g}", n=n, c=f"{n * _REVEAL_RS:g}")
+            cost = i18n.t("It searches Apollo, which is free, and shows up to {n} people by first name and "
+                          "title. You then reveal the full names and e-mails of the people you pick — about ₹{p} "
+                          "each from your Monid wallet.").format(n=self._target.value(), p=f"{_REVEAL_RS:g}")
         elif self._source == "apollo":
-            cost = i18n.t("It searches Apollo — about one Apollo credit for each "
-                          "person revealed, up to {n}.").format(n=self._target.value())
+            cost = i18n.t("It searches Apollo, which is free, and shows up to {n} people by first name and "
+                          "title. You then reveal the people you pick — about one Apollo credit "
+                          "each.").format(n=self._target.value())
             if _monid_ready(self.cfg):
                 # The run asks Monid instead when Apollo refuses this key (workers.SourceWorker), so that spend is
                 # named here too.
@@ -2571,21 +2570,16 @@ class LeadsWorkbench(QWidget):
         figure is the most it can be."""
         price = gateway.rate("apollo_reveal", 2)
         n = self._target.value()
-        lines = [i18n.t("It searches Apollo, which is free, and reveals each person's full name (and "
-                        "e-mail, when Apollo has it) — {p} for each full name, for up to {n} people — "
-                        "up to {c}.").format(
-                            p=self._cr(price), n=n, c=self._cr(price * n)),
-                 i18n.t("A person Apollo does not find is not charged.")]
+        lines = [i18n.t("It searches Apollo, which is free, and shows up to {n} people by first name and "
+                        "title. Nothing is charged for the search.").format(n=n),
+                 i18n.t("You then reveal the full names and e-mails of the people you pick — {p} each, only "
+                        "for the people Apollo finds.").format(p=self._cr(price))]
         backup = self._exa_backup_cost(spec if spec is not None else self._filters.spec(), companies)
         if backup:
             lines.append(i18n.t("If Apollo finds nobody, Exa searches instead — up to {c}. An Exa search "
                                 "that finds nobody is not charged.").format(c=self._cr(backup)))
         if companies:
             lines.append(i18n.t("It looks at {what}.").format(what=note))
-        balance = self._balance()
-        if balance is not None and n * price > balance:
-            lines.append(i18n.t("That is more than you have — the search stops "
-                                "when your credits run out."))
         return self._confirm_pool(i18n.t("Find new people"), lines)
 
     def _save_keys(self) -> None:
@@ -3010,6 +3004,76 @@ class LeadsWorkbench(QWidget):
         if given and self._res is not None and (self._res.dossiers
                                                 or getattr(self._res, "all_leads", None)):
             self._start_export(self._autosave_dir(), announce=False)
+
+    def _reveal_selected(self, dossiers):
+        """Reveal: Apollo's full name and e-mail for the ticked preview rows, and only them (the owner, 25-Nov-2026:
+        "do it the apollo way" — search free, pay for the people you pick). Asks first, in what it costs on this
+        machine's route; the rows fill in place."""
+        if not dossiers or self._jobs:
+            return
+        from addons.leads.cockpit import needs_reveal
+        leads = [d.lead for d in dossiers if needs_reveal(d)]
+        if not leads:
+            self._status.setText(i18n.t("Those people are revealed already."))
+            return
+        if self._pooled():
+            blocked = self._pool_blocker("apollo")
+            if blocked:
+                self._status.setText(blocked)
+                return
+        if not self._confirm_reveal(len(leads)):
+            return
+        self._set_running(True)
+        self._acted = list(leads)
+        self._status.setText(i18n.t("Revealing {n} people…").format(n=len(leads)))
+        self._reveal_worker = LeadsRevealWorker(leads, self.cfg)
+        self._reveal_worker.progress.connect(lambda i, n: self._status.setText(
+            i18n.t("Revealed {i} of {n}…").format(i=i, n=n)))
+        self._reveal_worker.done.connect(self._on_revealed)
+        self._reveal_worker.failed.connect(self._on_failed)
+        self._job_started()
+        self._reveal_worker.start()
+
+    def _confirm_reveal(self, n: int) -> bool:
+        """The question before a reveal, in this route's money: Prism's credits, the owner's Monid wallet (rupees),
+        or their own Apollo account."""
+        if self._pooled():
+            price = gateway.rate("apollo_reveal", 2)
+            lines = [i18n.t("Reveal the full name and e-mail of {n} people — {p} each, up to {c}.").format(
+                         n=n, p=self._cr(price), c=self._cr(price * n)),
+                     i18n.t("A person Apollo does not find is not charged.")]
+            balance = self._balance()
+            if balance is not None and n * price > balance:
+                lines.append(i18n.t("That is more than you have — it stops when your credits run out."))
+            return self._confirm_pool(i18n.t("Reveal"), lines)
+        if self._apollo_via_monid():
+            text = i18n.t("Reveal the full name and e-mail of {n} people from your Monid wallet — about ₹{p} "
+                          "each, up to about ₹{c}? A person Apollo does not find is not charged.").format(
+                              n=n, p=f"{_REVEAL_RS:g}", c=f"{n * _REVEAL_RS:g}")
+        else:
+            text = i18n.t("Reveal the full name and e-mail of {n} people — about one Apollo credit each? A "
+                          "person Apollo does not find is not charged.").format(n=n)
+        answer = QMessageBox.question(self, i18n.t("Reveal"), text,
+                                      QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                      QMessageBox.StandardButton.Yes)
+        return answer == QMessageBox.StandardButton.Yes
+
+    def _on_revealed(self, counts) -> None:
+        """The revealed rows now carry their full names and e-mails: keep them, and say what was found."""
+        idle = self._job_done()
+        counts = counts if isinstance(counts, dict) else {}
+        found, missing = int(counts.get("found", 0)), int(counts.get("missing", 0))
+        self._save_session()
+        if not self._keep_as_contacts(getattr(self, "_acted", []), "email"):
+            self._rebuild_pool_keep_page()
+        if idle:
+            self._set_running(False)
+        parts = [i18n.t("Revealed {f} of {a} people.").format(f=found, a=int(counts.get("asked", 0)))]
+        if missing:
+            parts.append(i18n.t("Apollo didn't find {n} — not charged.").format(n=missing))
+        if counts.get("stopped"):
+            parts.append(i18n.t("It stopped before the rest: the reveal was refused part-way."))
+        self._status.setText("   ·   ".join(parts) + self._used_note())
 
     def _find_mobiles(self, dossiers):
         """"Find their mobile" — one PERSON's own mobile number from Apollo, through the

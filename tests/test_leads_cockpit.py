@@ -1358,7 +1358,7 @@ class ApolloIsTheOtherDatabase(_Workbench):
         self.assertIn("Exa searches", wb._find_meta.text())  # what the press costs
         wb._src_apollo.click()
         self.assertEqual(wb._source, "apollo")
-        self.assertIn("credit per full name revealed", wb._find_meta.text())
+        self.assertIn("Apollo credit for each person you reveal", wb._find_meta.text())
 
     def test_the_apollo_key_is_saved_and_nothing_else_in_the_config_is(self):
         """The rail saves the key it was given by loading the config fresh and
@@ -1459,13 +1459,15 @@ class ApolloIsTheOtherDatabase(_Workbench):
             wb._refresh_prepare()
             self.assertIn("from your Monid wallet", wb._find_meta.text())
             self.assertIn("₹2.5", wb._find_meta.text())
+            self.assertIn("free", wb._find_meta.text())               # the Apollo way: the search costs nothing
             self.assertNotIn("credit", wb._find_meta.text())
             said = []
             with mock.patch.object(self._WB.QMessageBox, "question",
                                    lambda *a, **k: (said.append(a[2]), self._WB.QMessageBox.StandardButton.No)[1]):
                 self._saved_attrs["_confirm_search"](wb, wb._filters.spec(), [], "")
             self.assertIn("Monid wallet", said[0])
-            self.assertIn("up to ₹%g" % (wb._target.value() * 2.5), said[0])
+            self.assertIn("₹2.5 each", said[0])                     # per person revealed, not a run ceiling
+            self.assertIn("people you pick", said[0])
             self.assertNotIn("Apollo credit", said[0])
 
     def test_with_an_apollo_key_of_their_own_it_is_still_priced_in_apollo_credits(self):
@@ -1473,7 +1475,8 @@ class ApolloIsTheOtherDatabase(_Workbench):
         wb._set_source("apollo")
         wb._filters.set_spec(self._WB.SearchSpec.from_dict({"job_titles": {"include": ["Head of Automation"]}}))
         wb._refresh_prepare()
-        self.assertEqual(wb._find_meta.text(), "Searches Apollo — about a credit per full name revealed")
+        self.assertEqual(wb._find_meta.text(),
+                         "Searches Apollo, free — then about one Apollo credit for each person you reveal")
 
     def test_with_only_a_monid_key_the_keys_box_stays_folded(self):
         wb = self._WB.LeadsWorkbench({"monid_api_key": "mk"})
@@ -1492,12 +1495,11 @@ class ApolloIsTheOtherDatabase(_Workbench):
         self.assertEqual(wb._target_row.name.text(), "Source up to")
         wb._src_apollo.click()
         self.assertEqual(wb._source, "apollo")
-        self.assertEqual(wb._target_row.name.text(), "Full names up to")
-        # 24-Nov-2026: the tip no longer names "one Apollo credit": on the credit pool a reveal is charged
-        # in Prism's own credits, and with the owner's Monid key it is a few cents. It says what is free
-        # and what is not, in words that are true on every route.
-        self.assertIn("Searching Apollo is free", wb._target.toolTip())
-        self.assertIn("revealing a person's name and e-mail costs a little each", wb._target.toolTip())
+        # 25-Nov-2026, the Apollo way: an Apollo search SHOWS people (free); the owner reveals whom they pick.
+        self.assertEqual(wb._target_row.name.text(), "Show up to")
+        self.assertIn("Searching is free", wb._target.toolTip())
+        self.assertIn("you reveal the full names and e-mails of the people you pick", " ".join(
+            wb._target.toolTip().split()))
         wb._src_exa.click()
         self.assertEqual(wb._target_row.name.text(), "Source up to")
 
@@ -1636,7 +1638,7 @@ class SourceWorkerSearchesApollo(unittest.TestCase):
         self.assertEqual(res.filtered_out, {"location": 40})
         self.assertEqual(res.skipped_seen, 3)
         self.assertIn("Searching Apollo — page 3 · 240 found", got["progress"])
-        self.assertIn("Revealing 12 of 25 (Apollo credits)", got["progress"])
+        self.assertIn("Revealing 12 of 25…", got["progress"])
 
     def test_an_apollo_error_is_what_the_failure_says(self):
         apollo = _apollo_module()

@@ -144,7 +144,9 @@ def keys_of(lead) -> frozenset:
         keys.add("a:" + apollo_id)
     name = norm_text(getattr(lead, "name", ""))
     company = norm_company(getattr(lead, "company", ""))
-    if name and company:
+    # An Apollo preview row's name is half a name ("Rahul S."): as a key it would fold two real Rahuls at Acme into
+    # one. Its Apollo id identifies it instead (a: above).
+    if name and company and not extra.get("apollo_preview"):
         keys.add(f"n:{name}|{company}")
     return frozenset(keys)
 
