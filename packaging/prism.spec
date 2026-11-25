@@ -862,8 +862,8 @@ if IS_MAC:
                 "into a task.",
             "NSAppleEventsUsageDescription":
                 "Prism opens Chrome to drive the AI tools you are signed in to.",
-            # Follows the CI job's target (build.yml, build-macos), which is
-            # checked against every binary by packaging/check_macos_minos.py.
-            "LSMinimumSystemVersion": os.environ.get("MACOSX_DEPLOYMENT_TARGET") or "11.0",
+            # Same number as build-macos in .github/workflows/build.yml, which
+            # checks it against every binary (packaging/check_macos_minos.py).
+            "LSMinimumSystemVersion": "14.0",
         },
     )

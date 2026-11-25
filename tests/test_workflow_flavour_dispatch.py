@@ -66,18 +66,9 @@ class DispatchBuildsOneFlavourAndNeverPublishes(unittest.TestCase):
         self.assertIn("github.event_name == 'push'", cond)
         self.assertIn("startsWith(github.ref, 'refs/tags/v')", cond)
 
-    def test_only_the_release_jobs_can_publish_and_nothing_touches_the_licence_server(self):
-        """Changed 2026-11-25: `release-macos` adds the Mac files to the release
-        `release` already published, so that a Mac that is switched off cannot
-        hold up Windows and Linux. It has the same pushed-tag-only condition and
-        one publishing command; everything else still publishes nothing."""
-        mac = self.wf["jobs"]["release-macos"]
-        self.assertEqual(mac["if"], self.wf["jobs"]["release"]["if"])
-        self.assertEqual([s["run"] for s in mac["steps"] if "run" in s],
-                         ['gh release upload "$GITHUB_REF_NAME" artifacts/* --clobber '
-                          '-R "$GITHUB_REPOSITORY"'])
+    def test_only_the_release_job_can_publish_and_nothing_touches_the_licence_server(self):
         for name, job in self.wf["jobs"].items():
-            if name in ("release", "release-macos"):
+            if name == "release":
                 continue
             for step in job["steps"]:
                 text = _step_text(step)

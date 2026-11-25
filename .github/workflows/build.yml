@@ -91,10 +91,9 @@ jobs:
           - os: windows-latest
             label: Windows
             pins: windows-x64
-          # NO MACOS HERE. GitHub refused the hosted runner on 2026-11-17 ("The
-          # configuration 'macos-14-arm64-us-default' is not supported"), and
-          # this matrix runs on pull requests, which must never reach our own
-          # Mac. macOS is built by `build-macos` below; its tests are not run.
+          # No macOS: its tests have not run since GitHub refused `macos-14` on
+          # 2026-11-17 (that image was retired on 2 November 2026). The app itself
+          # is built by `build-macos` below.
 
     steps:
       - uses: actions/checkout@v4
@@ -263,9 +262,9 @@ jobs:
           - os: windows-latest
             label: Windows (x64)
             pins: windows-x64
-          # macOS is NOT a leg of this matrix: pull requests run it. See
-          # `build-macos` at the end of this file. The macOS steps below are kept
-          # for a GitHub-hosted Mac, should that become usable again.
+          # macOS is not a leg: `release` needs all of them, and a Mac must not
+          # hold up Windows. See `build-macos` at the end of this file; the macOS
+          # steps below are kept for the day it is a leg again.
           #
           # No Intel Mac target. macos-15-intel built fine but failed its smoke
           # test, and `release` needs the whole matrix — one red leg blocks the
@@ -587,66 +586,70 @@ jobs:
             the one remaining manual step (sign + publish) before this
             release is fetchable by Prism's in-app updater._
 
-  # macOS on OUR OWN Mac (docs/MAC_BUILD_RUNNER.md), never on a pull request.
-  # A job of its own, not a leg of `build`: `build` runs on pull requests, and a
-  # step-level check is too late, the Mac would already have been handed the job.
-  # The `if:` protects against our own mistakes only: a fork's pull request
-  # brings its own copy of this file. What stops that is the repository's approval
-  # setting and the guard script on the Mac (same document, part 1).
+  # macOS, Apple Silicon, on GitHub's own runner. `macos-15` is a STANDARD runner
+  # (free while this repository is public); never use a `-large` or `-xlarge`
+  # label, those are billed. The old `macos-14` was retired on 2 November 2026.
   #
-  # PRISM_MAC_RUNNER is a repository variable. Unset, the job is skipped, so a
-  # Mac that is not connected never leaves a run waiting. Set to `on`, a job for
-  # a Mac that is switched off waits in GitHub's queue for up to 24 hours and is
-  # then cancelled (GitHub's limit; `timeout-minutes` only counts running time).
+  # A job of its own and not a leg of `build`, because `release` needs the whole
+  # of `build`: a Mac that fails, or that GitHub does not hand out, must not hold
+  # up Windows. Nothing needs this job.
   #
-  # Nothing waits for this job except `release-macos`: `release` publishes Windows
-  # and Linux as soon as they are ready, Mac or no Mac.
-  #
-  # Unsigned: no signing secret is given to this machine. Adding signing later
-  # needs a separate keychain that is deleted after every run.
+  # Its result is a workflow artifact only, UNSIGNED and for testers. The name
+  # must not start with `prism-`: `release` publishes every `prism-*` artifact it
+  # finds, so the Mac would get into a release or not depending on which job
+  # finished first. No update manifest or update files are made for it yet.
   build-macos:
-    name: macOS (Apple Silicon)
+    name: macOS (Apple Silicon, testers)
+    needs: changes
     if: >-
-      vars.PRISM_MAC_RUNNER == 'on'
-      && contains(fromJSON('["push", "schedule", "workflow_dispatch"]'), github.event_name)
-      && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
-    runs-on: [self-hosted, macOS, ARM64, prism-mac]
-    timeout-minutes: 120
+      !cancelled() && (
+        github.event_name != 'pull_request'
+        || contains(github.event.pull_request.labels.*.name, 'build')
+        || needs.changes.outputs.packaging != 'false'
+      )
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
     permissions:
-      contents: read      # the machine is kept between runs: it gets no write token
+      contents: read
     strategy:
       matrix:
         include:
-          # `os` only names the artifacts. devtools/release_all.py looks for
-          # `update-assets-macos-14`, the name they have always had.
-          - os: macos-14
+          - os: macos-15
             pins: macos-arm64
     env:
-      # The oldest macOS the app runs on (13 = Ventura). One number: it is also
-      # written into the app and checked below. macos-pins.yml has the same.
-      MACOSX_DEPLOYMENT_TARGET: "13.0"
+      # The oldest macOS the app runs on (owner, 2026-11-25: 14, Sonoma). The same
+      # number is in packaging/prism.spec and macos-pins.yml.
+      MACOSX_DEPLOYMENT_TARGET: "14.0"
     steps:
-      - name: Refuse pull requests
-        if: github.event_name == 'pull_request' || github.event_name == 'pull_request_target'
-        run: |
-          echo "::error::The build Mac never runs pull-request code. Restore the 'if:' of build-macos."
-          exit 1
-
       - uses: actions/checkout@v4
         with:
           submodules: recursive
-          persist-credentials: false
 
-      # Same rule as Windows and Linux: no pin file, no build.
-      - name: The macOS pin file must exist
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"   # why 3.12: see `build`
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            packaging/requirements-build.txt
+            constraints/${{ matrix.pins }}.txt
+
+      # The pin file is recorded by the workflow "Record macOS pin file". Until it
+      # is committed, a test build takes the newest versions and says so (an empty
+      # constraints file pins nothing). A tag never does.
+      - name: The macOS pin file
         run: |
-          if [ ! -f "constraints/${{ matrix.pins }}.txt" ]; then
-            echo "::error::constraints/${{ matrix.pins }}.txt is missing. Run the workflow 'Record macOS pin file' and commit its result (docs/MAC_BUILD_RUNNER.md, part 5)."
+          PINS="constraints/${{ matrix.pins }}.txt"
+          if [ -f "$PINS" ]; then exit 0; fi
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            echo "::error::$PINS is missing. Run 'Record macOS pin file' and commit its result (constraints/README.md)."
             exit 1
           fi
+          echo "::warning::NOT PINNED: $PINS is missing, so this Mac test build takes the newest version of every library. Run 'Record macOS pin file' and commit its result."
+          : > "$PINS"
 
-      - name: Python 3.12 and PortAudio
-        run: bash packaging/macos_ci_setup.sh
+      - name: PortAudio for macOS 14
+        run: bash packaging/macos_portaudio.sh
 
       - name: Install dependencies
         run: |
@@ -661,7 +664,7 @@ jobs:
         run: playwright install --no-shell chromium
 
       - name: Build
-        env:   # what each one is: the same step in `build`
+        env:   # what each one is: the same step in `build`. No signing secrets.
           PRISM_SERVER_URL: ${{ vars.PRISM_SERVER_URL }}
           PRISM_CHANNEL: ${{ vars.PRISM_CHANNEL }}
           PRISM_UPDATE_REPO: ${{ vars.PRISM_UPDATE_REPO }}
@@ -671,68 +674,24 @@ jobs:
         run: python packaging/smoke_test.py
 
       - name: Check the oldest macOS the bundle runs on
-        id: minos
         run: python packaging/check_macos_minos.py dist/Prism.app "$MACOSX_DEPLOYMENT_TARGET"
 
-      # For looking at on a Mac. Not named prism-*, so it is never published.
-      - name: Keep a build that failed the check above
-        if: failure() && steps.minos.outcome == 'failure'
-        uses: actions/upload-artifact@v4
-        with:
-          name: not-for-release-macos
-          path: dist/*.dmg
-          retention-days: 7
-          compression-level: 0
-
-      - name: Generate the (unsigned) update manifest
-        if: env.PRISM_BUILD_FLAVOUR == 'complete'
+      - name: Say what this build is
         run: |
-          set -eo pipefail
-          PLATFORM_TAG=$(python -c "import sys; sys.path.insert(0, '.'); import updater; print(updater.platform_tag())")
-          VERSION=$(python -c "import sys; sys.path.insert(0, '.'); import app_meta; print(app_meta.VERSION)")
-          python packaging/manifest.py dist/Prism.app "$VERSION" \
-            -o "dist/manifest.${PLATFORM_TAG}.unsigned.json" \
-            --archive "$(ls dist/*.dmg)"
-          echo "PLATFORM_TAG=${PLATFORM_TAG}" >> "$GITHUB_ENV"
-
-      - name: Flatten update assets for hosting
-        if: env.PRISM_BUILD_FLAVOUR == 'complete'
-        run: python packaging/flatten_update_assets.py dist/Prism.app dist/update-assets "$PLATFORM_TAG"
+          {
+            echo "### Mac build ($PRISM_BUILD_FLAVOUR): unsigned, for testers only"
+            echo
+            echo "- Not signed and not notarised (no Apple Developer account), so macOS warns on first launch: right-click, Open; on macOS 15 and later, System Settings > Privacy & Security > Open Anyway."
+            echo "- Needs an Apple Silicon Mac with macOS $MACOSX_DEPLOYMENT_TARGET or later."
+            echo "- Opening DWG files is expected to fail below macOS 26: the bundled converter needs it (RELEASE_ISSUES.md, 2026-11-25)."
+            echo "- Not published in any release, and in-app updates are not made for it."
+            echo "- The test suite does not run on macOS; only the packaged-app self-test does."
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.PRISM_BUILD_FLAVOUR == 'complete' && format('prism-{0}', matrix.os) || format('prism-{0}-{1}', env.PRISM_BUILD_FLAVOUR, matrix.os) }}
-          path: |
-            dist/*.dmg
-            dist/manifest.*.unsigned.json
+          name: macos-testers-${{ env.PRISM_BUILD_FLAVOUR }}
+          path: dist/*.dmg
           if-no-files-found: error
           retention-days: 14
           compression-level: 0
-
-      - if: env.PRISM_BUILD_FLAVOUR == 'complete'
-        uses: actions/upload-artifact@v4
-        with:
-          name: update-assets-${{ matrix.os }}
-          path: dist/update-assets/
-          if-no-files-found: error
-          retention-days: 14
-
-  # Adds the Mac files to the release `release` already published, whenever the
-  # Mac gets to it. If the Mac was off: start it and the queued job begins by
-  # itself; after 24 hours, re-run that one job on the tag's run. Until
-  # this has run, the version is not done: macOS customers are not offered it
-  # (devtools/release_all.py --only macos-arm64-app is run after this).
-  release-macos:
-    name: Publish release (macOS files)
-    needs: [release, build-macos]
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: prism-macos-14
-          path: artifacts
-      - name: Add them to the release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$GITHUB_REF_NAME" artifacts/* --clobber -R "$GITHUB_REPOSITORY"

@@ -1,10 +1,10 @@
-"""The Mac build runs on our own Mac, and never for a pull request.
+"""The Mac build: GitHub's own standard runner, testers only, nothing waits for it.
 
-The repository is public and that Mac is a machine somebody uses, so this pins
-(docs/MAC_BUILD_RUNNER.md, part 1 says what it cannot pin): which jobs may ask
-for the machine and on which events, that they get no write token and no signing
-secret, that a Mac that is off never holds up the Windows and Linux release, and
-that the oldest macOS we promise is checked against what was actually built.
+Pins which machine it asks for (never a billed one), when it runs, that Windows
+and Linux publish whether or not a Mac is available, that its unsigned result is
+never swept into a release, and that the oldest macOS we promise is checked
+against what was actually built, with a list of known exceptions that cannot grow
+by itself.
 """
 from __future__ import annotations
 
@@ -27,121 +27,92 @@ sys.path.insert(0, str(ROOT / "packaging"))
 import check_macos_minos as minos  # noqa: E402
 
 WORKFLOWS = ROOT / ".github" / "workflows"
-LABELS = ["self-hosted", "macOS", "ARM64", "prism-mac"]
-BUILD_IF = ("vars.PRISM_MAC_RUNNER == 'on' "
-            "&& contains(fromJSON('[\"push\", \"schedule\", \"workflow_dispatch\"]'), github.event_name) "
-            "&& (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))")
-RECORD_IF = "github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'"
+ENGINE = ROOT / "prism_terminal"
+TARGET = "14.0"
 
 
 def _workflow(name):
     return yaml.safe_load((WORKFLOWS / name).read_text(encoding="utf-8"))
 
 
-def _hosted_by_us():
-    """{(file, job): job} for every job in every workflow that can reach a
-    self-hosted machine, or whose machine cannot be read off the file."""
-    out = {}
-    for path in sorted(WORKFLOWS.glob("*.y*ml")):
-        for name, job in _workflow(path.name)["jobs"].items():
-            where = str(job.get("runs-on", ""))
-            if any(w in where.lower() for w in ("self-hosted", "prism-mac", "group", "fromjson")):
-                out[(path.name, name)] = job
-    return out
+def _machines(job):
+    """Every machine a job can ask for, with its matrix filled in."""
+    on = job["runs-on"]
+    if isinstance(on, list):
+        return on
+    if on == "${{ matrix.os }}":
+        m = job["strategy"]["matrix"]
+        return list(m.get("os", [])) + [leg["os"] for leg in m.get("include", [])]
+    return [on]
 
 
-class TheMacNeverRunsAPullRequest(unittest.TestCase):
+class TheMachineIsGithubsStandardMac(unittest.TestCase):
 
-    def test_only_the_two_known_jobs_can_ask_for_the_mac(self):
-        self.assertEqual({("build.yml", "build-macos"), ("macos-pins.yml", "record")},
-                         set(_hosted_by_us()))
+    def test_the_mac_jobs_ask_for_macos_15(self):
+        self.assertEqual(_machines(_workflow("build.yml")["jobs"]["build-macos"]), ["macos-15"])
+        self.assertEqual(_machines(_workflow("macos-pins.yml")["jobs"]["record"]), ["macos-15"])
 
-    def test_they_ask_for_all_four_labels(self):
-        for key, job in _hosted_by_us().items():
-            self.assertEqual(job["runs-on"], LABELS, key)
+    def test_no_workflow_asks_for_a_billed_or_a_private_machine(self):
+        """-large and -xlarge macOS runners are billed even on a public
+        repository; a self-hosted one would run strangers' pull requests."""
+        for path in sorted(WORKFLOWS.glob("*.y*ml")):
+            for name, job in _workflow(path.name)["jobs"].items():
+                for machine in _machines(job):
+                    self.assertNotRegex(machine, "large|self-hosted",
+                                        f"{path.name}: {name}")
 
-    def test_the_events_are_listed_and_no_pull_request_is_among_them(self):
-        jobs = _hosted_by_us()
-        self.assertEqual(" ".join(jobs["build.yml", "build-macos"]["if"].split()), BUILD_IF)
-        self.assertEqual(" ".join(jobs["macos-pins.yml", "record"]["if"].split()), RECORD_IF)
+    def test_the_mac_jobs_get_no_write_token_and_no_secret(self):
+        build = _workflow("build.yml")["jobs"]["build-macos"]
+        pins = _workflow("macos-pins.yml")
+        self.assertEqual(build["permissions"], {"contents": "read"})
+        self.assertEqual(pins["permissions"], {"contents": "read"})
+        self.assertNotIn("secrets.", str(build) + str(pins))
+
+    def test_the_recorder_is_started_by_hand_only(self):
         wf = _workflow("macos-pins.yml")
         self.assertEqual(wf.get("on", wf.get(True)), {"workflow_dispatch": None})
 
-    def test_the_first_step_refuses_a_pull_request_before_any_code_is_fetched(self):
-        for key, job in _hosted_by_us().items():
-            first = job["steps"][0]
-            self.assertEqual(first["if"], "github.event_name == 'pull_request' "
-                                          "|| github.event_name == 'pull_request_target'", key)
-            self.assertIn("exit 1", first["run"])
-            self.assertTrue(job["steps"][1]["uses"].startswith("actions/checkout@"), key)
 
-    def test_the_other_jobs_matrices_hold_no_mac(self):
-        for name in ("tests", "build"):
-            matrix = _workflow("build.yml")["jobs"][name]["strategy"]["matrix"]
-            self.assertNotIn("mac", str(matrix).lower(), name)
-
-    def test_the_machine_gets_no_write_token_and_no_secret(self):
-        for (file, name), job in _hosted_by_us().items():
-            granted = job.get("permissions", _workflow(file).get("permissions"))
-            self.assertEqual(granted, {"contents": "read"}, name)
-            self.assertNotIn("secrets.", str(job), name)
-            checkout = [s for s in job["steps"] if "actions/checkout" in s.get("uses", "")]
-            self.assertEqual([s["with"]["persist-credentials"] for s in checkout], [False], name)
-
-    def test_actionlint_knows_the_label(self):
-        cfg = yaml.safe_load((ROOT / ".github" / "actionlint.yaml").read_text(encoding="utf-8"))
-        self.assertEqual(cfg["self-hosted-runner"]["labels"], ["prism-mac"])
-
-
-class AMacThatIsOffHoldsUpNothing(unittest.TestCase):
+class TheMacHoldsUpNothing(unittest.TestCase):
 
     def setUp(self):
         self.jobs = _workflow("build.yml")["jobs"]
+        self.job = self.jobs["build-macos"]
 
-    def test_only_the_job_that_adds_the_mac_files_waits_for_it(self):
-        waiting = {}
+    def test_nothing_waits_for_it_and_it_is_in_no_matrix(self):
         for name, job in self.jobs.items():
             needs = job.get("needs", [])
-            needs = [needs] if isinstance(needs, str) else needs
-            if "build-macos" in needs:
-                waiting[name] = needs
-        self.assertEqual(waiting, {"release-macos": ["release", "build-macos"]})
-        self.assertNotIn("needs", self.jobs["build-macos"])
+            self.assertNotIn("build-macos", [needs] if isinstance(needs, str) else needs, name)
+        for name in ("tests", "build"):
+            self.assertNotIn("mac", " ".join(_machines(self.jobs[name])), name)
+        self.assertLessEqual(self.job["timeout-minutes"], 90)
 
-    def test_a_running_job_is_cut_off(self):
-        for key, job in _hosted_by_us().items():
-            self.assertLessEqual(job["timeout-minutes"], 120, key)
+    def test_it_runs_exactly_when_the_other_builds_do(self):
+        self.assertEqual(self.job["if"], self.jobs["build"]["if"])
+        self.assertEqual(self.job["needs"], self.jobs["build"]["needs"])
 
-    def test_the_mac_files_are_added_for_a_pushed_tag_only_from_githubs_machine(self):
-        job = self.jobs["release-macos"]
-        self.assertEqual(job["if"], self.jobs["release"]["if"])
-        self.assertEqual(job["runs-on"], "ubuntu-latest")
-        self.assertEqual(job["steps"][0]["with"]["name"], "prism-macos-14")
-        self.assertIn("gh release upload", job["steps"][1]["run"])
+    def test_its_result_is_never_swept_into_a_release(self):
+        import fnmatch
+        pattern = [s for s in self.jobs["release"]["steps"]
+                   if "download-artifact" in s.get("uses", "")][0]["with"]["pattern"]
+        names = [s["with"]["name"] for s in self.job["steps"]
+                 if "upload-artifact" in s.get("uses", "")]
+        self.assertEqual(names, ["macos-testers-${{ env.PRISM_BUILD_FLAVOUR }}"])
+        self.assertFalse(fnmatch.fnmatch(names[0], pattern))
 
-    def test_the_artifacts_have_the_names_release_all_downloads(self):
-        src = (ROOT / "devtools" / "release_all.py").read_text(encoding="utf-8")
-        self.assertIn('("macos-arm64-app", "macos-14")', src)
-        job = self.jobs["build-macos"]
-        self.assertEqual(job["strategy"]["matrix"]["include"],
-                         [{"os": "macos-14", "pins": "macos-arm64"}])
-        uploads = [s["with"] for s in job["steps"] if "upload-artifact" in s.get("uses", "")]
-        self.assertEqual([u["name"] for u in uploads[1:]], [
-            "${{ env.PRISM_BUILD_FLAVOUR == 'complete' && format('prism-{0}', matrix.os) "
-            "|| format('prism-{0}-{1}', env.PRISM_BUILD_FLAVOUR, matrix.os) }}",
-            "update-assets-${{ matrix.os }}"])
+    def test_the_flavour_reaches_it(self):
+        """packaging/build.py reads the workflow's PRISM_BUILD_FLAVOUR."""
+        self.assertNotIn("PRISM_BUILD_FLAVOUR", str(self.job.get("env", {})))
+        for step in self.job["steps"]:
+            self.assertNotIn("PRISM_BUILD_FLAVOUR", str(step.get("env", {})), step)
+        self.assertIn("python packaging/build.py --clean", [s.get("run") for s in self.job["steps"]])
 
-    def test_a_build_that_failed_the_check_is_never_swept_into_a_release(self):
-        failed = [s for s in self.jobs["build-macos"]["steps"]
-                  if s.get("with", {}).get("name") == "not-for-release-macos"]
-        self.assertEqual(len(failed), 1)
-        self.assertEqual(failed[0]["if"], "failure() && steps.minos.outcome == 'failure'")
-
-    def test_a_flavour_build_never_feeds_the_update_channel(self):
-        for step in self.jobs["build-macos"]["steps"]:
-            text = str(step.get("run", "")) + str(step.get("with", {}).get("name", ""))
-            if "manifest.py" in text or "update-assets" in text:
-                self.assertEqual(step.get("if"), "env.PRISM_BUILD_FLAVOUR == 'complete'", step)
+    def test_the_summary_says_unsigned_testers_and_dwg(self):
+        run = [s for s in self.job["steps"] if s.get("name") == "Say what this build is"][0]["run"]
+        self.assertIn("GITHUB_STEP_SUMMARY", run)
+        for words in ("unsigned, for testers only", "Opening DWG files is expected to fail below macOS 26",
+                      "Not published in any release"):
+            self.assertIn(words, run)
 
 
 class TheOldestMacosIsOneNumberAndIsChecked(unittest.TestCase):
@@ -149,14 +120,12 @@ class TheOldestMacosIsOneNumberAndIsChecked(unittest.TestCase):
     def setUp(self):
         self.job = _workflow("build.yml")["jobs"]["build-macos"]
 
-    def test_both_workflows_set_the_same_target(self):
-        self.assertEqual(self.job["env"]["MACOSX_DEPLOYMENT_TARGET"], "13.0")
+    def test_the_workflows_and_the_app_say_the_same(self):
+        self.assertEqual(self.job["env"]["MACOSX_DEPLOYMENT_TARGET"], TARGET)
         self.assertEqual(
-            _workflow("macos-pins.yml")["jobs"]["record"]["env"]["MACOSX_DEPLOYMENT_TARGET"], "13.0")
-
-    def test_the_app_declares_the_same_number(self):
+            _workflow("macos-pins.yml")["jobs"]["record"]["env"]["MACOSX_DEPLOYMENT_TARGET"], TARGET)
         spec = (ROOT / "packaging" / "prism.spec").read_text(encoding="utf-8")
-        self.assertIn('"LSMinimumSystemVersion": os.environ.get("MACOSX_DEPLOYMENT_TARGET")', spec)
+        self.assertIn(f'"LSMinimumSystemVersion": "{TARGET}"', spec)
 
     def test_the_check_runs_after_the_build_and_before_anything_is_uploaded(self):
         runs = [str(s.get("run", s.get("uses", ""))) for s in self.job["steps"]]
@@ -244,45 +213,46 @@ class TheMinimumIsReadFromTheBinaries(unittest.TestCase):
     def test_nothing_found_is_not_a_pass(self):
         self.assertEqual(self._run({"readme.txt": b"no binaries here"})[0], 2)
 
+    _DWG = "Contents/Frameworks/core/vendor/dwg2dxf/macos-arm64/"
 
-@unittest.skipIf(sys.platform.startswith("win"), "bash scripts that only ever run on the build Mac")
-class TheScriptsOnTheMac(unittest.TestCase):
+    def test_a_known_exception_passes_and_is_reported_with_its_reason(self):
+        code, out = self._run({"Prism": _macho(), self._DWG + "dwg2dxf": _macho(version=(26, 0, 0))})
+        self.assertEqual(code, 0, out)
+        self.assertIn("1 known exceptions", out)
+        self.assertIn("KNOWN, needs macOS 26.0.0", out)
+        self.assertIn("opening DWG files is expected to fail on older Macs", out)
 
-    def test_they_parse(self):
-        for rel in ("packaging/macos_ci_setup.sh", "devtools/mac_runner_guard.sh"):
-            r = subprocess.run(["bash", "-n", str(ROOT / rel)], capture_output=True, text=True)
-            self.assertEqual(r.returncode, 0, r.stderr)
+    def test_a_known_exception_does_not_cover_a_higher_version_or_another_file(self):
+        self.assertEqual(self._run({self._DWG + "dwg2dxf": _macho(version=(27, 0, 0))})[0], 1)
+        self.assertEqual(self._run({self._DWG + "other.dylib": _macho(version=(26, 0, 0))})[0], 1)
+        self.assertEqual(self._run({"Contents/Frameworks/libredwg.0.dylib":
+                                    _macho(version=(26, 0, 0))})[0], 1)
 
-    def _guard(self, event, ref):
-        env = {"PATH": os.environ["PATH"], "GITHUB_EVENT_NAME": event, "GITHUB_WORKFLOW_REF": ref}
-        return subprocess.run(["bash", "-e", str(ROOT / "devtools" / "mac_runner_guard.sh")],
-                              env=env, capture_output=True, text=True).returncode
 
-    def test_the_guard_lets_our_own_builds_through(self):
-        wf = "AlphaKore5/prism_gui_dev/.github/workflows/"
-        for event, ref in (("push", "build.yml@refs/heads/main"),
-                           ("push", "build.yml@refs/tags/v1.9.0"),
-                           ("schedule", "build.yml@refs/heads/main"),
-                           ("workflow_dispatch", "build.yml@refs/heads/main"),
-                           ("workflow_dispatch", "macos-pins.yml@refs/heads/main")):
-            self.assertEqual(self._guard(event, wf + ref), 0, (event, ref))
+class TheExceptionsCannotGrowSilently(unittest.TestCase):
 
-    def test_the_guard_refuses_everything_else(self):
-        wf = "AlphaKore5/prism_gui_dev/.github/workflows/"
-        for event, ref in (("pull_request", wf + "build.yml@refs/pull/9/merge"),
-                           ("pull_request_target", wf + "build.yml@refs/heads/main"),
-                           ("issue_comment", wf + "build.yml@refs/heads/main"),
-                           ("push", wf + "evil.yml@refs/heads/main"),
-                           ("push", wf + "build.yml@refs/heads/some-branch"),
-                           ("workflow_dispatch", wf + "build.yml@refs/heads/some-branch"),
-                           ("push", "someone/prism_gui_dev/.github/workflows/build.yml@refs/heads/main"),
-                           ("push", ""), ("", "")):
-            self.assertEqual(self._guard(event, ref), 1, (event, ref))
+    def test_the_list_is_exactly_these_two_files(self):
+        d = "core/vendor/dwg2dxf/macos-arm64/"
+        self.assertEqual({p: v for p, (v, _why) in minos.KNOWN.items()},
+                         {d + "dwg2dxf": (26, 0, 0), d + "libredwg.0.dylib": (26, 0, 0)})
+        notes = (ROOT / "RELEASE_ISSUES.md").read_text(encoding="utf-8")
+        for path in minos.KNOWN:
+            self.assertIn(path.rsplit("/", 1)[1], notes)
 
-    def test_the_guard_names_the_jobs_the_workflows_really_have(self):
-        text = (ROOT / "devtools" / "mac_runner_guard.sh").read_text(encoding="utf-8")
-        for file, _job in _hosted_by_us():
-            self.assertIn(f"/.github/workflows/{file}@", text)
+    @unittest.skipUnless((ENGINE / "core").is_dir(), "the engine submodule is not checked out")
+    def test_the_engine_still_ships_those_files_with_that_minimum(self):
+        """Red when the engine's converter is rebuilt: then take it off KNOWN."""
+        for path, (allowed, _why) in minos.KNOWN.items():
+            self.assertEqual(minos.minimum_macos(str(ENGINE / path)), (True, allowed), path)
+
+
+@unittest.skipIf(sys.platform.startswith("win"), "a bash script that only runs on the Mac runner")
+class ThePortAudioScript(unittest.TestCase):
+
+    def test_it_parses(self):
+        r = subprocess.run(["bash", "-n", str(ROOT / "packaging" / "macos_portaudio.sh")],
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
 
 
 class OurPythonsOpenSslIsLeftAlone(unittest.TestCase):

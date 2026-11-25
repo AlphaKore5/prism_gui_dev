@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Does anything in the built Prism.app need a newer macOS than we promise?
 
-    python packaging/check_macos_minos.py dist/Prism.app 13.0
+    python packaging/check_macos_minos.py dist/Prism.app 14.0
 
 Every Mac program and library records the oldest macOS it was built for. One
 library that needs macOS 14 inside an app sold as "macOS 13 and later" opens
@@ -27,6 +27,26 @@ FAT_MAGIC, FAT_MAGIC_64 = 0xCAFEBABE, 0xCAFEBABF
 CPU_ARM64 = 0x0100000C
 LC_VERSION_MIN_MACOSX, LC_BUILD_VERSION = 0x24, 0x32
 PLATFORM_MACOS = 1
+
+
+# Known and listed, with the reason. Exactly these files, up to exactly this
+# version: anything else, or a higher version, still fails. tests/test_workflow_macos.py
+# pins the list and compares it with the engine's real files.
+_DWG = ("the engine's bundled DWG converter was built by Homebrew on macOS 26; opening DWG "
+        "files is expected to fail on older Macs (RELEASE_ISSUES.md, 2026-11-25)")
+KNOWN = {
+    "core/vendor/dwg2dxf/macos-arm64/dwg2dxf": ((26, 0, 0), _DWG),
+    "core/vendor/dwg2dxf/macos-arm64/libredwg.0.dylib": ((26, 0, 0), _DWG),
+}
+
+
+def known(path: str, minos: tuple[int, int, int]) -> str:
+    """The reason this file may need a newer macOS, or ""."""
+    path = "/" + path.replace(os.sep, "/")
+    for suffix, (allowed, reason) in KNOWN.items():
+        if path.endswith("/" + suffix) and minos <= allowed:
+            return reason
+    return ""
 
 
 def _version(packed: int) -> tuple[int, int, int]:
@@ -92,19 +112,23 @@ def main(argv: list[str]) -> int:
     if not found:
         print(f"::error::no Mac binaries found under {root}: nothing was checked")
         return 2
-    newer = sorted((m, p) for p, m in found if m and m > want)
+    above = sorted((m, p) for p, m in found if m and m > want)
+    newer = [(m, p) for m, p in above if not known(p, m)]
     unknown = [p for p, m in found if m is None]
     print(f"{len(found)} Mac binaries, target macOS {target}: {len(newer)} need a newer macOS, "
+          f"{len(above) - len(newer)} known exceptions, "
           f"{len(unknown)} record no minimum for Apple Silicon")
     for path in unknown:
         print(f"  no minimum recorded: {path}")
-    for minos, path in newer:
-        print(f"  needs macOS {'.'.join(map(str, minos))}: {path}")
+    for minos, path in above:
+        reason = known(path, minos)
+        print(f"  {'KNOWN, ' if reason else ''}needs macOS {'.'.join(map(str, minos))}: {path}")
+        if reason:
+            print(f"::warning::{path} needs macOS {minos[0]}: {reason}")
     if newer:
         print(f"::error::{len(newer)} file(s) in {os.path.basename(root)} need a newer macOS than "
               f"{target}. Pin an older version of that library in constraints/macos-arm64.txt, or "
-              "raise MACOSX_DEPLOYMENT_TARGET in .github/workflows/build.yml "
-              "(docs/MAC_BUILD_RUNNER.md, part 7).")
+              "raise MACOSX_DEPLOYMENT_TARGET in .github/workflows/build.yml.")
         return 1
     return 0
 

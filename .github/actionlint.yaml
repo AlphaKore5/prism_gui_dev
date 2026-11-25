@@ -1,4 +1,0 @@
-# actionlint only: the label of our own build Mac (docs/MAC_BUILD_RUNNER.md).
-self-hosted-runner:
-  labels:
-    - prism-mac
