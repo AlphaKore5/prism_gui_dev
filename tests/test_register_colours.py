@@ -40,6 +40,7 @@ from addons.inquiry import documents  # noqa: E402
 from core import inbox, mailflow, register  # noqa: E402
 
 _app = QApplication.instance() or QApplication([])
+theme.apply_palette(_app)    # what main.py does: pin the light scheme, so a dark desktop cannot change the colours under test
 
 _REAL_SAVE = CB.config.save
 _REAL_CONFIG_PATH = CB.config.CONFIG_PATH
