@@ -27,6 +27,7 @@ _app.setStyleSheet(open(os.path.join(ROOT, "style.qss"), encoding="utf-8").read(
                    .replace("%ASSETS%", os.path.join(ROOT, "assets").replace(os.sep, "/")))
 
 import festivals                                                   # noqa: E402
+from addons import registry                                       # noqa: E402
 from widgets import home_panel as H                                # noqa: E402
 
 FEST_DAY = date(2026, 10, 27)
@@ -56,7 +57,10 @@ class ChatFirstHome(unittest.TestCase):
     def setUp(self):
         for patcher in (mock.patch.object(festivals, "upcoming",
                                           lambda n, today=None: _real_upcoming(n, today=FEST_DAY)),
-                        mock.patch.object(H.DATA, "recent_runs", lambda cfg, n: _runs(5))):
+                        mock.patch.object(H.DATA, "recent_runs", lambda cfg, n: _runs(5)),
+                        # the Complete build's four chips, whatever flavour CI builds
+                        # (tests/test_home_try_chips_match_build.py tests the filter)
+                        mock.patch.object(registry, "is_absent", lambda key: False)):
             patcher.start()
             self.addCleanup(patcher.stop)
 

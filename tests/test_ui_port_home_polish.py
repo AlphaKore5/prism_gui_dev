@@ -27,6 +27,7 @@ QSS = open(os.path.join(ROOT, "style.qss"), encoding="utf-8").read()
 _app.setStyleSheet(QSS.replace("%ASSETS%", os.path.join(ROOT, "assets").replace(os.sep, "/")))
 
 from widgets import controls as C                                  # noqa: E402
+from addons import registry                                       # noqa: E402
 from widgets import home_panel as H                                # noqa: E402
 from widgets import icons                                          # noqa: E402
 
@@ -204,6 +205,12 @@ class TheSendButton(unittest.TestCase):
 
 class ComposerAndTryChips(unittest.TestCase):
     def setUp(self):
+        # These tests are about the chips' size, icons and routing, so they pin the
+        # Complete build's four chips. Which chips a flavour shows is
+        # tests/test_home_try_chips_match_build.py.
+        patcher = mock.patch.object(registry, "is_absent", lambda key: False)
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.home = H.HomePanel({})
         self.home.resize(1100, 900)
         self.composer = [b for b in self.home.findChildren(QPushButton)

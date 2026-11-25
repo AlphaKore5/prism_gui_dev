@@ -152,6 +152,21 @@ something you did not run.
 
 ## Issue log (newest first)
 
+### ISS-030 — A UI change passed PR CI and broke three tests in every flavour build (2026-11-26) — FIXED in code
+- **Seen:** the first Studio, Sales and Engineering builds from main (runs 45698103739, 45698110820, 45698116808): 5 test
+  shards red, no installer built. All 3 failures were chip tests that expect four "Try:" chips on Home
+  (`test_ui_port_home_polish.py` x2, `test_ui_port_home_layout.py` x1). Studio draws 2 chips, Sales 2, Engineering 2.
+- **Cause (PROVEN: reproduced locally with `PRISM_TEST_FLAVOUR=studio`, red on the old tests, green on the fixed ones):** PR #31
+  made Home draw only the chips whose add-on the build has. Pull-request CI runs the Complete flavour only, so all four
+  chips were present and every check was green. Only a manual flavour run (`workflow_dispatch`) runs the suite as
+  Studio/Sales/Engineering. I had run those test files only as Complete.
+- **Fix:** those two test files pin the Complete chip set in `setUp` (they test size and routing).
+  `tests/test_home_try_chips_match_build.py` tests the filter itself, per flavour.
+- **Check:** the three files pass under `PRISM_TEST_FLAVOUR` = complete, studio, sales, engineering.
+- **Rule:** a change to what a screen draws per flavour is not tested until the suite has run as each flavour
+  (`PRISM_TEST_FLAVOUR=<flavour>` locally, or a manual flavour run before merging). Local `PRISM_FLAVOUR` does not do
+  this inside pytest: a run that passes under it proves nothing.
+
 ### ISS-029 — A Studio, Sales or Engineering app would have updated itself into the complete Prism (2026-11-25) — FIXED in code, not yet in a build anyone installed
 - **What happened:** nothing yet, no flavour was ever released. Found by reading: `updater.py` built every URL from
   `platform_tag()`, so a flavour asked for `manifest.windows-x64.signed` (complete's) and the quiet `auto_stage` would
