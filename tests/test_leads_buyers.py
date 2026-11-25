@@ -615,6 +615,17 @@ class ThePage(unittest.TestCase):
         self.assertIn("real answer", self.p.empty.text())
         self.assertIn("0", self.p.headline.text())
 
+    def test_a_hunt_where_every_search_failed_is_not_called_an_answer(self):
+        # 25-Nov-2026: the live licence server had no hunt lookup, all 8 searches failed, and the page still said
+        # "That is a real answer".
+        self.p.set_hunt(self._hunt([], stats={"searches": 8, "failed": 8}))
+        self.assertNotIn("real answer", self.p.empty.text())
+        self.assertIn("No search could run", self.p.empty.text())
+
+    def test_a_hunt_where_some_searches_ran_can_still_be_an_answer(self):
+        self.p.set_hunt(self._hunt([], stats={"searches": 8, "failed": 3}))
+        self.assertIn("real answer", self.p.empty.text())
+
     def test_notes_and_credits_are_said_out_loud(self):
         self.p.set_hunt(self._hunt([_hit(1)], notes=["1 of 4 searches failed."], stats={"credits": 7}))
         self.assertIn("1 of 4 searches failed.", self.p.notes.text())

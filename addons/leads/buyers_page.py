@@ -594,11 +594,20 @@ class BuyersPage(QWidget):
         self.list.add_all([self._row(i, h, self._compact) for i, h in enumerate(shown)])
         self.list.setVisible(bool(shown))
         self.empty.setVisible(not shown)
-        self.empty.setText(
-            i18n.t("No buyers with proof turned up. That is a real answer: this niche may not "
-                   "announce its needs in public. Try other kinds of buyer or another place to look.")
-            if not hits else i18n.t("Nothing to show here. Try another tab, clear the search, or open "
-                                    "Filters to see weak matches, closed bids or the ones you put away."))
+        # "A real answer" only when the searches really ran. When every one of them failed (25-Nov-2026: a licence
+        # server without the hunt lookup failed 8 of 8 and the page still called the empty list a real answer),
+        # the empty list says nothing about the owner's buyers, and the page must say so.
+        failed, ran = int(stats.get("failed") or 0), int(stats.get("searches") or 0)
+        if hits:
+            empty = i18n.t("Nothing to show here. Try another tab, clear the search, or open "
+                           "Filters to see weak matches, closed bids or the ones you put away.")
+        elif failed and failed >= ran:
+            empty = i18n.t("No search could run, so this is not an answer about your buyers. The reasons are "
+                           "above; run it again once they are fixed.")
+        else:
+            empty = i18n.t("No buyers with proof turned up. That is a real answer: this niche may not "
+                           "announce its needs in public. Try other kinds of buyer or another place to look.")
+        self.empty.setText(empty)
         self._refresh_panel()
 
     def _row(self, idx: int, h: B.Hit, compact: bool = False) -> QWidget:
