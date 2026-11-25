@@ -490,7 +490,8 @@ jobs:
         run: python packaging/smoke_test.py
 
       # Installs the setup.exe for this runner's user, runs the self-test from
-      # the INSTALLED folder, swaps it the way an in-app update does,
+      # the INSTALLED folder, updates it to a higher version from a local server
+      # with a throwaway key (update_check.py; nothing is published),
       # uninstalls, and checks the program is gone and the data folder is not.
       # Writes the setup.exe and .zip sizes to the job summary.
       - name: Install, self-test and uninstall the Windows installer
