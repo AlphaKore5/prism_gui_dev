@@ -20,6 +20,12 @@ def _read(rel):
         return f.read()
 
 
+# macOS joins as soon as its file is committed.
+_PLATFORMS = {p: s for p, s in (("linux-x64", "linux"), ("windows-x64", "win32"),
+                                ("macos-arm64", "darwin"))
+              if p != "macos-arm64" or os.path.isfile(os.path.join(ROOT, "constraints", p + ".txt"))}
+
+
 def _pins(platform):
     out = {}
     for line in _read(f"constraints/{platform}.txt").splitlines():
@@ -60,16 +66,33 @@ class TheBuildInstallsExactVersions(unittest.TestCase):
     def test_every_matrix_leg_names_a_file_that_exists(self):
         wf = _read(".github/workflows/build.yml")
         legs = set(re.findall(r"^\s+pins:\s*(\S+)", wf, re.M))
-        self.assertEqual({"linux-x64", "windows-x64"}, legs)
-        for leg in legs:
+        self.assertEqual({"linux-x64", "windows-x64", "macos-arm64"}, legs)
+        # macOS: recorded on our own Mac (macos-pins.yml). Until it is, the Mac
+        # build job stops before it installs anything: the next test.
+        for leg in legs - {"macos-arm64"}:
             self.assertTrue(os.path.isfile(os.path.join(ROOT, "constraints", leg + ".txt")), leg)
 
+    def test_the_mac_build_stops_when_its_file_is_missing(self):
+        import yaml
+        steps = yaml.safe_load(_read(".github/workflows/build.yml"))["jobs"]["build-macos"]["steps"]
+        names = [s.get("name") for s in steps]
+        check = steps[names.index("The macOS pin file must exist")]
+        self.assertIn('[ ! -f "constraints/${{ matrix.pins }}.txt" ]', check["run"])
+        self.assertIn("exit 1", check["run"])
+        self.assertNotIn("if", check)
+        self.assertLess(names.index("The macOS pin file must exist"),
+                        names.index("Install dependencies"))
+
+    def test_only_the_recording_workflow_installs_unpinned(self):
+        wf = _read(".github/workflows/macos-pins.yml")
+        self.assertIn("pip install -r requirements.txt -r packaging/requirements-build.txt\n", wf)
+
     def test_every_line_is_an_exact_pin(self):
-        for plat in ("linux-x64", "windows-x64"):
+        for plat in _PLATFORMS:
             self.assertGreater(len(_pins(plat)), 100, plat)
 
     def test_every_direct_requirement_is_pinned(self):
-        for plat, sysp in (("linux-x64", "linux"), ("windows-x64", "win32")):
+        for plat, sysp in _PLATFORMS.items():
             pins = _pins(plat)
             missing = [n for n in _direct(sysp) if n not in pins]
             self.assertEqual([], missing,

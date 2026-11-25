@@ -21,7 +21,7 @@ change without a decision.
 |---|---|
 | `windows-x64.txt` | the `Successfully installed` lines of the Windows (x64) build job, CI run 44719386793 (the 1.8.9 build) |
 | `linux-x64.txt` | the same, Linux (x64) job |
-| macOS | none yet: the macOS build is deferred in CI. Create `macos-arm64.txt` the same way, and add `pins:` to the matrix, before turning that leg back on |
+| `macos-arm64.txt` | none yet, and the macOS build job fails until it exists. Recorded on our own Mac by the workflow "Record macOS pin file" (docs/MAC_BUILD_RUNNER.md, part 5); it cannot be written on Linux, the Mac wheels differ |
 
 ## Changing a library on purpose
 

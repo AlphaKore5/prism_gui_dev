@@ -1,0 +1,67 @@
+name: Record macOS pin file
+
+# Installs Prism's libraries on our own Mac WITHOUT a constraints file and
+# uploads the exact versions as `macos-arm64-pins`. A person reads it and commits
+# it as constraints/macos-arm64.txt (constraints/README.md). It cannot be written
+# on Linux: the Mac wheels differ. Run it by hand from `main` only; the Mac
+# itself refuses anything else (devtools/mac_runner_guard.sh).
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  record:
+    name: Record macOS versions
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, macOS, ARM64, prism-mac]
+    timeout-minutes: 60
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "13.0"   # keep equal to build-macos in build.yml
+    steps:
+      - name: Refuse pull requests
+        if: github.event_name == 'pull_request' || github.event_name == 'pull_request_target'
+        run: |
+          echo "::error::The build Mac never runs pull-request code."
+          exit 1
+
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Python 3.12 and PortAudio
+        run: bash packaging/macos_ci_setup.sh
+
+      - name: Install the newest versions and write them down
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r packaging/requirements-build.txt
+          {
+            echo "# Exact versions for macOS (Apple Silicon), recorded on our build Mac, CI run ${GITHUB_RUN_ID}."
+            echo "# Used as: pip install -r requirements.txt -c constraints/<platform>.txt"
+            echo "# (see constraints/README.md)."
+            python -m pip freeze --exclude-editable | sort -f
+          } > macos-arm64.txt
+          cat macos-arm64.txt
+          # Every line is name==version, and installing with it changes nothing.
+          if grep -v '^#' macos-arm64.txt | grep -vE '^[A-Za-z0-9_.-]+==[0-9][^ ;]*$'; then
+            echo "::error::the lines above are not exact versions"; exit 1
+          fi
+          pip install --dry-run -r requirements.txt -r packaging/requirements-build.txt \
+            -c macos-arm64.txt > dry-run.txt
+          if grep "Would install" dry-run.txt; then
+            echo "::error::installing with the new file would still change something"; exit 1
+          fi
+
+      # Reading the result: lines that differ from the Linux file are versions
+      # macOS would get that the other two platforms do not.
+      - name: Compare with Linux
+        run: diff -i <(grep -v '^#' constraints/linux-x64.txt | sort -f) <(grep -v '^#' macos-arm64.txt) || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-arm64-pins
+          path: macos-arm64.txt
+          if-no-files-found: error
+          retention-days: 30

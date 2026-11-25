@@ -74,7 +74,7 @@ hooks (`rthook_distutils.py`, `rthook_ssl_certs.py`).
 |---|---|---|
 | `ubuntu-22.04` | Linux x64 | Oldest supported glibc — binaries built against a newer libc cannot run on older systems |
 | `windows-latest` | Windows x64 | |
-| `macos-14` | macOS Apple Silicon | |
+| our own Mac (`prism-mac`) | macOS Apple Silicon | Never on a pull request; see `docs/MAC_BUILD_RUNNER.md` |
 | ~~`macos-15-intel`~~ | **Dropped** | Built fine but failed its smoke test, and `release` needs the whole matrix — one red leg blocks the publish for every platform. The machines this is going to are Apple Silicon |
 
 > **An arm64 `.dmg` will NOT run on an Intel Mac** — there is no Rosetta path
