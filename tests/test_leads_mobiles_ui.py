@@ -73,6 +73,12 @@ class FindMobilesOnTheScreen(_Workbench):
         patcher = mock.patch.object(self._WB.LeadsWorkbench, "_refresh_credits", lambda _self: None)
         patcher.start()
         self.addCleanup(patcher.stop)
+        # A server that HAS the mobile lookup. Since the PR #18 review (25-Nov-2026) a lookup the server never named
+        # is not offered (gateway.NEWER_OPS), and the stand-in server here names none; an old server blocking
+        # Find mobiles is held in test_leads_review_money_guards.
+        ready = mock.patch.object(G, "ready", lambda op: True)
+        ready.start()
+        self.addCleanup(ready.stop)
         _FakeMobileWorker.made = []
         orig = self._WB.LeadsMobileWorker
         self._WB.LeadsMobileWorker = _FakeMobileWorker

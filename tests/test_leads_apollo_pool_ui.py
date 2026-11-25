@@ -89,24 +89,27 @@ class TheWorkerOnThePool(unittest.TestCase):
         self.assertTrue(callable(self.apollo_calls[0]["transport"]))
         self.assertEqual(self.exa_calls, [])
 
-    def test_apollo_coming_back_empty_falls_back_to_exa_and_says_so(self):
+    # Changed 25-Nov-2026 (PR #18 review): these three used to expect a fall-back to the pooled Exa search. That
+    # spent credits the owner never approved (the question before the run priced Apollo), so on the pool a run now
+    # ends with Apollo's own reason and no Exa search. The rule and its test changed together, as CONTRIBUTING asks.
+    def test_apollo_coming_back_empty_ends_the_run_without_an_exa_search(self):
         self.apollo_answer = []
         got = self.run_worker(exa_key="pool")
-        self.assertEqual(self.names(got), ["Bo Lund"])
-        self.assertTrue(any("Exa instead" in line for line in got["progress"]))
+        self.assertEqual(self.exa_calls, [])
+        self.assertEqual(got["done"], [])
+        self.assertTrue(got["failed"])
 
-    def test_the_server_refusing_falls_back_to_exa(self):
+    def test_the_server_refusing_is_said_in_its_words_without_an_exa_search(self):
         self.apollo_answer = apollo.ApolloError("You've run out of credits.")
         got = self.run_worker(exa_key="pool")
-        self.assertEqual(self.names(got), ["Bo Lund"])
-        self.assertTrue(any("could not be searched" in line for line in got["progress"]))
+        self.assertEqual(self.exa_calls, [])
+        self.assertEqual(got["failed"], ["You've run out of credits."])
 
-    def test_a_server_that_has_not_got_apollo_is_never_asked_and_exa_answers(self):
+    def test_a_server_that_has_not_got_apollo_is_never_asked_and_exa_is_not_searched_either(self):
         self.ready = False
         got = self.run_worker(exa_key="pool")
-        self.assertEqual(self.apollo_calls, [])
-        self.assertEqual(self.names(got), ["Bo Lund"])
-        self.assertTrue(any("isn't switched on for your account yet" in line for line in got["progress"]))
+        self.assertEqual((self.apollo_calls, self.exa_calls), ([], []))
+        self.assertIn("isn't switched on for your account yet", got["failed"][0])
 
     def test_a_server_without_apollo_and_without_exa_says_so(self):
         self.ready = False

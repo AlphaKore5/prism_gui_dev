@@ -28,6 +28,18 @@ from openpyxl.utils import get_column_letter
 
 from .models import COLD, HOT, WARM, Dossier
 
+# A cell a spreadsheet would read as a formula: text from a web page or a provider (a company called
+# "=HYPERLINK(...)") must stay text (PR #18 review, 25-Nov-2026). A phone number starts with "+" and is no formula.
+_FORMULA_START = ("=", "+", "-", "@", "\t", "\r")
+_PHONE_LIKE = re.compile(r"^\+?[\d\s().-]{6,}$")
+
+
+def safe_cell(v):
+    """`v` as a spreadsheet keeps it: a string a spreadsheet would run as a formula gets a leading apostrophe."""
+    if isinstance(v, str) and v.startswith(_FORMULA_START) and not _PHONE_LIKE.match(v):
+        return "'" + v
+    return v
+
 # Colour-coding shared by both sheets, lifted from the hand-built VITRACX files.
 _EFILL = {"valid": "E4F2EA", "domain-ok": "E4F2EA",
           "invalid": "FBD5D5", "no-mx": "FBE6E4",
@@ -209,7 +221,7 @@ def leads_xlsx(leads, path: str) -> str:
                         x.get("location", ""), x.get("since", ""),
                         _linkedin_of(x), _profile_of(x)]
                 for ci, v in enumerate(vals, 1):
-                    c = ws.cell(rn, ci, v)
+                    c = ws.cell(rn, ci, safe_cell(v))
                     c.alignment = al
                     if first:
                         c.border = top
@@ -263,7 +275,7 @@ def hotlist_xlsx(dossiers, path: str) -> str:
                 cells.append(dim.mark() if dim else "?")
         cells.append(d.opener)
         for ci, v in enumerate(cells, 1):
-            c = ws.cell(ri, ci, v)
+            c = ws.cell(ri, ci, safe_cell(v))
             c.alignment = wrap if _HOT_COLS[ci - 1] in _DIMS + ["Why-now opener"] else topl
             if ci == 1 and verdict in _VFILL:
                 c.fill, c.font = _fill(_VFILL[verdict]), Font(bold=True)

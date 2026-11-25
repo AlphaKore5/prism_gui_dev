@@ -29,8 +29,9 @@ SOURCES = ("ai_ark", "reversecontact", "contactout")
 LABEL = {"ai_ark": "AI Ark", "reversecontact": "ReverseContact", "contactout": "ContactOut"}
 # Monid's own ceiling per run: the listed price plus a cent, so a price that changes is refused, not paid.
 MAX_COST = {"ai_ark": 0.10, "reversecontact": 0.12, "contactout": 0.22}
-# What the owner is told before a batch: the most one person can cost (the first source that finds a
-# number is the last one paid, so this is the dearest single hit) and what a number costs on average.
+# What the owner is told before a batch: the most one person can cost (the first source that returns ANY number,
+# a desk line included, is the last one asked and the only one paid, so this is the dearest single hit) and what a
+# number costs on average.
 WORST_PER_PERSON = 0.22
 TYPICAL_PER_NUMBER = 0.1225
 
@@ -92,6 +93,13 @@ def number_from(source: str, run) -> tuple | None:
     return None
 
 
+def billed(source: str, run) -> bool:
+    """The source answered with a number of any kind, so this lookup was charged even if it is no mobile."""
+    if not isinstance(run, dict) or run.get("output") is None or monid_run.http_status(run) not in (0, 200):
+        return False
+    return any(phones.normal_phone(raw, hint) for raw, hint in candidates(source, run.get("output")))
+
+
 def find(first: str, last: str, domain: str, *, key: str, company: str = "", title: str = "",
          sources=SOURCES, call=None) -> dict:
     """One person's mobile: the cheapest source first, the next only when nothing was found.
@@ -110,5 +118,11 @@ def find(first: str, last: str, domain: str, *, key: str, company: str = "", tit
         if got:
             tried.append((source, "found"))
             return {"number": got[0], "kind": got[1], "provider": source, "tried": tried}
+        if billed(source, run):
+            # It returned a number — a desk line, not a mobile — and a source bills for ANY number it returns.
+            # Asking the next one could pay a second time and a third for the same person, past the "at most"
+            # the owner was quoted (PR #18 review, 25-Nov-2026), so the waterfall stops here.
+            tried.append((source, "desk"))
+            return {"number": "", "kind": "", "provider": source, "tried": tried}
         tried.append((source, "none"))
     return {"number": "", "kind": "", "provider": "", "tried": tried}

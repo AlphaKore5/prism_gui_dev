@@ -267,15 +267,24 @@ def rate(action: str, default: int = 1) -> int:
         return default
 
 
+# Lookups added after the credit pool first shipped. A server that does not name one in its "ready" flags is older
+# than it and has no route for it, so it is NOT ready, and never asked: asking 404s, and a screen that offered it
+# would quote a price for a lookup that cannot run (PR #18 review, 25-Nov-2026). Unknown — the server not asked
+# yet — is not ready either: the screen asks again once the status arrives.
+NEWER_OPS = ("apollo", "mobile", "hunt")
+
+
 def ready(op: str) -> bool:
-    """False only when the server SAID it cannot make this lookup right now — or
-    is too old to have the lookup at all (outdated()). Unknown (never asked)
-    reads as ready — the lookup itself will say."""
+    """False when the server SAID it cannot make this lookup right now, when it is too old to have the lookup at
+    all (outdated()), or — for a lookup in NEWER_OPS — when it has not named it. Any other unknown reads as ready:
+    the lookup itself will say."""
     with _lock:
         flags = _state["ready"]
         old = _state["outdated"]
     if old:
         return False
+    if op in NEWER_OPS:
+        return bool(flags.get(op, False))
     return bool(flags.get(op, True)) if flags else True
 
 

@@ -499,6 +499,10 @@ class LeadsWorkbench(QWidget):
         self._credits_worker = None
         self._credit_status = dict(status or {})
         self._credits_error = ""
+        # Apollo on the pool is offered only once the server has said it has it (gateway.NEWER_OPS), so the start
+        # is decided again now that it has spoken — unless the owner already picked a source themself.
+        if self._pooled() and not getattr(self, "_source_picked", False):
+            self._set_source(self._default_source())
         self._sync_credits()
         self._refresh_prepare()             # the cost under Find new people uses the price list
 
@@ -687,7 +691,7 @@ class LeadsWorkbench(QWidget):
         for b, name in ((self._src_apollo, "apollo"), (self._src_exa, "exa")):
             b.setCheckable(True)
             b.setCursor(Qt.PointingHandCursor)
-            b.clicked.connect(lambda _=False, s=name: self._set_source(s))
+            b.clicked.connect(lambda _=False, s=name: self._pick_source(s))
             src.layout().addWidget(b, 1)
         # The rows are kept, not just their controls: the walkthrough points at
         # a whole setting — its name and its control — the way it is read.
@@ -849,6 +853,12 @@ class LeadsWorkbench(QWidget):
         "exa": "How many people to find before qualifying. Everyone outside "
                "your filters is left out and does not count.",
     }
+
+    def _pick_source(self, source: str) -> None:
+        """The owner chose a source with the switch: from now on the screen keeps it, instead of moving to the
+        default when the server's status arrives."""
+        self._source_picked = True
+        self._set_source(source)
 
     def _set_source(self, source: str):
         """Which database a Find-people run asks. Either can be picked with or
@@ -2318,10 +2328,11 @@ class LeadsWorkbench(QWidget):
                 w = csv.writer(f)
                 w.writerow(["company", "website", "location", "industry", "employees",
                             "stage"])
+                from prospector.exports import safe_cell
                 for c in companies:
-                    w.writerow([c.get("name", ""), c.get("website", ""),
-                                c.get("location", ""), c.get("industry", ""),
-                                c.get("headcount", ""), c.get("stage", "")])
+                    w.writerow([safe_cell(v) for v in (
+                        c.get("name", ""), c.get("website", ""), c.get("location", ""),
+                        c.get("industry", ""), c.get("headcount", ""), c.get("stage", ""))])
         except OSError as e:
             self._status.setText(i18n.t("Couldn't write the list {path}: {err}")
                                  .format(path=path, err=e))
@@ -2465,6 +2476,11 @@ class LeadsWorkbench(QWidget):
         elif self._source == "apollo":
             cost = i18n.t("It searches Apollo — about one Apollo credit for each "
                           "person revealed, up to {n}.").format(n=self._target.value())
+            if _monid_ready(self.cfg):
+                # The run asks Monid instead when Apollo refuses this key (workers.SourceWorker), so that spend is
+                # named here too.
+                cost += " " + i18n.t("If Apollo refuses your key, your Monid wallet is used instead — about ₹{p} "
+                                     "for each person revealed.").format(p=f"{_REVEAL_RS:g}")
         else:
             n, more = self._searches(spec, companies)
             if companies and n == 1:
@@ -3262,11 +3278,13 @@ class LeadsWorkbench(QWidget):
             w = csv.writer(f)
             w.writerow(["name", "company", "title", "email", "fit", "status",
                         "verdict"])
+            from prospector.exports import safe_cell
             for d in dossiers:
                 lead = d.lead
-                w.writerow([lead.name, lead.company, lead.title, lead.email,
-                            f"{getattr(lead, 'fit_score', 0) or 0:g}",
-                            status_of(d, self._draft_for(d)), d.verdict])
+                w.writerow([safe_cell(v) for v in (
+                    lead.name, lead.company, lead.title, lead.email,
+                    f"{getattr(lead, 'fit_score', 0) or 0:g}",
+                    status_of(d, self._draft_for(d)), d.verdict)])
         return len(dossiers)
 
     def _add_to_sequence(self, dossiers):
