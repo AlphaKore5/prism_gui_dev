@@ -21,8 +21,9 @@ on:
   schedule:
     - cron: "30 21 * * *"   # 21:30 UTC, 03:00 IST
   # A manual run builds ONE flavour (flavour.py) for testing and nothing else:
-  # it never publishes. The release job runs on a pushed tag only, and the
-  # update manifest / per-file update assets are made for "complete" only.
+  # it never publishes. The release job runs on a pushed tag only. A flavour's
+  # (unsigned) update manifest and per-file update assets are made too, under its
+  # own channel name, and stay artifacts of the run.
   workflow_dispatch:
     inputs:
       flavour:
@@ -504,18 +505,19 @@ jobs:
       # touches this workflow's secrets can also produce a valid update
       # signature.
       #
-      # `platform_tag` mirrors updater.py's own platform_tag() (same
-      # os-arch string it uses to build the URLs it fetches) so the human
-      # signing this knows which of the three unsigned manifests in the
-      # release corresponds to which client platform.
-      # Only for the complete build: a flavour build from a manual run is for
-      # testing and never feeds the update channel.
+      # UPDATE_CHANNEL mirrors updater.py's own update_channel() (the string it
+      # uses to build the URLs it fetches: `<os>-<arch>` for complete, plus
+      # `-<flavour>` for a flavour) so the human signing this knows which of the
+      # unsigned manifests corresponds to which client. build.py has already
+      # restored flavour.py, so the flavour comes from the environment here.
+      # Only a flavour's manifest names its channel inside: complete's content
+      # is exactly what it always was.
       - name: Generate the (unsigned) update manifest
-        if: env.PRISM_BUILD_FLAVOUR == 'complete'
         shell: bash
         run: |
           set -e
           PLATFORM_TAG=$(python -c "import sys; sys.path.insert(0, '.'); import updater; print(updater.platform_tag())")
+          UPDATE_CHANNEL=$(python -c "import sys; sys.path.insert(0, '.'); import flavour; print(flavour.update_channel(sys.argv[1], sys.argv[2]))" "$PLATFORM_TAG" "$PRISM_BUILD_FLAVOUR")
           VERSION=$(python -c "import sys; sys.path.insert(0, '.'); import app_meta; print(app_meta.VERSION)")
           # `|| true` matters: GNU/BSD `ls` exits nonzero when some (not all)
           # of several glob patterns match — exactly the normal case here,
@@ -532,23 +534,26 @@ jobs:
           # match a single file of (ISSUES_AND_FIXES.md 5.2).
           UPDATE_ROOT=dist/Prism
           if [ -d dist/Prism.app ]; then UPDATE_ROOT=dist/Prism.app; fi
+          FLAVOUR_ARGS=()
+          if [ "$PRISM_BUILD_FLAVOUR" != complete ]; then
+            FLAVOUR_ARGS=(--update-channel "$UPDATE_CHANNEL")
+          fi
           python packaging/manifest.py "$UPDATE_ROOT" "$VERSION" \
-            -o "dist/manifest.${PLATFORM_TAG}.unsigned.json" \
-            --archive "$ARCHIVE"
-          echo "PLATFORM_TAG=${PLATFORM_TAG}" >> "$GITHUB_ENV"
+            -o "dist/manifest.${UPDATE_CHANNEL}.unsigned.json" \
+            --archive "$ARCHIVE" "${FLAVOUR_ARGS[@]}"
+          echo "UPDATE_CHANNEL=${UPDATE_CHANNEL}" >> "$GITHUB_ENV"
           echo "UPDATE_ROOT=${UPDATE_ROOT}" >> "$GITHUB_ENV"
 
       # Flattened per-file copies, named exactly how updater.py's
-      # _file_url() expects to fetch them (<platform>__<path with / as __>)
+      # _file_url() expects to fetch them (<channel>__<path with / as __>)
       # — this is what makes the file-level diff (update-research.md §1/§3)
       # possible: a code-only release only needs the handful of files that
       # actually changed uploaded/downloaded, not the whole archive again.
       - name: Flatten update assets for hosting
-        if: env.PRISM_BUILD_FLAVOUR == 'complete'
         shell: bash
         run: |
           set -e
-          python packaging/flatten_update_assets.py "$UPDATE_ROOT" dist/update-assets "$PLATFORM_TAG"
+          python packaging/flatten_update_assets.py "$UPDATE_ROOT" dist/update-assets "$UPDATE_CHANNEL"
 
       # "complete" keeps the name it always had (prism-<os>); a flavour adds
       # itself (prism-sales-<os>). The release job only ever runs on a tag, and
@@ -579,10 +584,10 @@ jobs:
       # RELEASING-UPDATES.md. (Getting this naming wrong would mean every
       # tagged push silently attaches ~1300+ unsigned files per platform to
       # a public release — check this if you ever touch the naming here.)
-      - if: env.PRISM_BUILD_FLAVOUR == 'complete'
-        uses: actions/upload-artifact@v4
+      # A flavour's are named for it, as the artifact above is.
+      - uses: actions/upload-artifact@v4
         with:
-          name: update-assets-${{ matrix.os }}
+          name: ${{ env.PRISM_BUILD_FLAVOUR == 'complete' && format('update-assets-{0}', matrix.os) || format('update-assets-{0}-{1}', env.PRISM_BUILD_FLAVOUR, matrix.os) }}
           path: dist/update-assets/
           if-no-files-found: error
           retention-days: 14

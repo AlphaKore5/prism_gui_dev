@@ -3,13 +3,17 @@
 Parses .github/workflows/build.yml and pins: the `flavour` input and its four
 choices, that the flavour reaches the build and the tests, that the release job
 runs on a pushed tag only (a dispatch started on a tag ref must not publish),
-that nothing else in the workflow can publish, and that the update manifest and
-per-file update assets are made for the complete build only.
+that nothing else in the workflow can publish, and that each flavour's update
+manifest and per-file update assets are made under its own channel and stay
+artifacts of the run. The manifest and flatten steps are run for real (POSIX).
 """
 from __future__ import annotations
 
+import json
 import os
 import re
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -88,14 +92,22 @@ class DispatchBuildsOneFlavourAndNeverPublishes(unittest.TestCase):
         self.assertIn("github.event_name != 'pull_request'", self.wf["jobs"]["build"]["if"])
         self.assertIn("if", self.wf["jobs"]["release"])
 
-    def test_update_manifest_and_assets_are_for_the_complete_build_only(self):
+    def test_update_assets_artifact_is_never_what_the_release_job_downloads(self):
+        """Changed 2026-11-25: the manifest and the assets used to be made for
+        the complete build only, so a flavour could never be updated. They are
+        now made for every flavour, under its own channel name (the class below
+        runs the steps). What must still hold: complete's artifact keeps its
+        exact name (release_all.py downloads it by name), and no update-assets
+        artifact, of any flavour, matches the release job's `prism-*`."""
         steps = self.wf["jobs"]["build"]["steps"]
-        gate = "env.PRISM_BUILD_FLAVOUR == 'complete'"
-        for step in steps:
-            text = _step_text(step) + str(step.get("with", ""))
-            if "manifest.py" in text or "flatten_update_assets" in text \
-                    or str(step.get("with", {}).get("name", "")).startswith("update-assets"):
-                self.assertEqual(step.get("if"), gate, step.get("name") or step)
+        names = [s["with"]["name"] for s in steps
+                 if s.get("uses", "").startswith("actions/upload-artifact")]
+        assets = [n for n in names if "update-assets" in n]
+        self.assertEqual(assets, [
+            "${{ env.PRISM_BUILD_FLAVOUR == 'complete' && format('update-assets-{0}', matrix.os)"
+            " || format('update-assets-{0}-{1}', env.PRISM_BUILD_FLAVOUR, matrix.os) }}"])
+        self.assertEqual(len(names), 2)      # nothing else is uploaded by the build job
+        self.assertFalse(any("prism-" in n for n in assets))
 
     def test_complete_keeps_its_artifact_name_and_flavours_get_their_own(self):
         steps = self.wf["jobs"]["build"]["steps"]
@@ -113,6 +125,67 @@ class DispatchBuildsOneFlavourAndNeverPublishes(unittest.TestCase):
         for job in ("tests", "build"):
             oses = [m["os"] for m in self.wf["jobs"][job]["strategy"]["matrix"]["include"]]
             self.assertIn("windows-latest", oses)
+
+
+@unittest.skipIf(sys.platform == "win32",
+                 "runs the workflow's bash steps against copied sources; the Windows "
+                 "build job runs the real ones")
+class EachFlavoursManifestAndAssetsAreItsOwn(unittest.TestCase):
+    """The two workflow steps, run as bash runs them, on a small built tree."""
+
+    def run_steps(self, flav: str) -> tuple[dict, list[str], str]:
+        work = tempfile.mkdtemp(prefix="prism-wf-")
+        self.addCleanup(shutil.rmtree, work, True)
+        for name in ("app_meta.py", "channel.py", "flavour.py", "paths.py", "updater.py",
+                     "update_manifest.py", "licensing", "packaging"):
+            src, dst = os.path.join(ROOT, name), os.path.join(work, name)
+            if os.path.isdir(src):
+                shutil.copytree(src, dst, ignore=shutil.ignore_patterns("__pycache__"))
+            else:
+                shutil.copy2(src, dst)
+        os.makedirs(os.path.join(work, "dist", "Prism", "_internal"))
+        for rel in ("dist/Prism/Prism", "dist/Prism/_internal/a.dat", "dist/Prism.tar.gz"):
+            with open(os.path.join(work, rel), "w") as f:
+                f.write(rel)
+        shim = os.path.join(work, "bin")
+        os.makedirs(shim)
+        os.symlink(sys.executable, os.path.join(shim, "python"))
+        env = {k: v for k, v in os.environ.items() if not k.startswith("PRISM_")}
+        gh_env = os.path.join(work, "github_env")
+        env.update(PRISM_BUILD_FLAVOUR=flav, GITHUB_ENV=gh_env, HOME=work,
+                   PATH=shim + os.pathsep + env["PATH"])
+        steps = {s.get("name"): s for s in _load()["jobs"]["build"]["steps"]}
+        for name in ("Generate the (unsigned) update manifest",
+                     "Flatten update assets for hosting"):
+            self.assertNotIn("if", steps[name], name)
+            done = subprocess.run(["bash", "-eo", "pipefail", "-c", steps[name]["run"]],
+                                  cwd=work, env=env, capture_output=True, text=True)
+            self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+            with open(gh_env) as f:
+                env.update(line.strip().split("=", 1) for line in f if "=" in line)
+        made = [n for n in os.listdir(os.path.join(work, "dist")) if n.startswith("manifest.")]
+        self.assertEqual(len(made), 1)
+        with open(os.path.join(work, "dist", made[0])) as f:
+            manifest = json.load(f)
+        return manifest, sorted(os.listdir(os.path.join(work, "dist", "update-assets"))), made[0]
+
+    def test_complete_is_what_it_always_was(self):
+        import updater
+        tag = updater.platform_tag()
+        manifest, assets, name = self.run_steps("complete")
+        self.assertEqual(name, f"manifest.{tag}.unsigned.json")
+        self.assertEqual(set(manifest), {"version", "files", "archive"})
+        self.assertEqual(assets, [f"{tag}__Prism", f"{tag}___internal__a.dat"])
+
+    def test_a_flavour_gets_its_channel_in_the_names_and_in_the_signed_content(self):
+        import updater
+        for flav in ("studio", "sales", "engineering"):
+            channel = f"{updater.platform_tag()}-{flav}"
+            manifest, assets, name = self.run_steps(flav)
+            self.assertEqual(name, f"manifest.{channel}.unsigned.json")
+            self.assertEqual(manifest["update_channel"], channel)
+            self.assertEqual(set(manifest), {"version", "files", "archive", "update_channel"})
+            self.assertEqual(assets, [f"{channel}__Prism", f"{channel}___internal__a.dat"])
 
 
 class BuildStampsTheFlavour(unittest.TestCase):
