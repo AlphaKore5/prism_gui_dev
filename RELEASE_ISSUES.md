@@ -152,6 +152,17 @@ something you did not run.
 
 ## Issue log (newest first)
 
+### ISS-031 — PR #34 went red on a guard test I had not run, and my branch delete closed the PR (2026-11-26) — FIXED
+- **Seen:** `Tests · Linux 3/4` red on PR #34: `test_workflow_speed.py::TagRunsAndReleasesAreUntouched::test_tags_still_trigger_the_workflow_and_assets_tags_do_not`
+  pins the exact `tags:` list of `build.yml`, and I had added the flavour exclusions. Earlier in the same step, `gh pr merge`
+  was refused (branch policy) but the `git push --delete` chained after it still ran, so GitHub closed the PR; I reopened it.
+- **Cause (PROVEN):** I ran only the release tests (`test_release_*`, `test_promote_check`), not the suite, before pushing a
+  change to `build.yml`. A guard test that pins a workflow value is found by `git grep build.yml -- tests`, which I ran only after the failure.
+  The delete was chained to a command whose success I had not read.
+- **Fix:** the guard now expects the new list, with the reason in the test (rule 8).
+- **Rule:** before pushing a change to `build.yml`, run `git grep -l build.yml -- tests` and every file it lists. Never put a
+  branch delete in the same command as a merge: read the merge result first.
+
 ### ISS-030 — A UI change passed PR CI and broke three tests in every flavour build (2026-11-26) — FIXED in code
 - **Seen:** the first Studio, Sales and Engineering builds from main (runs 45698103739, 45698110820, 45698116808): 5 test
   shards red, no installer built. All 3 failures were chip tests that expect four "Try:" chips on Home
