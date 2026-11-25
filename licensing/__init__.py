@@ -1066,9 +1066,12 @@ def authorize(feature: str = "core", action: str = "run") -> Authorization:
     One exception to step 2: an ADD-ON opened while the lease is in its
     offline window (GRACE, signed and in scope) opens at once and the renewal
     runs on a background thread (_renew_in_background). Waiting on a sleeping
-    server can take most of a minute and the answer cannot change what this
-    open is allowed to do — only the next one. A denial from that renewal
-    clears or narrows the lease; it never closes an add-on that is open.
+    server can take most of a minute. Opens while that renewal is in flight
+    are allowed too, so this allows no more than the offline window already
+    allows with the network down. A definite refusal (revoked, expired,
+    device, too old, a narrower lease) clears or narrows the lease, so it
+    lands on the first open after the renewal returns; it never closes an
+    add-on that is open.
 
     This replaced a design that went to the server on EVERY plan with no
     offline fallback at all. That was up to 90 seconds against a cold host
