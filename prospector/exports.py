@@ -99,7 +99,8 @@ def phone_source_of(lead) -> str:
     except ValueError:
         pass
     if found.get("scope") == "person":
-        return "Their own mobile — Apollo%s, not called" % day
+        from .phones import provider_label
+        return "Their own mobile — %s%s, not called" % (provider_label(found), day)
     return "The company's number — %s%s, not verified" % (
         SOURCE_LABEL.get(found.get("source"), "the web"), day)
 

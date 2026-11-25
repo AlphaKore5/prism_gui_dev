@@ -307,12 +307,17 @@ def lease_bearer() -> str:
 
     Empty string when there is no usable lease; callers must treat that as
     "not authorised" rather than as "skip the header".
+
+    "Usable" means FRESH. A lease in its offline window still lets an add-on
+    open locally, but the backend judges a lease by its own clock and refuses
+    one past `exp`; handing it over would fail where an empty answer makes the
+    caller renew first (ai_server._auth renews only on an empty bearer).
     """
     try:
         lease_obj, lstate = _read_lease()
     except Exception:                               # noqa: BLE001
         return ""
-    if lease_obj is None or lstate == authorization.STALE:
+    if lease_obj is None or lstate != authorization.FRESH:
         return ""
     return lease_obj.raw
 
@@ -760,11 +765,13 @@ def apply_cached_payload() -> int:
     return len(selectors) + len(models) + len(profiles)
 
 
-def _refresh_lease_once() -> bool:
+def _refresh_lease_once(*, clear_if_too_old: bool = False) -> bool:
     """Renew the authorisation lease. True if a fresh one was cached.
 
     Free — /v1/lease records no usage and consumes no daily allowance — so
     this can run on a timer without billing anybody for the question.
+    `clear_if_too_old` is for the background renewal started by authorize()
+    only; see the CLIENT_TOO_OLD branch below.
     """
     license_id = store.load(user_dir()).get("license_id") or state().license_id
     if not license_id or state().status in (NONE, TAMPERED):
@@ -778,11 +785,19 @@ def _refresh_lease_once() -> bool:
         # get once it is below the floor — and it names the floor. Keep it,
         # so the banner can say "update" rather than "can't reach the server".
         _store_versions(e.detail)
-        if e.code in ("LICENSE_REVOKED", "LICENSE_EXPIRED",
-                      "DEVICE_NOT_ACTIVATED"):
+        if (e.code in ("LICENSE_REVOKED", "LICENSE_EXPIRED",
+                       "DEVICE_NOT_ACTIVATED")
+                or (clear_if_too_old and e.code == "CLIENT_TOO_OLD")):
             # A definite withdrawal. Drop the cached lease so protected work
             # stops at the end of this call rather than at the end of the
             # offline window — this is what makes revocation bite.
+            # CLIENT_TOO_OLD clears only for the background renewal:
+            # authorize() opens an add-on from a lease in its offline window
+            # without waiting for this answer, so the floor has to land on
+            # the lease for it to refuse the NEXT open. The 10-minute licence
+            # timer does not clear: if the floor were raised by mistake,
+            # customers on older builds must lose add-ons when their lease
+            # ends, not mid-session within 10 minutes.
             authorization.clear(user_dir())
         else:
             authorization.note_attempt(user_dir())
@@ -792,6 +807,61 @@ def _refresh_lease_once() -> bool:
         return False
     _store_versions(response)
     return _store_lease(response)
+
+
+# One renewal in flight at a time. Taken on the calling thread and released by
+# the worker's `finally`, so a second add-on click during a renewal starts no
+# second thread and a crash in the worker cannot leave it stuck "in flight".
+_renewal_lock = threading.Lock()
+_renewal_thread: threading.Thread | None = None
+
+
+def _renew_in_background() -> None:
+    """Start ONE background lease renewal, or do nothing if one is running.
+
+    The thread never touches a widget. Whatever the server answers lands on
+    disk (a new lease, or the lease cleared / narrowed), so it is the NEXT
+    open that sees it; an add-on that is already open is never closed.
+    """
+    global _renewal_thread
+    if not _renewal_lock.acquire(blocking=False):
+        return
+    try:
+        _renewal_thread = threading.Thread(
+            target=_renew_worker, name="prism-lease-renew", daemon=True)
+        _renewal_thread.start()
+    except Exception:                               # noqa: BLE001
+        # No thread, so nothing will release the lock. The open this was
+        # called from is already allowed; the next one tries again.
+        _renewal_lock.release()
+
+
+def _renew_worker() -> None:
+    try:
+        _refresh_lease_once(clear_if_too_old=True)
+    except Exception:                               # noqa: BLE001
+        pass
+    finally:
+        _renewal_lock.release()
+
+
+def _after_renewal(response: dict[str, Any], scope: str) -> Authorization:
+    """The answer once a lease or authorize response has been stored.
+
+    The server signs the scopes the licence holds NOW, intersected with what
+    was asked for, and refuses nothing on a missing scope. So a plan
+    downgrade arrives as a narrower lease, and the old lease that let this
+    call through must not be the last word: read what was just stored and
+    refuse a scope it does not carry, the same answer a lease already in hand
+    gets above.
+    """
+    lease_obj, lstate = _read_lease()
+    decision = authorization.decide(lease_obj, lstate, scope)
+    if not decision.allowed and decision.code == "SCOPE_NOT_GRANTED":
+        return Authorization(False, code="FEATURE_NOT_LICENSED",
+                             message=decision.message, state=lstate)
+    return Authorization(True, run_id=response.get("run_id", ""),
+                         state=authorization.FRESH)
 
 
 # False until the first renewal of this session has finished, whatever it
@@ -993,6 +1063,16 @@ def authorize(feature: str = "core", action: str = "run") -> Authorization:
            entitlement, quota and client version, and signs a new lease.
         4. Cache it, and proceed.
 
+    One exception to step 2: an ADD-ON opened while the lease is in its
+    offline window (GRACE, signed and in scope) opens at once and the renewal
+    runs on a background thread (_renew_in_background). Waiting on a sleeping
+    server can take most of a minute. Opens while that renewal is in flight
+    are allowed too, so this allows no more than the offline window already
+    allows with the network down. A definite refusal (revoked, expired,
+    device, too old, a narrower lease) clears or narrows the lease, so it
+    lands on the first open after the renewal returns; it never closes an
+    add-on that is open.
+
     This replaced a design that went to the server on EVERY plan with no
     offline fallback at all. That was up to 90 seconds against a cold host
     before the customer saw anything, and one flaky connection meant no work.
@@ -1014,8 +1094,9 @@ def authorize(feature: str = "core", action: str = "run") -> Authorization:
     The honest limit of the offline window
     ────────────────────────────────────────────────────────────────────────
     Inside GRACE a metered licence can plan without the server counting it.
-    That window is the backend-signed `off` claim (default one hour), so the
-    exposure is bounded, per-licence, and adjustable without shipping an app.
+    That window is the backend-signed `off` claim (the server's
+    `offline_hours`, 24 h by default), so the exposure is bounded,
+    per-licence, and adjustable without shipping an app.
     A local counter would look like a fix and would not be one — anything this
     process counts, this process can be patched to forget.
 
@@ -1054,6 +1135,15 @@ def authorize(feature: str = "core", action: str = "run") -> Authorization:
             and lstate == authorization.FRESH and not metered):
         return Authorization(True, run_id=_local_run_id(action), state=lstate)
 
+    # A lease inside its signed offline window, opening an add-on: decide() has
+    # already allowed it, so waiting for the server would only delay a yes.
+    # Plans (metered, or counted per run) and runs still ask the server.
+    if (blocked is None and decision.allowed
+            and lstate == authorization.GRACE
+            and action == "addon" and not metered):
+        _renew_in_background()
+        return Authorization(True, run_id=_local_run_id(action), state=lstate)
+
     # ── everything else needs the backend ──────────────────────────────────
     data = store.load(user_dir())
     license_id = data.get("license_id") or current.license_id
@@ -1074,8 +1164,7 @@ def authorize(feature: str = "core", action: str = "run") -> Authorization:
                 license_id, device_fingerprint(),
                 app_version=app_meta.VERSION, scopes=_scopes_wanted())
         _apply(response)
-        return Authorization(True, run_id=response.get("run_id", ""),
-                             state=authorization.FRESH)
+        return _after_renewal(response, scope)
     except ServerError as e:
         _store_versions(e.detail)
         if e.code == "DEVICE_NOT_ACTIVATED" and stored_key:
@@ -1092,8 +1181,7 @@ def authorize(feature: str = "core", action: str = "run") -> Authorization:
                                 app_version=app_meta.VERSION,
                                 scopes=_scopes_wanted()))
                 _apply(response)
-                return Authorization(True, run_id=response.get("run_id", ""),
-                                     state=authorization.FRESH)
+                return _after_renewal(response, scope)
             except (ServerError, Unreachable):
                 pass
         if e.code in ("LICENSE_REVOKED", "LICENSE_EXPIRED"):

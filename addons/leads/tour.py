@@ -346,6 +346,11 @@ STEPS = (
      "everyone it holds — filtered as you click. Save a company to make it an "
      "account, then open it for its stage, notes, tasks and the people there."),
 
+    ("tab_buyers", "Find buyers",
+     "Describe what you sell and Prism searches public tenders, job posts and "
+     "company news for organisations that look ready to buy, with the proof "
+     "for each one. Accept the good ones into People. Nothing is sent."),
+
     ("tab_sessions", "Sessions",
      "Every search you have run, with its filters and its results. Open one "
      "to see only its people."),

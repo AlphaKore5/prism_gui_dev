@@ -1,0 +1,52 @@
+{
+ "runId": "01FIXTUREFIXTUREFIXTURE01",
+ "provider": "x",
+ "endpoint": "/x",
+ "status": "COMPLETED",
+ "output": {
+  "found": true,
+  "data": {
+   "results": [
+    {
+     "author": "mukama",
+     "comments": 2,
+     "createdUtc": 1768741562,
+     "id": "46667519",
+     "permalink": "https://news.ycombinator.com/item?id=46667519",
+     "points": 10,
+     "title": "Show HN: Kling.to – Self-hosted email marketing with full data ownership",
+     "url": "https://kling.to"
+    },
+    {
+     "author": "pocha",
+     "comments": 1,
+     "createdUtc": 1787642097,
+     "id": "49430145",
+     "permalink": "https://news.ycombinator.com/item?id=49430145",
+     "points": 3,
+     "title": "Calendly WhatsApp integration on free Calendly plan",
+     "url": ""
+    }
+   ]
+  }
+ },
+ "providerResponse": {
+  "httpStatus": 200
+ },
+ "price": {
+  "type": "PER_CALL",
+  "amount": {
+   "value": 0.00015,
+   "currency": "USD"
+  }
+ },
+ "billing": {
+  "reportedCost": {
+   "currency": "USD",
+   "value": 150,
+   "unit": "MICRO_DOLLAR"
+  }
+ },
+ "resultCount": 1,
+ "billedUnits": 1
+}

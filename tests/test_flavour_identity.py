@@ -1,9 +1,9 @@
 """Gate G2 data: per-flavour names, bundle ids and update channel names.
 
-Only the DATA is tested (flavour.IDENTITY and flavour.update_channel). Nothing
-reads it yet: app_meta, build.py, updater.py and CI are untouched, so no build
-or release changes. What is NOT proven here: that an installer, .app, Start
-menu entry, signature or in-app update swap works under these names.
+Only the DATA is tested (flavour.IDENTITY and flavour.update_channel). Only
+packaging/build.py reads it, for the Windows installer (tests/test_windows_installer.py,
+packaging/windows/installer_check.py in CI). What is NOT proven here: that a
+.app, signature or in-app update swap works under these names.
 """
 from __future__ import annotations
 
@@ -101,12 +101,22 @@ class FlavoursNeverCollide(unittest.TestCase):
             self.assertEqual(flavour.identity()["name"], "Prism-Sales")
         self.assertEqual(flavour.identity("complete")["name"], "Prism")
 
-    def test_nothing_reads_the_table_yet(self):
-        """G2 is data only. When something is wired to IDENTITY this test must
-        change in the same commit, saying why."""
-        for rel in ("app_meta.py", "updater.py", os.path.join("packaging", "build.py")):
+    def test_only_the_windows_installer_reads_the_table(self):
+        """G2 was data only. Changed with the Windows installer (2026-11-25):
+        build.iscc_args() reads `name` and `display` for the install folder and
+        the Start-menu name, which is what `name` was defined for. Nothing else
+        is wired: app_meta, updater.py and the archive names stay as they were.
+        When something else is wired to IDENTITY this test must change in the
+        same commit, saying why."""
+        for rel in ("app_meta.py", "updater.py"):
             with open(os.path.join(ROOT, rel), encoding="utf-8") as f:
                 self.assertNotIn("IDENTITY", f.read(), rel)
+        with open(os.path.join(ROOT, "packaging", "build.py"), encoding="utf-8") as f:
+            text = f.read()
+        self.assertEqual(text.count("flavour.identity("), 1)
+        body = text.split("def iscc_args(", 1)[1].split("\ndef ", 1)[0]
+        self.assertIn("flavour.identity(", body)
+        self.assertEqual(sorted(set(re.findall(r'ident\["(\w+)"\]', text))), ["display", "name"])
 
 
 if __name__ == "__main__":
