@@ -427,6 +427,27 @@ jobs:
           rm -f "$RUNNER_TEMP/cert.p12"
           security find-identity -v -p codesigning "$KEYCHAIN"
 
+      # The Windows installer (packaging/windows/prism.iss) is compiled by
+      # build.py with this exact Inno Setup. The runner image ships 6.7.1
+      # (Windows2025 readme, image 20261116); a newer or older image gets
+      # 6.7.1 from Chocolatey instead, so the image cannot change the compiler.
+      - name: Pin Inno Setup (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $want = '6.7.1'
+          $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
+          function Get-Have { if (Test-Path $iscc) { $v = (Get-Item $iscc).VersionInfo; "{0}.{1}.{2}" -f $v.FileMajorPart, $v.FileMinorPart, $v.FileBuildPart } else { 'none' } }
+          $have = Get-Have
+          if ($have -ne $want) {
+            Write-Host "Inno Setup on the image: $have; installing $want"
+            choco upgrade innosetup --version=$want --allow-downgrade -y --no-progress
+            $have = Get-Have
+          }
+          if ($have -ne $want) { Write-Error "Inno Setup is $have, not $want"; exit 1 }
+          Write-Host "Inno Setup $have at $iscc"
+          "PRISM_ISCC=$iscc" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
       - name: Build
         env:
           # Which licence server this build talks to. A frozen app ignores
@@ -458,6 +479,14 @@ jobs:
       # if a hidden import was missed, and that is the failure users see.
       - name: Smoke-test the bundle
         run: python packaging/smoke_test.py
+
+      # Installs the setup.exe for this runner's user, runs the self-test from
+      # the INSTALLED folder, swaps it the way an in-app update does,
+      # uninstalls, and checks the program is gone and the data folder is not.
+      # Writes the setup.exe and .zip sizes to the job summary.
+      - name: Install, self-test and uninstall the Windows installer
+        if: runner.os == 'Windows'
+        run: python packaging/windows/installer_check.py
 
       # Unsigned, on purpose — see devtools/sign_manifest.py's docstring.
       # CI produces the (public, harmless) file list + hashes; the ACTUAL
@@ -522,6 +551,7 @@ jobs:
           path: |
             dist/*.tar.gz
             dist/*.zip
+            dist/*-setup.exe
             dist/*.dmg
             dist/*.AppImage
             dist/manifest.*.unsigned.json
@@ -580,7 +610,8 @@ jobs:
             System Settings → Privacy & Security → **Open Anyway**. If macOS
             says the app "is damaged", clear the quarantine flag:
             `xattr -dr com.apple.quarantine /Applications/Prism.app`
-            **Windows**: SmartScreen → More info → Run anyway.
+            **Windows**: run the `-setup.exe` (installs for you only, no admin
+            rights) or unzip the `.zip`; SmartScreen → More info → Run anyway.
             **Linux**: `chmod +x` the AppImage, or extract the tarball and run
             `./install.sh`.
 

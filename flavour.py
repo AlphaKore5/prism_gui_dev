@@ -149,8 +149,9 @@ def spec_excludes(flavour: str | None = None) -> list[str]:
             + package_excludes(flavour))
 
 
-# Who each build says it is (gate G2). DATA ONLY: nothing reads this yet (not
-# app_meta, build.py, updater.py or CI). `name` is the install folder and the
+# Who each build says it is (gate G2). Read only by packaging/build.py, for the
+# Windows installer's folder and display name; app_meta, updater.py and the
+# archive names do not use it yet. `name` is the install folder and the
 # archive stem (no spaces, like today's "Prism"), `display` what the person
 # sees, `bundle_id` the macOS bundle / Linux .desktop id, `channel` the suffix
 # on the update channel name. "complete" is today's product and MUST stay

@@ -10,7 +10,9 @@
 Produces, in dist/:
     Linux    Prism-<version>-linux-<arch>.tar.gz   (+ Prism-<version>.AppImage
                                                      when appimagetool is on PATH)
-    Windows  Prism-<version>-windows-<arch>.zip
+    Windows  Prism-<version>-windows-<arch>.zip        (+ ...-setup.exe, a per-user
+                                                     installer, when Inno Setup's
+                                                     iscc is available)
     macOS    Prism-<version>-macos-<arch>.dmg      (falls back to .zip without hdiutil)
 
 Neither engine can cross-compile: whatever OS you run this on is the OS you
@@ -466,6 +468,52 @@ def archive_windows(app_dir: str) -> list[str]:
     return [zip_path]
 
 
+def iscc_args(app_dir: str) -> list[str]:
+    """ISCC's arguments for packaging/windows/prism.iss: every value from
+    app_meta and flavour.IDENTITY, so the installer can never disagree with
+    the app or the .zip about its version or name."""
+    import flavour
+    ident = flavour.identity(FLAVOUR_BUILT)
+    defines = {
+        "AppVersion": app_meta.VERSION,
+        "Flavour": FLAVOUR_BUILT,
+        "AppName": ident["display"],
+        "AppDirName": ident["name"],
+        "AppExeName": f"{app_meta.NAME}.exe",
+        "AppPublisher": app_meta.PUBLISHER,
+        "AppURL": app_meta.WEBSITE,
+        "BundleDir": os.path.abspath(app_dir),
+        "OutputDir": DIST,
+        "OutputBase": f"{STEM}-setup",
+    }
+    return ([f"/D{k}={v}" for k, v in defines.items()]
+            + [os.path.join(HERE, "windows", "prism.iss")])
+
+
+def build_windows_installer(app_dir: str) -> list[str]:
+    """Prism-<version>-windows-<arch>-setup.exe beside the .zip, when Inno
+    Setup's ISCC is available. CI pins it and names it in PRISM_ISCC, which
+    must then exist; without either, the .zip is complete on its own."""
+    import time
+    iscc = os.environ.get("PRISM_ISCC") or shutil.which("iscc")
+    if os.environ.get("PRISM_ISCC") and not os.path.isfile(iscc):
+        sys.exit(f"packaging: PRISM_ISCC points at {iscc!r}, which does not exist")
+    if not iscc:
+        print("!  Inno Setup (iscc) not found — skipping the installer "
+              "(the .zip is complete on its own).")
+        return []
+    started = time.monotonic()
+    run([iscc, *iscc_args(app_dir)])
+    out = os.path.join(DIST, f"{STEM}-setup.exe")
+    line = (f"[prism] installer: {os.path.getsize(out) / 1e6:.0f} MB in "
+            f"{time.monotonic() - started:.0f} s (lzma2/ultra64, solid)")
+    print(line)
+    if os.environ.get("GITHUB_STEP_SUMMARY"):
+        with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as f:
+            f.write(line.replace("[prism] ", "- ") + "\n")
+    return [out]
+
+
 def archive_macos(app_bundle: str) -> list[str]:
     if not shutil.which("hdiutil"):
         zip_path = os.path.join(DIST, f"{STEM}.zip")
@@ -645,7 +693,7 @@ def main():
     if args.no_archive:
         return
     if IS_WIN:
-        made = archive_windows(app_dir)
+        made = archive_windows(app_dir) + build_windows_installer(app_dir)
     elif IS_MAC:
         made = archive_macos(target)
         # The image is a separate signable object from the bundle inside it;
