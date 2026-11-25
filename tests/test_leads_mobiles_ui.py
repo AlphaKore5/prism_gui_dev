@@ -73,6 +73,12 @@ class FindMobilesOnTheScreen(_Workbench):
         patcher = mock.patch.object(self._WB.LeadsWorkbench, "_refresh_credits", lambda _self: None)
         patcher.start()
         self.addCleanup(patcher.stop)
+        # A server that HAS the mobile lookup. Since the PR #18 review (25-Nov-2026) a lookup the server never named
+        # is not offered (gateway.NEWER_OPS), and the stand-in server here names none; an old server blocking
+        # Find mobiles is held in test_leads_review_money_guards.
+        ready = mock.patch.object(G, "ready", lambda op: True)
+        ready.start()
+        self.addCleanup(ready.stop)
         _FakeMobileWorker.made = []
         orig = self._WB.LeadsMobileWorker
         self._WB.LeadsMobileWorker = _FakeMobileWorker
@@ -150,7 +156,7 @@ class FindMobilesOnTheScreen(_Workbench):
         [(title, lines)] = said
         self.assertEqual(title, "Find mobiles")
         self.assertIn("3 people", lines[0])
-        self.assertIn("up to 30 credits", lines[0])             # 3 x the 10-credit default
+        self.assertIn("up to 12 credits", lines[0])             # 3 x the 4-credit default
         self.assertIn("only for a number found", lines[1])
         self.assertIn("three data sources", lines[1])               # not "Apollo": the server asks three, cheapest first
         self.assertIn("a minute or two", lines[1])

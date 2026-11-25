@@ -732,19 +732,30 @@ def monid_transport(key: str, *, call=None):
     BULK_MATCH has no Monid twin, so it is one `apollo /people/match` per person (about $0.026 each,
     charged when Apollo attaches the name to a company) answered in the shape bulk_match has — one entry
     per person asked, {} for nobody — which is why `search_people` needs no other change. A key or wallet
-    Monid refuses is an ApolloError in Monid's own words; a call that did not land is `_Unreachable`."""
+    Monid refuses is an ApolloError in Monid's own words; a call that did not land is `_Unreachable`.
+
+    Reveals are PAID, so a refusal part-way through them (the wallet ran dry) must not throw away the ones already
+    bought (PR #18 review, 25-Nov-2026): the batch comes back with what was revealed, and every later call raises
+    `_Unreachable` with Monid's words, which ends the run keeping its list."""
     call = call or monid_run.call
+    dry: list = []                                      # Monid's refusal, once a reveal has met one
 
     def one(detail) -> dict:
         query = {k: v for k, v in (detail or {}).items() if v}
         if not query:
             return {}                                   # nothing identifies them: nobody to ask for
-        run = call("apollo", "/people/match", key=key, query=query, max_cost=MONID_MATCH_COST)
+        try:
+            run = call("apollo", "/people/match", key=key, query=query, max_cost=MONID_MATCH_COST)
+        except monid_run.MonidError as exc:
+            dry.append(str(exc))
+            return {}
         out = run.get("output") if isinstance(run, dict) else None
         person = out.get("person") if isinstance(out, dict) else None
         return person if isinstance(person, dict) else {}
 
     def send(path: str, body: dict) -> dict:
+        if dry:
+            raise _Unreachable(dry[0])
         try:
             if path == SEARCH:
                 run = call("apollo", "/mixed_people/api_search", key=key,
@@ -756,9 +767,15 @@ def monid_transport(key: str, *, call=None):
             if path == BULK_MATCH:
                 details = [d for d in (body.get("details") or []) if isinstance(d, dict)]
                 with ThreadPoolExecutor(max_workers=_MONID_WORKERS) as pool:
-                    return {"matches": list(pool.map(one, details))}
+                    matches = list(pool.map(one, details))
+                if dry and not any(matches):
+                    raise ApolloError(dry[0])           # nothing bought in this batch: say why, now
+                return {"matches": matches}
             if path == MATCH:
-                return {"person": one(body)}
+                person = one(body)
+                if dry and not person:
+                    raise ApolloError(dry[0])
+                return {"person": person}
         except monid_run.MonidError as exc:
             raise ApolloError(str(exc)) from exc
         raise ApolloError(REFUSED.format(code=0, path=path))

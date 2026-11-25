@@ -776,11 +776,9 @@ class SourceWorker(_Worker):
                     # same free search, a reveal about $0.026.
                     transport = apollo.monid_transport(monid_run.api_key(self.cfg))
                 if not key and transport is None:
-                    if gateway.pooled() and exa_key:
-                        self.progress.emit("Apollo isn't switched on for your account yet — "
-                                           "searching with Exa instead…")
-                        apollo_run, self.source = False, "exa"
-                    elif gateway.pooled():
+                    # On the pool an Exa search is never started in Apollo's place: it costs credits the owner
+                    # did not approve (the question before the run priced Apollo). PR #18 review, 25-Nov-2026.
+                    if gateway.pooled():
                         self.failed.emit("Searching Apollo isn't switched on for your account yet — "
                                          "contact Alphakore.")
                         return
@@ -799,15 +797,20 @@ class SourceWorker(_Worker):
                 # it does NOT emit as a failure is the plan/scope refusal:
                 # that wall is there for every later run too, so it goes out
                 # as `blocked` and the rail stops offering Apollo.
+                # The reveals PAID for, across every company group: `room` counts the people kept, and a person
+                # the filters drop was still paid for, so without this each group got a fresh ceiling and an
+                # import of 200 companies could reveal 4x the "Reveal up to" the owner approved (PR #18 review).
+                spent = 0
                 for part in parts:
-                    room = self.target - len(leads)     # Apollo bills each reveal
-                    if room <= 0:
+                    room = self.target - len(leads)     # people still wanted
+                    left = self.target - spent          # reveals still allowed
+                    if room <= 0 or left <= 0:
                         break
                     got: dict = {}
                     try:
                         leads += apollo.search_people(
                             part if part is not None else (self.spec or {}), key,
-                            target=room, skip=skip, stats=got,
+                            target=room, budget=left, skip=skip, stats=got,
                             on_progress=self._apollo_progress, transport=transport)
                     except apollo.ApolloError as exc:
                         if transport is None and monid_run.available(self.cfg) and (
@@ -817,11 +820,12 @@ class SourceWorker(_Worker):
                             self.progress.emit("Your Apollo key was refused — asking Apollo through "
                                                "your Monid wallet instead…")
                             transport, key = apollo.monid_transport(monid_run.api_key(self.cfg)), ""
+                            spent += int(got.get("revealed") or 0)
                             got = {}
                             try:
                                 leads += apollo.search_people(
                                     part if part is not None else (self.spec or {}), key,
-                                    target=room, skip=skip, stats=got,
+                                    target=room, budget=max(0, self.target - spent), skip=skip, stats=got,
                                     on_progress=self._apollo_progress, transport=transport)
                             except apollo.ApolloError as again:
                                 lost = again
@@ -835,10 +839,13 @@ class SourceWorker(_Worker):
                                 raise
                             self.blocked.emit(why)
                             return
+                    spent += int(got.get("revealed") or 0)
                     _add_stats(stats, got)
                     asked = self._asked(part, asked)
                 if transport is not None and not leads:
-                    if not exa_key:
+                    # On the pool the Exa backup is approved with the run: the question before it names
+                    # its cost (workbench._exa_backup_cost; the owner, 25-Nov-2026).
+                    if not exa_key or (gateway.pooled() and not gateway.ready("people")):
                         if lost is not None:
                             raise lost          # nothing to fall back on: say why
                     else:
@@ -1010,6 +1017,17 @@ class BuyerHuntWorker(_Worker):
                 raise buyers.BuyersError(
                     "Finding buyers needs an Exa key. Add it under Search settings, or ask "
                     "Alphakore to switch on credits.")
+            if gateway.pooled():
+                # Asked BEFORE the hunt: a server without the hunt lookup would still have charged for the model's
+                # check of the planned searches, then failed every search (PR #18 review, 25-Nov-2026).
+                try:
+                    gateway.status()
+                except gateway.GatewayError:
+                    pass
+                if not gateway.ready("hunt"):
+                    raise buyers.BuyersError(
+                        "Finding buyers isn't switched on for your account yet. Nothing was charged — "
+                        "contact Alphakore and we'll turn it on.")
             gateway.reset()
             res = buyers.hunt(
                 self.offer, self.summary, self.types, self.channels, search,

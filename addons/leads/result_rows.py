@@ -8,6 +8,7 @@ This file knows nothing about people or companies: a caller hands it text, pills
 """
 from __future__ import annotations
 
+import html
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
@@ -134,7 +135,9 @@ class _Elided(QLabel):
             return
         shown = QFontMetrics(self.font()).elidedText(self._full, Qt.ElideRight, width)
         self.setText(shown)
-        self.setToolTip(self._full if shown != self._full else "")
+        # Rich text, escaped: a tooltip guesses rich text from tags, and this text is a stranger's (a page title, a
+        # company name), so "<img src=...>" in it must show as written (PR #18 review, 25-Nov-2026).
+        self.setToolTip(f"<qt>{html.escape(self._full)}</qt>" if shown != self._full else "")
 
 
 class ResultRow(QFrame):

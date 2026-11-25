@@ -893,7 +893,18 @@ def to_lead(h: Hit):
                 extra={"profile_url": h.url,       # the identity key: one page, one lead
                        "source_url": h.url, "buyer_channel": h.channel, "buyer_kind": h.kind,
                        "buyer_why": h.why, "buyer_evidence": h.snippet[:400],
-                       "buyer_closes": h.closes, "website": "https://" + h.source if h.source else ""})
+                       "buyer_closes": h.closes, "website": _own_site(h)})
+
+
+def _own_site(h: Hit) -> str:
+    """The buyer's OWN website, or "" so `verify.find_domains` looks it up. Only a "companies like your customer"
+    card carries one: its source is the company's domain. Every other card's source is where the evidence was
+    published (a job board, a newspaper, Reddit), and keying later paid lookups — phones, e-mails, people — on
+    that domain would buy the publisher's contacts (PR #18 review, 25-Nov-2026)."""
+    site = (h.source or "").strip().lower()
+    if h.channel != LIST or "." not in site or " " in site or site.endswith("linkedin.com"):
+        return ""
+    return "https://" + site
 
 
 def _grade(n: int) -> str:

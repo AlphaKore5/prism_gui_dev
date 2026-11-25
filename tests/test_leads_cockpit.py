@@ -1358,7 +1358,7 @@ class ApolloIsTheOtherDatabase(_Workbench):
         self.assertIn("Exa searches", wb._find_meta.text())  # what the press costs
         wb._src_apollo.click()
         self.assertEqual(wb._source, "apollo")
-        self.assertIn("credit per person revealed", wb._find_meta.text())
+        self.assertIn("credit per full name revealed", wb._find_meta.text())
 
     def test_the_apollo_key_is_saved_and_nothing_else_in_the_config_is(self):
         """The rail saves the key it was given by loading the config fresh and
@@ -1473,7 +1473,7 @@ class ApolloIsTheOtherDatabase(_Workbench):
         wb._set_source("apollo")
         wb._filters.set_spec(self._WB.SearchSpec.from_dict({"job_titles": {"include": ["Head of Automation"]}}))
         wb._refresh_prepare()
-        self.assertEqual(wb._find_meta.text(), "Searches Apollo — about a credit per person revealed")
+        self.assertEqual(wb._find_meta.text(), "Searches Apollo — about a credit per full name revealed")
 
     def test_with_only_a_monid_key_the_keys_box_stays_folded(self):
         wb = self._WB.LeadsWorkbench({"monid_api_key": "mk"})
@@ -1492,7 +1492,7 @@ class ApolloIsTheOtherDatabase(_Workbench):
         self.assertEqual(wb._target_row.name.text(), "Source up to")
         wb._src_apollo.click()
         self.assertEqual(wb._source, "apollo")
-        self.assertEqual(wb._target_row.name.text(), "Reveal up to")
+        self.assertEqual(wb._target_row.name.text(), "Full names up to")
         # 24-Nov-2026: the tip no longer names "one Apollo credit": on the credit pool a reveal is charged
         # in Prism's own credits, and with the owner's Monid key it is a few cents. It says what is free
         # and what is not, in words that are true on every route.
@@ -1505,7 +1505,7 @@ class ApolloIsTheOtherDatabase(_Workbench):
         wb = self._WB.LeadsWorkbench({})
         res, drafts = self._run()
         res.apollo_stats = {"searched": 240, "revealed": 25, "reveal_calls": 3}
-        self.assertIn("Apollo: 240 found · 25 revealed (about 25 credits)",
+        self.assertIn("Apollo: 240 found · 25 full names revealed (about 25 credits)",
                       wb._run_summary(res, drafts))
         res.apollo_stats = {}                       # an Exa run says nothing
         self.assertNotIn("Apollo", wb._run_summary(res, drafts))

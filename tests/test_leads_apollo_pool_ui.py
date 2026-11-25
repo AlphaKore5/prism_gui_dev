@@ -89,6 +89,9 @@ class TheWorkerOnThePool(unittest.TestCase):
         self.assertTrue(callable(self.apollo_calls[0]["transport"]))
         self.assertEqual(self.exa_calls, [])
 
+    # 25-Nov-2026: the PR #18 review found the Exa backup spent credits the question before the run never named.
+    # The owner kept the backup ("Keep backup, show cost"): the question now names its cost
+    # (TheQuestionNamesTheExaBackup), so the run falls back to Exa as before.
     def test_apollo_coming_back_empty_falls_back_to_exa_and_says_so(self):
         self.apollo_answer = []
         got = self.run_worker(exa_key="pool")
@@ -101,12 +104,11 @@ class TheWorkerOnThePool(unittest.TestCase):
         self.assertEqual(self.names(got), ["Bo Lund"])
         self.assertTrue(any("could not be searched" in line for line in got["progress"]))
 
-    def test_a_server_that_has_not_got_apollo_is_never_asked_and_exa_answers(self):
+    def test_a_server_that_has_not_got_apollo_is_never_asked_and_exa_is_not_searched_either(self):
         self.ready = False
         got = self.run_worker(exa_key="pool")
-        self.assertEqual(self.apollo_calls, [])
-        self.assertEqual(self.names(got), ["Bo Lund"])
-        self.assertTrue(any("isn't switched on for your account yet" in line for line in got["progress"]))
+        self.assertEqual((self.apollo_calls, self.exa_calls), ([], []))
+        self.assertIn("isn't switched on for your account yet", got["failed"][0])
 
     def test_a_server_without_apollo_and_without_exa_says_so(self):
         self.ready = False
@@ -151,7 +153,7 @@ class TheScreenOnThePool(_Workbench):
     def test_the_target_says_reveal_for_apollo_and_names_no_provider_credit(self):
         wb = self.bench()
         wb._set_source("apollo")
-        self.assertEqual(wb._target_row.name.text(), "Reveal up to")
+        self.assertEqual(wb._target_row.name.text(), "Full names up to")
         self.assertNotIn("Apollo credit", wb._target.toolTip())
 
     def test_the_line_under_find_says_search_is_free_and_prices_a_reveal(self):
@@ -175,6 +177,26 @@ class TheScreenOnThePool(_Workbench):
         self.assertIn("40 people", lines[0])
         self.assertIn("up to 80 credits", lines[0])
         self.assertIn("not charged", lines[1])
+
+    def test_the_question_names_what_the_exa_backup_can_cost(self):
+        # The owner, 25-Nov-2026: "Keep backup, show cost".
+        wb = self.bench()
+        wb._set_source("apollo")
+        wb._searches = lambda spec, companies=(): (4, 2)       # the Exa searches these filters would plan
+        said = []
+        wb._confirm_pool = lambda title, lines: (said.append(lines), False)[1]
+        self._saved_attrs["_confirm_search"](wb, wb._filters.spec(), [], "")
+        backup = [line for line in said[0] if "Exa searches instead" in line]
+        self.assertEqual(len(backup), 1)
+        self.assertIn("up to 18 credits", backup[0])               # 6 searches x the 3-credit default
+        self.assertIn("Exa searches up to", wb._pool_search_meta(wb._filters.spec(), []))
+
+    def test_no_exa_on_the_server_means_no_backup_is_promised(self):
+        wb = self.bench()
+        wb._set_source("apollo")
+        with mock.patch.object(G, "ready", lambda op: op != "people"):
+            self.assertEqual(wb._exa_backup_cost(wb._filters.spec(), []), 0)
+            self.assertNotIn("Exa", wb._pool_search_meta(wb._filters.spec(), []))
 
     def test_more_than_the_balance_is_said(self):
         wb = self.bench(balance=10)
@@ -230,7 +252,7 @@ class TheScreenOnThePool(_Workbench):
     def test_the_email_and_mobile_lines_use_the_rate_card_not_a_rupee_guess(self):
         said = self.bench()._settings_hints()
         self.assertIn("2 credits for each address found", said["verify"])
-        self.assertIn("10 credits for each number found", said["mobiles"])
+        self.assertIn("4 credits for each number found", said["mobiles"])
         self.assertNotIn("\u20b9", " ".join(said.values()))
 
     def test_the_hints_are_written_on_the_labels_and_follow_the_ceiling(self):
