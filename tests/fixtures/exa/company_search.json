@@ -1,0 +1,79 @@
+{
+ "_comment": "Real Exa company-search rows (category=company) for 'small industrial equipment manufacturer in Gujarat, India', 22-Nov-2026, trimmed to the fields the engine reads.",
+ "results": [
+  {
+   "url": "https://baggingmachine.co.in/",
+   "title": "Vineraj Weighing Automation",
+   "entities": [
+    {
+     "type": "company",
+     "properties": {
+      "name": "Vineraj Weighing Automation",
+      "foundedYear": 2024,
+      "description": "Vineraj Weighing Automation, is a 15 years legacy holder with a vast expertise in Weighing Automations & Project Solutions. Our core products includes - Gross / Net / Valve Type Bagging Machines, Jumbo Bagging Machines, Bag Placers, Batching Systems. These machines are majorly utilized by FMCG/Pharma/Chemical/Agriculture Industries for packing bulk materials.",
+      "workforce": {
+       "total": 2
+      },
+      "headquarters": {
+       "address": "GIDC Makarpura, Plot No.158/A, GIDC Industrial Estate, Vadodara, Gujarat 390010, IN",
+       "city": "Vadodara",
+       "postalCode": null,
+       "country": "India"
+      },
+      "financials": null
+     }
+    }
+   ],
+   "text": "# Vineraj Weighing Automation\n\n## Workforce\n- Employees: 2\n- Company Size: 1-10 employees\n\n## Social\n\n### Linkedin\n\n- [2026-11-08] 🪔✨ Happy Diwali! ✨🪔 On the auspicious occasion of Diwali, Team Vineraj Weighing Automation extends heartfelt wishes to all our valued customers...\n\n- [2026-10-29 · 1 reaction] The carbon black industry is witnessing unprecedented growth, driven by surging demand across tires, rubber, plastics, and high-performance industrial coatings. As production scales, efficient, acc...\n\n- [2026-10-27 · 2 reactions] May the divine blessings and teachings of Sri Guru Ramdas Ji fill your life with peace, humility, and prosperity. Wishing you and your loved ones a very Happy Prakash Purab...\n\n- [2026-10-25 · 1 reaction] 🎉 THANK YOU FOR 500 FOLLOWERS! 🎉 A Big Thank You to All Our Followers, Customers & Supporters!\n\n- [2026-09-16] 🚀 New Project Milestone Achieved in Chhattisgarh! 🚀 We are thrilled to announce the successful installation and commissioning of our 1-Ton Jumbo Bag Filling Machine...\n\n## Locations\n- Headquarters: vadodara, gujarat, india\n"
+  },
+  {
+   "url": "https://linkedin.com/company/m-s-r-b-industrial-equipments",
+   "title": "M/s R B INDUSTRIAL EQUIPMENTS",
+   "entities": [
+    {
+     "type": "company",
+     "properties": {
+      "name": "M/s R B INDUSTRIAL EQUIPMENTS",
+      "foundedYear": null,
+      "description": "was founded in 2011 by Mr. Bajrang Chaudhary. He have good experience of Material Handling Equipment. We developed many innovative universal use products useful in Textile / Engineering / Pharma / Cement / POY / Texturising and other industires.",
+      "workforce": {
+       "total": 3
+      },
+      "headquarters": {
+       "address": "PLOT No: 6235, ROAD No: 62 GIDC ESTATE , Sachin, Surat, Gujarat, 394230, in",
+       "city": "Surat",
+       "postalCode": null,
+       "country": "India"
+      },
+      "financials": null
+     }
+    }
+   ]
+  },
+  {
+   "url": "https://jaldharaindustries.com/",
+   "title": "Jaldhara Industries - India",
+   "entities": [
+    {
+     "type": "company",
+     "properties": {
+      "name": "Jaldhara Industries - India",
+      "foundedYear": null,
+      "description": "JALDHARA INDUSTRIES is a company that specializes in the manufacturing, wholesaler, supplier, and trader of air blowers, centrifugal blowers, draught fans, industrial burners, air lock valves, dust collectors, pumping units.",
+      "workforce": {
+       "total": 6
+      },
+      "headquarters": {
+       "address": "Plot No. 244, Vatva, Ahmedabad, Gujarat 382445, IN",
+       "city": "Ahmedabad",
+       "postalCode": null,
+       "country": "India"
+      },
+      "financials": null
+     }
+    }
+   ],
+   "text": "# Jaldhara Industries - India\n\n## Workforce\n- Employees: 6\n  - Yearly Growth: -14.3%\n\n## Web presence\n"
+  }
+ ]
+}

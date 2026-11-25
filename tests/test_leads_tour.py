@@ -57,7 +57,7 @@ CONTRACT = {
     "col_focus", "col_fit", "col_status", "col_signal", "pager", "bulk_bar",
     "bulk_save", "bulk_remove", "bulk_verify", "bulk_emails", "bulk_phones", "bulk_list",
     "bulk_export", "bulk_stage", "bulk_qualify", "bulk_sequence", "drawer", "tab_people",
-    "tab_companies", "tab_sessions",
+    "tab_companies", "tab_buyers", "tab_sessions",
     "tab_lists", "tab_saved", "tab_sequences", "tab_analytics", "tab_deals", "tab_due", "tab_stats",
 }
 

@@ -1,0 +1,70 @@
+{
+ "runId": "01FIXTUREFIXTUREFIXTURE01",
+ "provider": "x",
+ "endpoint": "/x",
+ "status": "COMPLETED",
+ "output": {
+  "data": {
+   "nextCursor": "cur_GA31uAddQjeuqj9R9jFWBg",
+   "posts": [
+    {
+     "author": "DutyOnly4308",
+     "authorId": "lj7yq5dj",
+     "createdUtc": 1795354187,
+     "id": "1y2pd6c",
+     "media": [],
+     "nsfw": false,
+     "numComments": 0,
+     "permalink": "/r/AppBusiness/comments/1y2pd6c/building_on_a_feature_apple_doesnt_ship_what_i/",
+     "score": 1,
+     "selftext": "Short write-up, since this sub is about app businesses. Disclosure: the app is mine (Mac+).\n\n**The gap:** macOS has moving wallpapers, but only Apple's. There's no setting to pick your own video. People search for exactly that sentence, \"set video as wallpaper Mac\", and land on old forum threads.\n\nWhat I took from it:\n\n- **Build around the sentence people type.** My best pages and posts answer that one question direc",
+     "subreddit": "AppBusiness",
+     "title": "Building on a feature Apple doesn't ship: what I learned selling a Mac wallpaper app as a solo dev",
+     "url": "https://www.reddit.com/r/AppBusiness/comments/1y2pd6c/building_on_a_feature_apple_doesnt_ship_what_i/"
+    },
+    {
+     "author": "caffeineaddictnerd",
+     "authorId": "1oo5zgq570",
+     "createdUtc": 1795353994,
+     "id": "1y2paxa",
+     "media": [
+      {
+       "height": 140,
+       "type": "photo",
+       "url": "https://preview.redd.it/56s78ri6163i1.jpeg?width=140&height=140&crop=1%3A1%2Csmart&auto=webp&s=09cb3999107f1646b3cc86444f4d9468967e1da8",
+       "width": 140
+      }
+     ],
+     "nsfw": false,
+     "numComments": 1,
+     "permalink": "/r/fredagain/comments/1y2paxa/fred_on_india_tour_whatsapp_channel/",
+     "score": 3,
+     "selftext": "Looks like it's for announcing the artists performing (other than him).",
+     "subreddit": "fredagain",
+     "title": "Fred on India tour whatsapp channel:",
+     "url": "https://www.reddit.com/r/fredagain/comments/1y2paxa/fred_on_india_tour_whatsapp_channel/"
+    }
+   ]
+  },
+  "found": true
+ },
+ "providerResponse": {
+  "httpStatus": 200
+ },
+ "price": {
+  "type": "PER_CALL",
+  "amount": {
+   "value": 0.00015,
+   "currency": "USD"
+  }
+ },
+ "billing": {
+  "reportedCost": {
+   "currency": "USD",
+   "value": 150,
+   "unit": "MICRO_DOLLAR"
+  }
+ },
+ "resultCount": 1,
+ "billedUnits": 1
+}

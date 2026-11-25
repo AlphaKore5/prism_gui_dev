@@ -1,0 +1,126 @@
+{
+ "ai_ark_hit": {
+  "runId": "run_fake",
+  "status": "COMPLETED",
+  "provider": "x",
+  "endpoint": "/x",
+  "billedUnits": 1,
+  "providerResponse": {
+   "httpStatus": 200
+  },
+  "output": {
+   "found": true,
+   "data": {
+    "linkedinUrl": "https://www.linkedin.com/in/asha-rao-fake",
+    "phone": "+919825012345",
+    "phoneGroups": [
+     [
+      "+919825012345"
+     ]
+    ],
+    "phones": [
+     "+919825012345"
+    ],
+    "recordId": "rec-fake"
+   }
+  }
+ },
+ "ai_ark_miss": {
+  "runId": "run_fake",
+  "status": "COMPLETED",
+  "provider": "x",
+  "endpoint": "/x",
+  "billedUnits": 0,
+  "providerResponse": {
+   "httpStatus": 200
+  },
+  "output": {
+   "found": false,
+   "data": null,
+   "reason": "not_found"
+  }
+ },
+ "reversecontact_hit": {
+  "runId": "run_fake",
+  "status": "COMPLETED",
+  "provider": "x",
+  "endpoint": "/x",
+  "billedUnits": 1,
+  "providerResponse": {
+   "httpStatus": 200
+  },
+  "output": {
+   "success": true,
+   "data": {
+    "webhookId": "wh-fake",
+    "status": "succeeded",
+    "eventType": "FETCH_CONTACT_DATA",
+    "errorCode": null,
+    "result": [
+     {
+      "value": "+917555012345",
+      "type": "landline"
+     },
+     {
+      "value": "+919825012345",
+      "type": "mobile"
+     }
+    ]
+   },
+   "error": null,
+   "metadata": {
+    "requestId": "req-fake"
+   }
+  }
+ },
+ "reversecontact_miss": {
+  "runId": "run_fake",
+  "status": "COMPLETED",
+  "provider": "x",
+  "endpoint": "/x",
+  "billedUnits": 0,
+  "providerResponse": {
+   "httpStatus": 404
+  },
+  "output": null
+ },
+ "contactout_hit": {
+  "runId": "run_fake",
+  "status": "COMPLETED",
+  "provider": "x",
+  "endpoint": "/x",
+  "billedUnits": 1,
+  "providerResponse": {
+   "httpStatus": 200
+  },
+  "output": {
+   "status_code": 200,
+   "profile": {
+    "url": "https://www.linkedin.com/in/asha-rao-fake",
+    "email": [],
+    "work_email": [],
+    "personal_email": [],
+    "phone": [
+     "+91 98250 12345"
+    ],
+    "full_name": "Asha Rao",
+    "company": {
+     "name": "Acme Motors",
+     "domain": "acme.example"
+    },
+    "country": "India"
+   }
+  }
+ },
+ "contactout_miss": {
+  "runId": "run_fake",
+  "status": "COMPLETED",
+  "provider": "x",
+  "endpoint": "/x",
+  "billedUnits": 0,
+  "providerResponse": {
+   "httpStatus": 404
+  },
+  "output": null
+ }
+}

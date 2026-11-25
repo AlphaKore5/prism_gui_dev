@@ -1,0 +1,19 @@
+{
+ "runId": "run_fake",
+ "status": "COMPLETED",
+ "billedUnits": 0,
+ "providerResponse": {
+  "httpStatus": 200
+ },
+ "output": {
+  "data": {
+   "email": null,
+   "score": null,
+   "verification": {
+    "date": null,
+    "status": null
+   }
+  },
+  "meta": {}
+ }
+}

@@ -1,0 +1,61 @@
+{
+ "runId": "run_fake",
+ "status": "COMPLETED",
+ "provider": "x",
+ "endpoint": "/x",
+ "billedUnits": 2,
+ "providerResponse": {
+  "httpStatus": 200
+ },
+ "output": {
+  "people": [
+   {
+    "id": "apid-0001",
+    "first_name": "Asha",
+    "last_name_obfuscated": "Ra***o",
+    "title": "Head of Automation",
+    "has_email": true,
+    "has_direct_phone": "Yes",
+    "has_city": true,
+    "has_state": true,
+    "has_country": true,
+    "last_refreshed_at": "2026-11-01T00:00:00.000+00:00",
+    "organization": {
+     "name": "Acme Motors",
+     "has_industry": true,
+     "has_phone": true,
+     "has_employee_count": true,
+     "has_revenue": true,
+     "has_city": true,
+     "has_state": true,
+     "has_country": true,
+     "has_zip_code": true
+    }
+   },
+   {
+    "id": "apid-0002",
+    "first_name": "Vikram",
+    "last_name_obfuscated": "Sh***a",
+    "title": "Digital Transformation Lead",
+    "has_email": false,
+    "has_direct_phone": "No",
+    "has_city": true,
+    "has_state": true,
+    "has_country": true,
+    "last_refreshed_at": "2026-10-20T00:00:00.000+00:00",
+    "organization": {
+     "name": "Bharat Gears",
+     "has_industry": true,
+     "has_phone": false,
+     "has_employee_count": true,
+     "has_revenue": false,
+     "has_city": true,
+     "has_state": true,
+     "has_country": true,
+     "has_zip_code": false
+    }
+   }
+  ],
+  "total_entries": 318
+ }
+}
