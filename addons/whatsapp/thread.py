@@ -38,6 +38,17 @@ _PLACEHOLDER = re.compile(r"^\[(image|video|audio|document|sticker)\]\s*")      
 _TEMPLATE = re.compile(r"^\[template\]\s*(\S.*)$")                                   # the service stores a sent template as "[template] its_name"
 
 
+def template_text(components: list) -> str:
+    """The words of an approved template as the customer reads them: a text header, the body, the footer, one blank line apart. Blanks
+    ({{1}}) stay as they are: the thread does not know what was filled in, and it must not invent it."""
+    out = {"HEADER": "", "BODY": "", "FOOTER": ""}
+    for c in components or []:
+        kind = str(c.get("type") or "").upper()
+        if kind in out and not (kind == "HEADER" and str(c.get("format") or "TEXT").upper() != "TEXT"):
+            out[kind] = (c.get("text") or "").strip()
+    return "\n\n".join(out[k] for k in ("HEADER", "BODY", "FOOTER") if out[k])
+
+
 def _font(px: int, weight: int = 400) -> QFont:
     f = QFont(theme.FONT_BODY)
     f.setPixelSize(px)
@@ -254,7 +265,7 @@ class MediaBlock(QFrame):
 class Bubble(QFrame):
     retry = Signal(object)                  # this bubble
 
-    def __init__(self, msg: dict, tail: bool, caption: str = "", parent=None):
+    def __init__(self, msg: dict, tail: bool, caption: str = "", parent=None, template_body: str = ""):
         super().__init__(parent)
         self.msg = msg
         self.outbound = msg.get("direction") == "out"
@@ -289,7 +300,9 @@ class Bubble(QFrame):
         if self.media_block is not None:
             text = _PLACEHOLDER.sub("", text)                    # a bare "[image]" is the file itself, not words
         template = _TEMPLATE.match(text)
-        if template:                                             # say what it is, and show its name as a name, not as stored text
+        if template and template_body:                           # the template is known: show the message itself, as the customer got it
+            text = template_body
+        elif template:                                           # not known (yet): say what it is, and show its name as a name, not as stored text
             kind = QLabel(i18n.t("Template message").upper())
             kind.setFont(_font(10, 700))
             kind.setStyleSheet(f"color: {theme.NEUTRAL[600]}; background: transparent;")
@@ -369,6 +382,23 @@ class MessageThread(QScrollArea):
         # must outlive a redraw: it is not in the server's thread, the composer
         # was already cleared, and dropping it would lose the person's words.
         self._pending_msgs: list[dict] = []
+        self._templates: dict = {}              # approved template name -> its words (template_text), set by the inbox
+        self._shown: list = []                  # the messages on screen, so a late template list can redraw them
+
+    def set_templates(self, words: dict):
+        """Teach the thread what each approved template says. A message sent from one then shows those words instead of the template's name,
+        and the thread on screen is redrawn once if any of it changes."""
+        words = {str(k): str(v) for k, v in (words or {}).items() if v}
+        if words == self._templates:
+            return
+        self._templates = words
+        if self._shown:
+            self._signature = ()                                     # never equal to a real one: forces the redraw, and keeps the scroll where it was
+            self.set_messages(self._shown)
+
+    def _template_words(self, msg: dict) -> str:
+        found = _TEMPLATE.match(msg.get("text") or "")
+        return self._templates.get(found.group(1).strip(), "") if found else ""
 
     # -- content ----------------------------------------------------------------
     def _clear(self):
@@ -398,6 +428,7 @@ class MessageThread(QScrollArea):
                     for m in messages)
         if sig == self._signature:
             return False
+        self._shown = list(messages)
         stick = self._at_bottom() or self._signature is None
         self._sticky = stick
         self._signature = sig
@@ -428,7 +459,7 @@ class MessageThread(QScrollArea):
             if outbound and not grouped:
                 who = (m.get("sender") or "").strip()
                 caption = i18n.t("Auto-reply") if who.lower() == "bot" else who
-            bubble = Bubble(dict(m), tail=tail, caption=caption)
+            bubble = Bubble(dict(m), tail=tail, caption=caption, template_body=self._template_words(m))
             bubble.retry.connect(self._on_retry)
             self._bubbles.append(bubble)
             self._add_row(bubble, Qt.AlignRight if outbound else Qt.AlignLeft,

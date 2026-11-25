@@ -220,7 +220,7 @@ class GateTest(unittest.TestCase):
                     self._done(list(self.steps))
         return _Instant
 
-    def _instant_authorize(self, allowed=True, message=""):
+    def _instant_authorize(self, allowed=True, message="", code=""):
         """Replace AuthorizeWorker with something synchronous.
 
         The real one is a QThread doing a network round trip. Left running,
@@ -246,7 +246,8 @@ class GateTest(unittest.TestCase):
             def start(self):
                 if self._cb:
                     self._cb(licensing.Authorization(allowed, run_id="run_test",
-                                                     message=message))
+                                                     message=message,
+                                                     code=code))
         return _Instant
 
 
@@ -314,6 +315,46 @@ class WindowGates(GateTest):
             win._open_boq()
         dialog.assert_not_called()
         warned.assert_called_once()
+
+    def test_a_refusal_the_token_does_not_know_about_is_not_silent(self):
+        """After a plan downgrade the renewed lease refuses the add-on
+        (FEATURE_NOT_LICENSED) while the token still lists it until the next
+        licence refresh, so require() passes and shows no pitch. The click
+        must still say something."""
+        import main_window
+        self.grant(["core", "boq"])
+        win = self._window()
+        opened = []
+        with mock.patch.object(
+                main_window, "AuthorizeWorker",
+                self._instant_authorize(allowed=False, message="x",
+                                        code="FEATURE_NOT_LICENSED")), \
+             mock.patch.object(main_window.QMessageBox,
+                               "information") as info:
+            win._authorized_then("boq", "addon", lambda: opened.append(1))
+        self.assertEqual(opened, [])
+        self.assertEqual(self.paywalled, [])
+        info.assert_called_once_with(win, "Licence", "x")
+
+    def test_a_refusal_for_a_feature_not_owned_shows_only_the_pitch(self):
+        """The other half: when the token has lost the feature too, the pitch
+        is the answer and no second box is shown."""
+        import main_window
+        self.grant(["core", "boq"])
+        win = self._window()
+
+        class _Downgraded(self._instant_authorize(
+                allowed=False, message="x", code="FEATURE_NOT_LICENSED")):
+            def start(inner):
+                self.grant(["core"])    # the token refresh landed meanwhile
+                super().start()
+
+        with mock.patch.object(main_window, "AuthorizeWorker", _Downgraded), \
+             mock.patch.object(main_window.QMessageBox,
+                               "information") as info:
+            win._authorized_then("boq", "addon", lambda: None)
+        self.assertEqual(self.paywalled, ["boq"])
+        info.assert_not_called()
 
     @needs_addon("email", "email")
     def test_email_gate(self):

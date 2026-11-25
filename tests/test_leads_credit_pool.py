@@ -548,6 +548,9 @@ class _PooledScreen(_Workbench):
         wb = self._WB.LeadsWorkbench({"exa_api_key": "live-exa", "api_key": "gsk_live"})
         self.server.balance = balance
         wb._on_credits(G.status())
+        # 24-Nov-2026: on the credit pool the screen now starts on Apollo (the server asks it for free). These
+        # tests are about what an EXA search costs in credits, so they pick Exa, as an owner can.
+        wb._set_source("exa")
         return wb
 
 

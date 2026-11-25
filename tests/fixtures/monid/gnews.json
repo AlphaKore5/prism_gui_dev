@@ -1,0 +1,50 @@
+{
+ "runId": "01FIXTUREFIXTUREFIXTURE01",
+ "provider": "x",
+ "endpoint": "/x",
+ "status": "COMPLETED",
+ "output": {
+  "search_parameters": {
+   "q": "raises funding electronics manufacturing startup India",
+   "hl": "en-IN",
+   "gl": "IN",
+   "limit": 5
+  },
+  "articles": [
+   {
+    "title": "Power electronics startup Leanwatts raises $2 million in seed funding, eyes ARR scale-up - electronics.economictimes.indiatimes.com",
+    "link": "https://news.google.com/rss/articles/CBMi-gFBVV95cUxQVDM4akRaOVMxUUZxVVhZTWZJajBLU3FETDZzd",
+    "published_at": "Sat, 05 Sep 2026 07:00:00 GMT",
+    "source": "electronics.economictimes.indiatimes.com",
+    "source_url": "http://electronics.economictimes.indiatimes.com"
+   },
+   {
+    "title": "Electronics Development Fund-Backed 128 Startups Raise ₹22.5K Cr - Inc42",
+    "link": "https://news.google.com/rss/articles/CBMinAFBVV95cUxNRUxxTV9TY0RadTdwamFDZVp4MDdDTXdrR1dCR",
+    "published_at": "Wed, 29 Jul 2026 07:00:00 GMT",
+    "source": "Inc42",
+    "source_url": "https://inc42.com"
+   }
+  ],
+  "billed": true
+ },
+ "providerResponse": {
+  "httpStatus": 200
+ },
+ "price": {
+  "type": "PER_CALL",
+  "amount": {
+   "value": 0.00015,
+   "currency": "USD"
+  }
+ },
+ "billing": {
+  "reportedCost": {
+   "currency": "USD",
+   "value": 150,
+   "unit": "MICRO_DOLLAR"
+  }
+ },
+ "resultCount": 1,
+ "billedUnits": 1
+}

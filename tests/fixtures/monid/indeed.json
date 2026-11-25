@@ -1,0 +1,112 @@
+{
+ "runId": "01FIXTUREFIXTUREFIXTURE01",
+ "provider": "x",
+ "endpoint": "/x",
+ "status": "COMPLETED",
+ "output": {
+  "search_metadata": {
+   "id": "5b2dba860275b635812b9681",
+   "status": "Success",
+   "created_at": "2026-11-22T13:32:45.633886+00:00",
+   "processed_at": "2026-11-22T13:32:45.877447+00:00",
+   "total_time_taken": 0.244
+  },
+  "search_parameters": {
+   "q": "PCB design engineer",
+   "page": 1,
+   "location": "Bengaluru",
+   "radius": 25,
+   "radius_unit": "miles",
+   "country": "IN",
+   "limit": 5,
+   "sort": "date",
+   "fromage": 30,
+   "easy_apply": false,
+   "no_experience": false
+  },
+  "jobs_results": [
+   {
+    "position": 1,
+    "job_id": "04650b940d11f27c",
+    "title": "Electronics Engineer",
+    "link": "https://www.indeed.com/viewjob?jk=04650b940d11f27c",
+    "company_name": "karnataka solution",
+    "location": "Bengaluru, Karnataka",
+    "description": "Dear Candidate We have immediate vacancies for the post of Electronics Engineer / Production / Quality / Design / Project Engineer / PCB / Testing Engineer / Embedded / Software Engineer. Qualification: BE / B.Tech Freshers and Experienced Salary: 4 Lakhs Per Annum to 7 LPA Pay: ₹30,000.00 - ₹55,000.00 per month Benefits: Life insurance Provident Fund Work Location: In person",
+    "salary": {
+     "minimum": 30000,
+     "maximum": 55000,
+     "currency": "INR",
+     "interval": "MONTH",
+     "source": "Indeed"
+    },
+    "posted_at": "2026-11-21T11:17:37.642000+00:00",
+    "employment_types": [
+     "Full-time"
+    ],
+    "apply_link": "http://in.indeed.com/job/electronics-engineer-04650b940d11f27c",
+    "attributes": [
+     {
+      "key": "6NWK8",
+      "label": "Provident Fund"
+     },
+     {
+      "key": "C5C2F",
+      "label": "System design"
+     }
+    ]
+   },
+   {
+    "position": 2,
+    "job_id": "52e77206f845184d",
+    "title": "STAFF R&D/PRODUCT DVL ENGINEER",
+    "link": "https://www.indeed.com/viewjob?jk=52e77206f845184d",
+    "company_name": "TE Connectivity",
+    "location": "Bengaluru, Karnataka",
+    "description": "Leads technical domain of singe/ multiple strategic development projects from initial ideation to final production. Responsibilities: Subject matter expert in signal integrity design, simulation and validation activities through product development cycles Establishing signal integrity design performance/functional requirements for new products Performing signal integrity simulations for multiple high-speed standards ",
+    "posted_at": "2026-11-21T06:00:00+00:00",
+    "company_rating": 3.6,
+    "company_logo": "https://d2q79iu7y748jz.cloudfront.net/s/_squarelogo/256x256/99ad094688784d8b6945865207a0c502",
+    "apply_link": "https://careers.te.com/job/STAFF-R&DPRODUCT-DVL-ENGINEER/162076-en_US",
+    "attributes": [
+     {
+      "key": "2WBSG",
+      "label": "AutoCAD"
+     },
+     {
+      "key": "2WTFZ",
+      "label": "Product design project leadership"
+     }
+    ]
+   }
+  ],
+  "search_information": {
+   "jobs_results_state": "Results found"
+  },
+  "pagination": {
+   "current": 1,
+   "next_page": 2,
+   "next_page_token": "AAUAAYEABQAAAAAAAAAAAAAAAmfetgIADgEABVEzdt98m44rjPggAAA="
+  },
+  "billed": true
+ },
+ "providerResponse": {
+  "httpStatus": 200
+ },
+ "price": {
+  "type": "PER_CALL",
+  "amount": {
+   "value": 0.00015,
+   "currency": "USD"
+  }
+ },
+ "billing": {
+  "reportedCost": {
+   "currency": "USD",
+   "value": 150,
+   "unit": "MICRO_DOLLAR"
+  }
+ },
+ "resultCount": 1,
+ "billedUnits": 1
+}

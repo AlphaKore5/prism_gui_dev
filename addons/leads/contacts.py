@@ -64,7 +64,7 @@ SCHEMA = 1
 FILE = "contacts.json"
 _KEY = "contacts"
 _WHAT = "your saved contacts"
-VIA = ("import", "save", "export", "sequence", "list", "email", "phone")
+VIA = ("import", "save", "export", "sequence", "list", "email", "phone", "buyers")
 # Apollo's default contact stages, in its order. A stage from an imported
 # sheet that is not one of these is kept as written (see stage_named).
 STAGES = ("Cold", "Approaching", "Replied", "Interested", "Not Interested",

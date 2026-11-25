@@ -416,9 +416,17 @@ class AuthorizeFlow(LeaseHarness):
         self.install_token()
         self.install_lease(ttl=-60, offline=3600)
         with self._no_network()[0], self._no_network()[1]:
-            result = licensing.authorize("boq", "addon")
+            # "run": an add-on in GRACE no longer waits to find the server
+            # down (GraceOpensAtOnce); a run still does, and says so.
+            result = licensing.authorize("boq", "run")
         self.assertTrue(result.allowed)
         self.assertTrue(result.offline)
+        # The add-on opens too; its background renewal is joined inside the
+        # patches so it cannot reach the real client afterwards.
+        licensing._renewal_thread = None
+        with self._no_network()[0], self._no_network()[1]:
+            self.assertTrue(licensing.authorize("boq", "addon").allowed)
+            licensing._renewal_thread.join(10)
 
     def test_l_an_outage_past_the_window_refuses(self):
         """L — and says why, in words about the network rather than the
@@ -480,7 +488,9 @@ class AuthorizeFlow(LeaseHarness):
         refusal = client.ServerError("LICENSE_REVOKED",
                                      "This licence has been cancelled.")
         with mock.patch.object(client, "lease", side_effect=refusal):
-            result = licensing.authorize("boq", "addon")
+            # "run": an add-on in GRACE opens at once and meets the
+            # revocation on its NEXT open (GraceOpensAtOnce).
+            result = licensing.authorize("boq", "run")
         self.assertFalse(result.allowed)
         self.assertEqual(result.code, "LICENSE_REVOKED")
         self.assertFalse(os.path.exists(A.path(self.tmp)))
@@ -528,6 +538,254 @@ class AuthorizeFlow(LeaseHarness):
         self.assertFalse(result.allowed)
         self.assertEqual(result.code, "NONE")
         call.assert_not_called()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# An add-on opens at once from a lease in its offline window
+# ═══════════════════════════════════════════════════════════════════════════
+class GraceOpensAtOnce(LeaseHarness):
+    """GRACE with the server ANSWERING. (With it down, G and L above already
+    cover the open.) Nothing here waits on a sleep: a stub server blocks on an
+    Event the test controls, and the renewal thread is joined."""
+
+    WAIT = 10.0
+
+    def setUp(self):
+        super().setUp()
+        licensing._renewal_thread = None
+        self.install_token()
+
+    def tearDown(self):
+        join_licence_threads()
+        licensing._renewal_thread = None
+        super().tearDown()
+
+    def _join_renewal(self):
+        t = licensing._renewal_thread
+        self.assertIsNotNone(t, "no background renewal was started")
+        t.join(self.WAIT)
+        self.assertFalse(t.is_alive(), "the renewal thread did not finish")
+
+    def _blocking_server(self, answer):
+        """A client.lease stand-in that records which thread called it, says
+        when it was entered, and holds until the test lets it go."""
+        calls, entered, release = [], threading.Event(), threading.Event()
+
+        def lease(*_a, **_kw):
+            calls.append(threading.current_thread())
+            entered.set()
+            release.wait(self.WAIT)
+            if isinstance(answer, Exception):
+                raise answer
+            return answer
+
+        return lease, calls, entered, release
+
+    def _down(self):
+        return [mock.patch.object(client, "lease",
+                                  side_effect=client.Unreachable("down")),
+                mock.patch.object(client, "authorize",
+                                  side_effect=client.Unreachable("down"))]
+
+    def test_grace_addon_opens_without_waiting_for_the_server(self):
+        self.install_lease(ttl=-60, offline=3600)
+        fresh, _ = self.make_lease(ttl=1800)
+        lease, calls, entered, release = self._blocking_server(
+            {"lease": fresh})
+        started = time.monotonic()
+        with mock.patch.object(client, "lease", side_effect=lease):
+            result = licensing.authorize("boq", "addon")
+            # The server has not been let go yet: if authorize() had waited
+            # for it, it could not have returned before `release` is set.
+            returned_while_server_blocked = not release.is_set()
+            self.assertTrue(entered.wait(self.WAIT))
+            release.set()
+            self._join_renewal()
+        self.assertTrue(returned_while_server_blocked)
+        self.assertLess(time.monotonic() - started, self.WAIT)
+        self.assertTrue(result.allowed)
+        self.assertEqual(result.state, A.GRACE)
+        self.assertTrue(result.run_id.startswith("loc_"))
+        self.assertEqual(len(calls), 1)
+        self.assertIsNot(calls[0], threading.current_thread())
+        self.assertTrue(calls[0].daemon)
+        # The renewal landed quietly: the NEXT open is a plain fresh one.
+        self.assertEqual(licensing._read_lease()[1], A.FRESH)
+
+    def test_grace_addon_starts_exactly_one_background_renewal(self):
+        self.install_lease(ttl=-60, offline=3600)
+        fresh, _ = self.make_lease(ttl=1800)
+        lease, calls, entered, release = self._blocking_server(
+            {"lease": fresh})
+        with mock.patch.object(client, "lease", side_effect=lease):
+            first = licensing.authorize("boq", "addon")
+            self.assertTrue(entered.wait(self.WAIT))
+            first_thread = licensing._renewal_thread
+            # Two more clicks while the first renewal is still in flight.
+            second = licensing.authorize("boq", "addon")
+            third = licensing.authorize("boq", "addon")
+            self.assertIs(licensing._renewal_thread, first_thread)
+            release.set()
+            self._join_renewal()
+        self.assertTrue(first.allowed and second.allowed and third.allowed)
+        self.assertEqual(len(calls), 1)
+
+    def test_a_crashing_renewal_does_not_leave_it_in_flight(self):
+        self.install_lease(ttl=-60, offline=3600)
+        with mock.patch.object(licensing, "_refresh_lease_once",
+                               side_effect=RuntimeError("boom")):
+            self.assertTrue(licensing.authorize("boq", "addon").allowed)
+            self._join_renewal()
+        self.assertTrue(licensing._renewal_lock.acquire(blocking=False))
+        licensing._renewal_lock.release()
+
+    def test_grace_plan_still_goes_to_the_server(self):
+        self.install_lease(ttl=-60, offline=3600)
+        for action in ("plan", "run"):
+            fresh, _ = self.make_lease(ttl=1800)
+            with mock.patch.object(client, "lease",
+                                   return_value={"lease": fresh}) as call:
+                result = licensing.authorize("core", action)
+            self.assertTrue(result.allowed, action)
+            call.assert_called_once()
+            self.assertIsNone(licensing._renewal_thread, action)
+            self.install_lease(ttl=-60, offline=3600)   # back into GRACE
+        # A metered plan asks the server's counter, not the lease.
+        self.install_lease(ttl=-60, offline=3600, metered=True)
+        fresh, _ = self.make_lease(metered=True)
+        with mock.patch.object(
+                client, "authorize",
+                return_value={"run_id": "run_1", "lease": fresh}) as call:
+            result = licensing.authorize("core", "plan")
+        call.assert_called_once()
+        self.assertEqual(result.run_id, "run_1")
+        self.assertIsNone(licensing._renewal_thread)
+
+    def test_grace_with_tampered_or_expired_token_does_not_take_the_fast_path(
+            self):
+        # Past the signed window: STALE, waits for the server as before.
+        self.install_lease(ttl=-7200, offline=3600)
+        fresh, _ = self.make_lease(ttl=1800)
+        lease, calls, entered, release = self._blocking_server(
+            {"lease": fresh})
+        release.set()
+        with mock.patch.object(client, "lease", side_effect=lease):
+            result = licensing.authorize("boq", "addon")
+        self.assertTrue(result.allowed)
+        self.assertEqual(calls, [threading.current_thread()])
+        self.assertIsNone(licensing._renewal_thread)
+        # A lease whose signed window was widened by hand is TAMPERED, not
+        # GRACE: it is dropped and the server is asked on this thread.
+        raw, _ = self.make_lease(ttl=-7200, offline=3600)
+        head, payload, sig = raw.split(".")
+        claims = json.loads(T.b64u_decode(payload))
+        claims["off"] = 400 * DAY
+        store.write_json(A.path(self.tmp),
+                         {"lease": f"{head}.{L.encode_payload(claims)}.{sig}"})
+        calls.clear()
+        with mock.patch.object(client, "lease", side_effect=lease):
+            licensing.authorize("boq", "addon")
+        self.assertEqual(calls, [threading.current_thread()])
+        self.assertIsNone(licensing._renewal_thread)
+
+    def test_background_revocation_refuses_the_next_open(self):
+        self.install_lease(ttl=-60, offline=3600)
+        refusal = client.ServerError("LICENSE_REVOKED", "Cancelled.")
+        lease, _calls, _entered, release = self._blocking_server(refusal)
+        release.set()
+        with mock.patch.object(client, "lease", side_effect=lease):
+            self.assertTrue(licensing.authorize("boq", "addon").allowed)
+            self._join_renewal()
+        self.assertFalse(os.path.exists(A.path(self.tmp)))
+        # Cleared, so the offline window cannot carry the next open either.
+        with self._down()[0], self._down()[1]:
+            self.assertFalse(licensing.authorize("boq", "addon").allowed)
+
+    def test_background_client_too_old_refuses_the_next_open(self):
+        self.install_lease(ttl=-60, offline=3600)
+        refusal = client.ServerError(
+            "CLIENT_TOO_OLD", "Please update Prism.",
+            {"min_supported_version": "99.0.0"})
+        lease, _calls, _entered, release = self._blocking_server(refusal)
+        release.set()
+        with mock.patch.object(client, "lease", side_effect=lease):
+            self.assertTrue(licensing.authorize("boq", "addon").allowed)
+            self._join_renewal()
+            self.assertFalse(os.path.exists(A.path(self.tmp)))
+            nxt = licensing.authorize("boq", "addon")
+        self.assertFalse(nxt.allowed)
+        self.assertEqual(nxt.code, "CLIENT_TOO_OLD")
+        # The floor is kept for the banner, as the foreground path does.
+        self.assertEqual(store.load(self.tmp).get("min_supported_version"),
+                         "99.0.0")
+
+    def test_the_timer_path_keeps_the_lease_on_client_too_old(self):
+        """Only the background renewal clears on CLIENT_TOO_OLD. The 10-minute
+        timer calls _refresh_lease_once() with no argument: a floor raised by
+        mistake must not take add-ons away mid-session, only at lease end."""
+        self.install_lease(ttl=-60, offline=3600)
+        A.save(self.tmp, {**A.load(self.tmp), "last_attempt": 1})
+        refusal = client.ServerError(
+            "CLIENT_TOO_OLD", "Please update Prism.",
+            {"min_supported_version": "99.0.0"})
+        with mock.patch.object(client, "lease", side_effect=refusal):
+            self.assertFalse(licensing._refresh_lease_once())
+        self.assertTrue(os.path.exists(A.path(self.tmp)))
+        self.assertGreater(A.load(self.tmp)["last_attempt"], 1)
+        self.assertEqual(store.load(self.tmp).get("min_supported_version"),
+                         "99.0.0")
+
+    def test_licence_refresh_keeps_the_lease_on_client_too_old(self):
+        """The same, through licensing.refresh(): what main_window's
+        10-minute licence timer actually calls."""
+        self.install_lease(ttl=-60, offline=3600)
+        refusal = client.ServerError(
+            "CLIENT_TOO_OLD", "Please update Prism.",
+            {"min_supported_version": "99.0.0"})
+        with mock.patch.object(client, "refresh",
+                               side_effect=client.Unreachable("down")), \
+                mock.patch.object(client, "lease",
+                                  side_effect=refusal) as lease:
+            self.assertIsNone(licensing.refresh())
+            join_licence_threads()
+        lease.assert_called_once()
+        self.assertTrue(os.path.exists(A.path(self.tmp)))
+        self.assertEqual(licensing._read_lease()[1], A.GRACE)
+
+    def test_renewed_lease_without_the_scope_is_refused(self):
+        """A plan downgrade arrives as a narrower lease. The old lease that
+        let this call through must not be the last word."""
+        self.install_lease(ttl=-7200, offline=0,
+                           scopes=("core", "workflow", "boq"))
+        narrower, _ = self.make_lease(scopes=("core", "workflow"),
+                                      features=("core",))
+        with mock.patch.object(client, "lease",
+                               return_value={"lease": narrower}):
+            result = licensing.authorize("boq", "addon")
+        self.assertFalse(result.allowed)
+        self.assertEqual(result.code, "FEATURE_NOT_LICENSED")
+
+    def test_background_downgrade_refuses_the_next_open(self):
+        self.install_lease(ttl=-60, offline=3600,
+                           scopes=("core", "workflow", "boq"))
+        narrower, _ = self.make_lease(scopes=("core", "workflow"),
+                                      features=("core",))
+        lease, _calls, _entered, release = self._blocking_server(
+            {"lease": narrower})
+        release.set()
+        with mock.patch.object(client, "lease", side_effect=lease):
+            self.assertTrue(licensing.authorize("boq", "addon").allowed)
+            self._join_renewal()
+            nxt = licensing.authorize("boq", "addon")
+        self.assertFalse(nxt.allowed)
+        self.assertEqual(nxt.code, "FEATURE_NOT_LICENSED")
+
+    def test_lease_bearer_is_empty_in_grace(self):
+        """The backend refuses a lease past `exp`; an empty bearer is what
+        makes ai_server._auth renew before it spends."""
+        self.install_lease(ttl=-60, offline=3600)
+        self.assertEqual(licensing._read_lease()[1], A.GRACE)
+        self.assertEqual(licensing.lease_bearer(), "")
 
 
 # ═══════════════════════════════════════════════════════════════════════════

@@ -426,11 +426,57 @@ def mobile_result(run_id: str, why: list | None = None) -> dict | None:
     return res if isinstance(res, dict) and res.get("state") in ("pending", "done") else None
 
 
+def apollo_search(params: dict) -> dict:
+    """Apollo's people search through the server (/v1/leads/apollo-search): {"people": [cards],
+    "total_entries": n}. FREE — no credit is taken, so it is asked even with an empty balance. A card is
+    a first name, an obfuscated surname, a title, a company name and an Apollo id: never a contact.
+    Raises GatewayError (the server's own sentence) when it cannot be made."""
+    out = _raw_call("/v1/leads/apollo-search", _auth_body(params=dict(params or {})))
+    _note(out)
+    return out
+
+
+def apollo_reveal(details: list) -> list:
+    """Up to ten search cards turned into people (/v1/leads/apollo-reveal): one entry per card asked,
+    in order, a person with a full name, e-mail and company website — or {} when Apollo did not find
+    them. Charged per person found. Raises GatewayError (OutOfCredits when the pool is spent)."""
+    out = _call("apollo-reveal", people=[d for d in (details or []) if isinstance(d, dict)][:10])
+    matches = (out.get("result") or {}).get("matches")
+    return [m if isinstance(m, dict) else {} for m in matches] if isinstance(matches, list) else []
+
+
+def find_mobile(first_name: str, last_name: str, domain: str, company: str = "", title: str = "",
+                why: list | None = None) -> dict | None:
+    """One person's own mobile number, asked of three sources in turn by the server
+    (/v1/leads/mobile-find): {"phone": "+91...", "kind": "mobile", "provider": "ai_ark"}, with
+    "phone" "" when none of them had one — or None when the lookup could not be made. One
+    request, answered in seconds, charged once and only when a number comes back (a miss and a
+    landline cost nothing). `why`, when a list, gets the server's own sentence for a failure."""
+    try:
+        out = _call("mobile-find", first_name=str(first_name or "")[:60], last_name=str(last_name or "")[:60],
+                    domain=str(domain or "")[:120], company=str(company or "")[:120], title=str(title or "")[:120])
+    except GatewayError as e:
+        if why is not None:
+            why.append(e.message)
+        return None
+    res = out.get("result")
+    return res if isinstance(res, dict) and "phone" in res else None
+
+
 def news_rows(company: str, focus: str = "", exclude_domains=(), num_results: int = 5,
               days: int = 180) -> list | None:
     """Dated news rows about one company, or None when the lookup failed."""
     return _rows("signals", company=company, focus=focus or "", num_results=num_results,
                  days=days, exclude_domains=list(exclude_domains or ())[:60])
+
+
+def hunt_rows(query: str, num_results: int = 8, days: int = 0) -> list | None:
+    """Rows of one web-wide search for buyers (Find my buyers) — a list (maybe
+    empty) when it answered, None when it failed. `days` limits to pages
+    published that recently; 0 means no window (a tender page has no date, its
+    closing date is read from the text). Charged per search that finds rows."""
+    return _rows("hunt", query=str(query or "")[:300],
+                 num_results=max(1, min(int(num_results), 10)), days=max(0, min(int(days), 730)))
 
 
 def ask(prompt: str, purpose: str, json_mode: bool = False, temperature: float = 0.2) -> str:

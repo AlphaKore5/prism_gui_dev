@@ -290,6 +290,37 @@ def _hunter_find(lead, key: str):
         return "", ""
 
 
+def _hunter_find_monid(lead, key: str):
+    """The same Hunter finder, bought through the owner's MONID wallet instead of a Hunter key
+    (`hunterio /email-finder`, $0.0245 and only when an address is found, 24-Nov-2026). Same inputs, same
+    answer shape, same contract as `_hunter_find`: (email, verification_status), ("", "") for nobody, and
+    FinderRefused when Monid turns the key or the wallet away — every other person would get the same
+    answer, so the batch stops asking."""
+    from . import monid_run
+    first, last = _name_parts(lead.name)
+    dom = _registrable(_domain_of(lead))
+    company = (getattr(lead, "company", "") or "").strip()
+    if not (first and last and (dom or len(company) >= 3)):
+        return "", ""                               # Monid's finder takes a name of 3+ letters when it has no domain
+    query = {"first_name": first, "last_name": last}
+    if dom:
+        query["domain"] = dom
+    else:
+        query["company"] = company
+    try:
+        run = monid_run.call("hunterio", "/email-finder", key=key, query=query, max_cost=0.05)
+    except monid_run.MonidError as why:
+        raise FinderRefused(str(why)) from why
+    out = run.get("output") if isinstance(run, dict) else None
+    d = out.get("data") if isinstance(out, dict) else None
+    if not isinstance(d, dict):
+        return "", ""
+    email = d.get("email") or ""
+    if email and d.get("linkedin_url") and not (lead.extra or {}).get("linkedin"):
+        lead.extra["linkedin"] = d["linkedin_url"]
+    return email, ((d.get("verification") or {}).get("status") or "")
+
+
 # The FINDERS — the only way Prism gets an address it was not handed (the
 # owner, 24-Sep-2026: "hunter + apollo only to find mails"; addresses are never
 # guessed). Hunter is our MAIN finder (the owner, 27-Sep-2026: "our main will
@@ -322,6 +353,13 @@ def collect_keys(cfg: dict | None = None) -> dict:
         v = (cfg.get(k) or os.environ.get(k.upper()) or "").strip()
         if v:
             out[k] = v
+    # No Hunter key of their own: a Monid key buys the same Hunter finder (find_and_verify reads this as
+    # Hunter — the finders stay Hunter, then Apollo). With one, Hunter is asked directly and Monid is not
+    # asked for the same person twice.
+    if "hunter_api_key" not in out:
+        monid = (cfg.get("monid_api_key") or os.environ.get("MONID_API_KEY") or "").strip()
+        if monid:
+            out["monid_api_key"] = monid
     return out
 
 
@@ -548,6 +586,8 @@ def find_and_verify(lead, keys: dict | None = None, refused: dict | None = None)
     if (lead.name or "") and somewhere and check not in ("valid", "catch-all"):
         for cfg_key, name, fn in _FINDERS:
             k = keys.get(cfg_key)
+            if not k and cfg_key == "hunter_api_key" and keys.get("monid_api_key"):
+                k, fn = keys["monid_api_key"], _hunter_find_monid       # Hunter, through the Monid wallet
             if not k or (refused is not None and name in refused):
                 continue
             # The finder that supplied the address we are holding has nothing

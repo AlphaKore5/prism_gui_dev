@@ -152,7 +152,8 @@ class FindMobilesOnTheScreen(_Workbench):
         self.assertIn("3 people", lines[0])
         self.assertIn("up to 30 credits", lines[0])             # 3 x the 10-credit default
         self.assertIn("only for a number found", lines[1])
-        self.assertIn("a few minutes", lines[1])
+        self.assertIn("three data sources", lines[1])               # not "Apollo": the server asks three, cheapest first
+        self.assertIn("a minute or two", lines[1])
         self.assertEqual(_FakeMobileWorker.made, [])            # declined: nothing ran, nothing spent
 
     @pytest.mark.pooled
@@ -176,13 +177,59 @@ class FindMobilesOnTheScreen(_Workbench):
         self.assertIn("isn't switched on yet", wb._status.text())
         self.assertEqual(_FakeMobileWorker.made, [])
 
-    def test_with_your_own_keys_it_says_there_is_no_mobile_source(self):
+    def test_with_your_own_keys_and_no_monid_key_it_says_what_is_missing(self):
+        # 24-Nov-2026: a Monid key IS a mobile source now (the next tests), so "no source" became "no Monid key".
         wb = self._bench()                                      # the suite runs in direct mode
         leads = self._people(wb)
         self._tick(wb, leads)
-        wb._find_mobiles(wb._cockpit.leads.selected())
+        with mock.patch.dict(os.environ, {"MONID_API_KEY": ""}):
+            wb._find_mobiles(wb._cockpit.leads.selected())
         self.assertIn("runs on Prism's credits", wb._status.text())
+        self.assertIn("MONID_API_KEY", wb._status.text())
         self.assertEqual(_FakeMobileWorker.made, [])
+
+    def _monid_bench(self, answer=True):
+        wb = self._WB.LeadsWorkbench({"monid_api_key": "mk"})
+        said: list = []
+        from PySide6.QtWidgets import QMessageBox
+        yes = QMessageBox.StandardButton.Yes if answer else QMessageBox.StandardButton.No
+        patch = mock.patch.object(self._WB.QMessageBox, "question", lambda *a, **k: (said.append(a), yes)[1])
+        patch.start()
+        self.addCleanup(patch.stop)
+        return wb, said
+
+    def test_with_a_monid_key_the_worker_is_started_without_the_credit_pool(self):
+        wb, said = self._monid_bench()
+        leads = self._people(wb, 3)
+        self._tick(wb, leads)
+        wb._find_mobiles(wb._cockpit.leads.selected())
+        [worker] = _FakeMobileWorker.made
+        self.assertTrue(worker.started)
+        self.assertEqual(len(worker.leads), 3)
+        self.assertEqual(worker.cfg.get("monid_api_key"), "mk")
+        self.assertIn("3 people", wb._status.text())
+
+    def test_with_a_monid_key_it_asks_first_in_rupees_and_names_the_wallet(self):
+        wb, said = self._monid_bench(answer=False)
+        leads = self._people(wb, 3)
+        self._tick(wb, leads)
+        wb._find_mobiles(wb._cockpit.leads.selected())
+        [args] = said
+        text = args[2]
+        self.assertEqual(args[1], "Find mobiles")
+        self.assertIn("3 people", text)
+        self.assertIn("Monid wallet", text)
+        self.assertIn("₹12 a number", text)                     # $0.1225 measured, at ₹96
+        self.assertIn("at most ₹21", text)
+        self.assertIn("only for a number it returns", text)
+        self.assertEqual(_FakeMobileWorker.made, [])            # declined: nothing ran, nothing spent
+
+    def test_a_monid_key_does_not_skip_the_page_limit(self):
+        wb, said = self._monid_bench(answer=False)
+        leads = self._people(wb, M.LIMIT + 5)
+        self._tick(wb, leads)
+        wb._find_mobiles(wb._cockpit.leads.selected())
+        self.assertIn(f"{M.LIMIT} people", said[0][2])
 
     def test_nobody_left_to_look_up_says_so(self):
         wb = self._bench()

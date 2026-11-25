@@ -398,6 +398,63 @@ def test_a_sent_template_reads_as_a_template_not_as_stored_text():
     assert plain.body.text() == "Hello there" and "TEMPLATE MESSAGE" not in {l.text() for l in plain.findChildren(QLabel)}
 
 
+_TPL_MSG = {"direction": "out", "sender": "campaign", "text": "[template] alphakore_team_update", "created_at": "2026-11-20T18:04:00+0530", "status": "sent"}
+_TPL_COMPONENTS = [{"type": "HEADER", "format": "TEXT", "text": "Team update"},
+                   {"type": "BODY", "text": "Hello {{1}}, the team meets at 5 pm today."},
+                   {"type": "FOOTER", "text": "Alphakore"},
+                   {"type": "BUTTONS", "buttons": [{"type": "QUICK_REPLY", "text": "OK"}]}]
+
+
+def test_the_words_of_a_template_are_its_header_body_and_footer_with_blanks_left_alone():
+    from addons.whatsapp.thread import template_text
+    assert template_text(_TPL_COMPONENTS) == "Team update\n\nHello {{1}}, the team meets at 5 pm today.\n\nAlphakore"
+    media_header = [{"type": "HEADER", "format": "IMAGE"}, {"type": "BODY", "text": "See the picture."}]
+    assert template_text(media_header) == "See the picture."          # a picture header has no words to show
+    assert template_text([]) == "" and template_text(None) == ""
+
+
+def test_a_sent_template_shows_the_whole_message_once_its_words_are_known():
+    from addons.whatsapp.thread import Bubble, template_text
+    words = template_text(_TPL_COMPONENTS)
+    b = Bubble(dict(_TPL_MSG), tail=True, template_body=words)
+    assert b.body.text() == words
+    assert "TEMPLATE MESSAGE" not in {l.text() for l in b.findChildren(QLabel)}
+    assert b.body.toolTip() == "[template] alphakore_team_update"       # the stored name is still one hover away
+
+
+def test_the_thread_redraws_a_template_message_when_the_template_list_arrives_and_not_again_for_the_same_list():
+    from addons.whatsapp.thread import MessageThread, template_text
+    t = MessageThread()
+    assert t.set_messages([dict(_TPL_MSG)]) is True
+    assert t._bubbles[0].body.text() == "Alphakore team update"          # list not here yet: the name, as before
+    words = {"alphakore_team_update": template_text(_TPL_COMPONENTS)}
+    t.set_templates(words)
+    assert t._bubbles[0].body.text() == words["alphakore_team_update"]
+    assert t.set_messages([dict(_TPL_MSG)]) is False                     # same messages, same words: nothing to draw
+    t.set_templates(dict(words))                                         # the same list again: no second redraw
+    assert len(t._bubbles) == 1
+
+
+def test_a_template_the_list_does_not_know_still_reads_as_its_name_and_other_messages_are_untouched():
+    from addons.whatsapp.thread import MessageThread
+    t = MessageThread()
+    t.set_templates({"some_other_template": "Words"})
+    t.set_messages([dict(_TPL_MSG), {"direction": "in", "text": "Thanks!", "created_at": "2026-11-20T18:05:00+0530"}])
+    assert [b.body.text() for b in t._bubbles] == ["Alphakore team update", "Thanks!"]
+
+
+def test_the_inbox_hands_the_thread_every_templates_words_preferring_an_approved_copy(inbox, calls):
+    assert "templates/list" in routes(calls)
+    inbox._on_templates({"templates": [
+        {"name": "alphakore_team_update", "status": "PENDING", "components": [{"type": "BODY", "text": "Old words"}]},
+        {"name": "alphakore_team_update", "status": "APPROVED", "components": _TPL_COMPONENTS},
+        {"name": "paused_one", "status": "PAUSED", "components": [{"type": "BODY", "text": "Still readable"}]},
+        {"name": "", "status": "APPROVED", "components": [{"type": "BODY", "text": "no name"}]}]})
+    assert inbox.thread._templates["alphakore_team_update"].startswith("Team update")
+    assert inbox.thread._templates["paused_one"] == "Still readable"
+    assert "" not in inbox.thread._templates
+
+
 def test_the_thread_cannot_be_dragged_sideways():
     from addons.whatsapp.thread import MessageThread
     t = MessageThread()

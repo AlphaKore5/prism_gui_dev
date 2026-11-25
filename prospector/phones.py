@@ -149,6 +149,21 @@ SOURCE_LINE = {
 # A PERSON's own mobile (prospector/mobiles.py) is not a company's published number, and the
 # panel must not say it is: it comes from Apollo, and nobody has rung it.
 PERSON_LINE = "Their own mobile number, from Apollo · found {when} · not called, format checked only"
+# The same line for a number bought from another source (prospector/phone_waterfall.py) — who sold it is named.
+PERSON_LINE_BY = "Their own mobile number, from {who} · found {when} · not called, format checked only"
+PROVIDER_LABEL = {"apollo": "Apollo", "ai_ark": "AI Ark", "reversecontact": "ReverseContact",
+                  "contactout": "ContactOut"}
+
+
+def provider_label(entry) -> str:
+    """Who sold a number: "Apollo" for an entry from before there were other sources."""
+    key = str((entry or {}).get("provider") or "apollo").lower()
+    return PROVIDER_LABEL.get(key, key.title())
+
+
+def person_line(entry) -> str:
+    """The sentence under a person's own mobile: format it with `when=` and `who=`."""
+    return PERSON_LINE if str((entry or {}).get("provider") or "apollo").lower() == "apollo" else PERSON_LINE_BY
 # The same source in a few words, for the spreadsheet's Phone source column.
 SOURCE_LABEL = {"own_website": "their website", "directory": "a business directory",
                 "other": "the web"}

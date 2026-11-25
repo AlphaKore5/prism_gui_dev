@@ -626,20 +626,22 @@ class WorkspaceSurface(unittest.TestCase):
         self.d2 = _dos("Vaibhav", 80, "v@x.com", "")
         self.w = CK.LeadsWorkspace(leads_folder=tempfile.mkdtemp())
 
-    def test_ten_tabs_over_ten_screens(self):
-        # Deals and Due today (the CRM mockup's boards) joined the original seven, at the end so nothing earlier moved.
-        self.assertEqual(len(self.w._tabs), 10)
-        self.assertEqual(self.w._stack.count(), 10)
+    def test_eleven_tabs_over_eleven_screens(self):
+        # Deals and Due today (the CRM mockup's boards) joined the original seven; Find buyers sits after Companies.
+        self.assertEqual(len(self.w._tabs), 11)
+        self.assertEqual(self.w._stack.count(), 11)
         self.assertIs(self.w._stack.currentWidget(), self.w.leads)  # Leads default
 
     def test_selecting_a_tab_switches_the_stack(self):
-        self.w._select(6)                                   # Analytics
+        self.w._select(CK._TABS.index("Analytics"))
         self.assertIs(self.w._stack.currentWidget(), self.w._analytics)
-        self.w._select(3)                                   # Lists
+        self.w._select(CK._TABS.index("Lists"))
         self.assertIs(self.w._stack.currentWidget(), self.w._lists)
-        self.w._select(2)                                   # Sessions
+        self.w._select(CK._TABS.index("Sessions"))
         self.assertIs(self.w._stack.currentWidget(), self.w._sessions)
-        self.w._select(1)                                   # Companies
+        self.w._select(CK._TABS.index("Find buyers"))
+        self.assertIs(self.w._stack.currentWidget(), self.w.buyers)
+        self.w._select(CK._TABS.index("Companies"))
         self.assertIs(self.w._stack.currentWidget(), self.w.companies)
 
     def test_set_dossiers_reaches_leads_and_analytics(self):
@@ -698,6 +700,37 @@ class ListsTab(unittest.TestCase):
         self.assertTrue(tab._scroll.isHidden())
 
 
+def _delete_built(workbenches: list, before: "set | None" = None) -> None:
+    """Delete each workbench a test built, with the window it sits in (a LeadsPanel), right now.
+
+    Found 25-Nov-2026: nothing deleted them, so the file ended with ~8,900 live top-level widgets and Windows killed
+    the run with an access violation in a Qt-owned thread, at a different test each time (~140-265), on main too.
+    `deleteLater()` cannot be used: it needs the event loop, and no test may run it (CONTRIBUTING; flushing posted
+    events fired an earlier test's deferred dialog and hung the suite). shiboken6.delete() runs the C++ destructor
+    now, which takes every child — the dialogs, menus and pages the workbench owns — with it."""
+    import shiboken6
+    tops = []
+    for wb in workbenches:
+        if not shiboken6.isValid(wb):
+            continue
+        top = wb
+        while top.parentWidget() is not None:
+            top = top.parentWidget()
+        if all(top is not t for t in tops):
+            tops.append(top)
+    # The person and company panels open windows of their own with no parent (a drawer, a dialog), so deleting the
+    # workbench does not take them: anything top-level that appeared during the test goes too.
+    if before is not None:
+        for w in QApplication.topLevelWidgets():
+            if id(w) not in before and w.parentWidget() is None and all(w is not t for t in tops):
+                tops.append(w)
+    for top in tops:
+        if shiboken6.isValid(top):
+            top.hide()
+            shiboken6.delete(top)
+    workbenches.clear()
+
+
 class _Workbench(unittest.TestCase):
     """A workbench that only ever touches temp folders — sheets, sessions,
     saved searches, saved contacts and CSV imports — plus a finished run to
@@ -733,9 +766,24 @@ class _Workbench(unittest.TestCase):
             return True
         WB.LeadsWorkbench._confirm_search = confirm
 
+        # Every workbench a test builds is deleted when the test ends (see tearDown). Recorded here, not asked of
+        # each test: ~140 tests build one.
+        self._built = []
+        self._init = WB.LeadsWorkbench.__dict__["__init__"]
+        built, init = self._built, self._init
+
+        def record(wb, *args, **kwargs):
+            init(wb, *args, **kwargs)
+            built.append(wb)
+        WB.LeadsWorkbench.__init__ = record
+        # Registered first, so it runs LAST: a test's own cleanups (closing a dialog it opened) run before it and
+        # still find their widgets alive.
+        self.addCleanup(_delete_built, self._built, {id(w) for w in QApplication.topLevelWidgets()})
+
     def tearDown(self):
         for name, value in self._saved_attrs.items():
             setattr(self._WB.LeadsWorkbench, name, value)
+        self._WB.LeadsWorkbench.__init__ = self._init
 
     def _run(self):
         """A finished sheet run: two qualified leads, one draft already sent."""
@@ -833,7 +881,7 @@ class WorkbenchAndPanel(_Workbench):
     def test_workbench_builds_with_the_cockpit(self):
         wb = self._WB.LeadsWorkbench({})
         self.assertIsNotNone(wb._cockpit)
-        self.assertEqual(len(wb._cockpit._tabs), 10)
+        self.assertEqual(len(wb._cockpit._tabs), len(CK._TABS))
         self.assertEqual(wb._cockpit._tabs[0].text(), "People")
 
     def test_status_line_hides_until_it_has_text(self):
@@ -1190,7 +1238,7 @@ class LeadFiltersInTheWorkbench(_Workbench):
                       "include_earlier": True, "offer": "Line retrofits"})
         wb = self._WB.LeadsWorkbench({})
         wb._cockpit.refresh_searches()
-        wb._cockpit._select(4)
+        wb._cockpit._select(CK._TABS.index("Saved searches"))
         card = wb._cockpit._saved._grid.itemAt(0).widget()
         card._use.click()
         self.assertEqual(wb._filters.spec(), spec)
@@ -1391,13 +1439,65 @@ class ApolloIsTheOtherDatabase(_Workbench):
         wb._src_exa.click()
         self.assertIsNotNone(self._prepared(wb))
 
+    def test_a_monid_key_is_enough_to_search_apollo(self):
+        # 24-Nov-2026: Apollo's people search is free through the owner's Monid wallet, so a Monid key
+        # stands in for an Apollo key (and Exa is the backup if Apollo comes back empty).
+        wb = self._WB.LeadsWorkbench({"monid_api_key": "mk"})
+        wb._src_apollo.click()
+        self.assertEqual(wb._source, "apollo")
+        self.assertIsNotNone(self._prepared(wb))
+        self.assertEqual(wb._jobs, 1)
+
+    def test_with_only_a_monid_key_apollo_is_priced_in_rupees_not_in_apollo_credits(self):
+        # 24-Nov-2026: found by rendering the screen. With a Monid key and no Apollo account a reveal is about
+        # Rs 2.5 from the owner's wallet; "a credit" is the wording for an Apollo key of their own.
+        from unittest import mock
+        with mock.patch.dict(os.environ, {"MONID_API_KEY": ""}):
+            wb = self._WB.LeadsWorkbench({"monid_api_key": "mk"})
+            wb._set_source("apollo")
+            wb._filters.set_spec(self._WB.SearchSpec.from_dict({"job_titles": {"include": ["Head of Automation"]}}))
+            wb._refresh_prepare()
+            self.assertIn("from your Monid wallet", wb._find_meta.text())
+            self.assertIn("₹2.5", wb._find_meta.text())
+            self.assertNotIn("credit", wb._find_meta.text())
+            said = []
+            with mock.patch.object(self._WB.QMessageBox, "question",
+                                   lambda *a, **k: (said.append(a[2]), self._WB.QMessageBox.StandardButton.No)[1]):
+                self._saved_attrs["_confirm_search"](wb, wb._filters.spec(), [], "")
+            self.assertIn("Monid wallet", said[0])
+            self.assertIn("up to ₹%g" % (wb._target.value() * 2.5), said[0])
+            self.assertNotIn("Apollo credit", said[0])
+
+    def test_with_an_apollo_key_of_their_own_it_is_still_priced_in_apollo_credits(self):
+        wb = self._WB.LeadsWorkbench({"apollo_api_key": "ap-k", "monid_api_key": "mk"})
+        wb._set_source("apollo")
+        wb._filters.set_spec(self._WB.SearchSpec.from_dict({"job_titles": {"include": ["Head of Automation"]}}))
+        wb._refresh_prepare()
+        self.assertEqual(wb._find_meta.text(), "Searches Apollo — about a credit per person revealed")
+
+    def test_with_only_a_monid_key_the_keys_box_stays_folded(self):
+        wb = self._WB.LeadsWorkbench({"monid_api_key": "mk"})
+        self.assertTrue(wb._keys_box.isHidden())
+
+    def test_with_neither_key_prepare_names_both_apollo_ways_in(self):
+        from unittest import mock
+        with mock.patch.dict(os.environ, {"MONID_API_KEY": ""}):
+            wb = self._WB.LeadsWorkbench({"exa_api_key": "exa-k"})
+            wb._src_apollo.click()
+            self.assertIsNone(self._prepared(wb))
+        self.assertIn("Apollo API key or a Monid key", wb._status.text())
+
     def test_the_run_setting_says_what_the_source_charges(self):
         wb = self._WB.LeadsWorkbench({})
         self.assertEqual(wb._target_row.name.text(), "Source up to")
         wb._src_apollo.click()
         self.assertEqual(wb._source, "apollo")
         self.assertEqual(wb._target_row.name.text(), "Reveal up to")
-        self.assertIn("one Apollo credit", wb._target.toolTip())
+        # 24-Nov-2026: the tip no longer names "one Apollo credit": on the credit pool a reveal is charged
+        # in Prism's own credits, and with the owner's Monid key it is a few cents. It says what is free
+        # and what is not, in words that are true on every route.
+        self.assertIn("Searching Apollo is free", wb._target.toolTip())
+        self.assertIn("revealing a person's name and e-mail costs a little each", wb._target.toolTip())
         wb._src_exa.click()
         self.assertEqual(wb._target_row.name.text(), "Source up to")
 
@@ -4132,7 +4232,7 @@ _COCKPIT_KEYS = _TOOLBAR_KEYS + ("table", "select_all", "col_lead", "col_focus",
 _BULK_KEYS = ("bulk_bar", "bulk_save", "bulk_remove", "bulk_verify", "bulk_emails",
               "bulk_phones", "bulk_list", "bulk_export", "bulk_stage", "bulk_qualify",
               "bulk_sequence")
-_TAB_KEYS = ("tab_people", "tab_companies", "tab_sessions", "tab_lists", "tab_saved",
+_TAB_KEYS = ("tab_people", "tab_companies", "tab_buyers", "tab_sessions", "tab_lists", "tab_saved",
              "tab_sequences", "tab_analytics", "tab_deals", "tab_due", "tab_stats")
 # The workbench's own: Find new people. (Search settings' rows are one
 # toolbar step — they sit in a modal dialog the walk must not open.)
@@ -4452,7 +4552,7 @@ class PointAtMeWorkbench(_Workbench):
                     fp.spec().to_dict(), sorted(ck._checked))
 
         ck.set_filters_shown(False)
-        ws._select(2)
+        ws._select(CK._TABS.index("Sessions"))
         before = state()
         walk = T.Tour(T.Guide(wb), wb)
         walk.start()

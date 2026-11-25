@@ -746,7 +746,7 @@ class SourceWorker(_Worker):
 
     def run(self):
         try:
-            from prospector import engine, reach, signals, verify
+            from prospector import engine, gateway, reach, signals, verify
             from prospector.filters import SearchSpec, company_chunks
             spec = SearchSpec.from_dict(self.spec) if isinstance(self.spec, dict) else None
             # The roles triage and qualification read: the job titles, or the
@@ -760,15 +760,36 @@ class SourceWorker(_Worker):
             parts = (company_chunks(spec, self.companies)
                      if spec is not None and self.companies else [spec])
             leads, asked = [], 0
+            transport, lost = None, None
             if apollo_run:
                 # Lazy, like every engine import here: the Exa path must not
                 # pay for a module it never calls.
-                from prospector import apollo
+                from prospector import apollo, monid_run
                 key = apollo.api_key(self.cfg)
-                if not key:
-                    self.failed.emit("Searching Apollo needs an Apollo API key — "
-                                     "add it under Keys & claims and try again.")
-                    return
+                if not key and gateway.pooled():
+                    # The credit pool: the licence server asks Apollo through Prism's own Monid
+                    # account. A server that has not got it (or has no Monid key) is not asked at all.
+                    if gateway.ready("apollo"):
+                        transport = apollo.pool_transport()
+                elif not key and monid_run.available(self.cfg):
+                    # No Apollo key but a Monid one: the owner's wallet asks Apollo instead — the
+                    # same free search, a reveal about $0.026.
+                    transport = apollo.monid_transport(monid_run.api_key(self.cfg))
+                if not key and transport is None:
+                    if gateway.pooled() and exa_key:
+                        self.progress.emit("Apollo isn't switched on for your account yet — "
+                                           "searching with Exa instead…")
+                        apollo_run, self.source = False, "exa"
+                    elif gateway.pooled():
+                        self.failed.emit("Searching Apollo isn't switched on for your account yet — "
+                                         "contact Alphakore.")
+                        return
+                    else:
+                        self.failed.emit("Searching Apollo needs an Apollo API key or a Monid key — "
+                                         "add one under Keys & claims (or set MONID_API_KEY) and "
+                                         "try again.")
+                        return
+            if apollo_run:
                 self.progress.emit("Searching Apollo for people who match your filters…"
                                    if skip is None else
                                    "Searching Apollo — skipping anyone already pulled…")
@@ -787,16 +808,46 @@ class SourceWorker(_Worker):
                         leads += apollo.search_people(
                             part if part is not None else (self.spec or {}), key,
                             target=room, skip=skip, stats=got,
-                            on_progress=self._apollo_progress)
+                            on_progress=self._apollo_progress, transport=transport)
                     except apollo.ApolloError as exc:
-                        why = _plan_refusal(exc, apollo)
-                        if not why:
-                            raise
-                        self.blocked.emit(why)
-                        return
+                        if transport is None and monid_run.available(self.cfg) and (
+                                str(exc) == apollo.BAD_KEY or _plan_refusal(exc, apollo)):
+                            # The owner's own Apollo key is refused (wrong, or a free plan) but a Monid
+                            # wallet is attached: ask Apollo through it instead, once, and say so.
+                            self.progress.emit("Your Apollo key was refused — asking Apollo through "
+                                               "your Monid wallet instead…")
+                            transport, key = apollo.monid_transport(monid_run.api_key(self.cfg)), ""
+                            got = {}
+                            try:
+                                leads += apollo.search_people(
+                                    part if part is not None else (self.spec or {}), key,
+                                    target=room, skip=skip, stats=got,
+                                    on_progress=self._apollo_progress, transport=transport)
+                            except apollo.ApolloError as again:
+                                lost = again
+                                break
+                        elif transport is not None:
+                            lost = exc          # Monid's own words; Exa is tried below
+                            break
+                        else:
+                            why = _plan_refusal(exc, apollo)
+                            if not why:
+                                raise
+                            self.blocked.emit(why)
+                            return
                     _add_stats(stats, got)
                     asked = self._asked(part, asked)
-            else:
+                if transport is not None and not leads:
+                    if not exa_key:
+                        if lost is not None:
+                            raise lost          # nothing to fall back on: say why
+                    else:
+                        self.progress.emit(
+                            "Apollo came back empty — searching with Exa instead…"
+                            if lost is None else
+                            "Apollo could not be searched — searching with Exa instead…")
+                        apollo_run, asked, self.source = False, 0, "exa"
+            if not apollo_run:
                 # `as people_search`: self.source is the name of the database,
                 # the module is the Exa people search itself.
                 from prospector import source as people_search
@@ -906,5 +957,71 @@ class SourceWorker(_Worker):
                 on_progress=lambda i, n, l: self.progress.emit(
                     f"Writing {i} of {n}: {l.display()}"))
             self.done.emit(res, drafts)
+        except Exception as e:                          # noqa: BLE001
+            self.failed.emit(str(e))
+
+
+class BuyerOfferWorker(_Worker):
+    """Read what the owner sells and name the kinds of buyer — "Find my buyers",
+    step one. One model call, off the UI thread. `done` carries a buyers.Reading:
+    the one-line summary, the buyer types, the kinds of competitor and the sources that fit."""
+    done = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, offer, cfg: dict):
+        super().__init__()
+        self.offer, self.cfg = offer, _run_cfg(cfg)
+
+    def run(self):
+        try:
+            from prospector import buyers
+            ask = buyers.make_ask(self.cfg)
+            if ask is None:
+                raise buyers.BuyersError(
+                    "Reading what you sell needs the AI model. Add your Groq key under "
+                    "Search settings, or ask Alphakore to switch on credits.")
+            self.done.emit(buyers.read(self.offer, ask))
+        except Exception as e:                          # noqa: BLE001
+            self.failed.emit(str(e))
+
+
+class BuyerHuntWorker(_Worker):
+    """Run the searches for the chosen buyer types and sources, score what comes
+    back and hand over the cards — "Find my buyers", the hunt. A search that fails
+    is counted and said, never read as "no buyers"; the credits the run spent (on
+    the pool) ride in `stats["credits"]`. `done` carries a buyers.HuntResult."""
+    progress = Signal(int, int, str)        # search n of total, and what it is looking for
+    waiting = Signal(str)                   # the model is rate-limited: what Prism is waiting for
+    done = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, offer, summary: str, types: list, channels, cfg: dict, preview: bool = False, memory=None):
+        super().__init__()
+        self.offer, self.summary, self.types = offer, summary, list(types or [])
+        self.channels, self.cfg, self.preview = tuple(channels or ()), _run_cfg(cfg), bool(preview)
+        self.memory = list(memory or [])                 # what the owner already judged (buyers_learn)
+
+    def run(self):
+        try:
+            from prospector import buyers, gateway
+            from prospector import buyers_list
+            search = buyers.make_search(self.cfg)
+            if search is None:
+                raise buyers.BuyersError(
+                    "Finding buyers needs an Exa key. Add it under Search settings, or ask "
+                    "Alphakore to switch on credits.")
+            gateway.reset()
+            res = buyers.hunt(
+                self.offer, self.summary, self.types, self.channels, search,
+                buyers.make_ask(self.cfg, cancelled=self.isInterruptionRequested,
+                                on_wait=lambda secs, why: self.waiting.emit(f"{why} ({int(secs)}s)…")),
+                preview=self.preview,
+                on_progress=lambda i, n, q: self.progress.emit(i, n, q.channel),
+                cancelled=self.isInterruptionRequested, monid=buyers.monid_ready(self.cfg),
+                lister=buyers_list.make_lister(self.cfg), memory=self.memory)
+            res.stats["credits"] = gateway.used()
+            if gateway.exhausted():
+                res.notes.append(gateway.exhausted())
+            self.done.emit(res)
         except Exception as e:                          # noqa: BLE001
             self.failed.emit(str(e))

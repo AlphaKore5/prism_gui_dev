@@ -248,7 +248,7 @@ class TheStalledDealsOnDueToday(unittest.TestCase):
             DL.add(folder, "Old deal", value=5)
         w.set_due_contacts([])
         self.assertEqual(w.due.count(), 1)
-        self.assertEqual(w._tabs[8].text(), "Due today  1")
+        self.assertEqual(w._tabs[9].text(), "Due today  1")
         w.due.list.rows()[0].buttons[0].click()
         self.assertIs(w._stack.currentWidget(), w.deals)
 
@@ -257,11 +257,11 @@ class TheWorkspace(unittest.TestCase):
     def setUp(self):
         self.w = CK.LeadsWorkspace(leads_folder=tempfile.mkdtemp())
 
-    def test_deals_and_due_today_follow_the_original_seven_tabs(self):
+    def test_deals_and_due_today_follow_the_original_eight_tabs(self):
         # Stats was appended after them, so they are no longer the last two; their places did not move.
-        self.assertEqual([b.text().split("  ")[0] for b in self.w._tabs][7:9], ["Deals", "Due today"])
-        self.assertIs(self.w._stack.widget(7), self.w.deals)
-        self.assertIs(self.w._stack.widget(8), self.w.due)
+        self.assertEqual([b.text().split("  ")[0] for b in self.w._tabs][8:10], ["Deals", "Due today"])
+        self.assertIs(self.w._stack.widget(CK._TABS.index("Deals")), self.w.deals)
+        self.assertIs(self.w._stack.widget(CK._TABS.index("Due today")), self.w.due)
 
     def test_the_due_tab_says_how_many_wait(self):
         from addons.leads import contacts as CT
@@ -269,9 +269,9 @@ class TheWorkspace(unittest.TestCase):
         c = CT.Contact(lead=Lead(name="Ramesh", company="Patel"), saved_at="2026-10-01T10:00:00+05:30")
         c.tasks = [{"id": "t", "at": "2026-10-01", "text": "Call", "due": "2000-01-01", "done": False}]
         self.w.set_due_contacts([c])
-        self.assertEqual(self.w._tabs[8].text(), "Due today  1")
+        self.assertEqual(self.w._tabs[9].text(), "Due today  1")
         self.w.set_due_contacts([])
-        self.assertEqual(self.w._tabs[8].text(), "Due today")
+        self.assertEqual(self.w._tabs[9].text(), "Due today")
 
     def test_due_rows_reach_the_workspace_signals(self):
         from addons.leads import contacts as CT
