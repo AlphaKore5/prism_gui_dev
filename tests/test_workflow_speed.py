@@ -445,7 +445,8 @@ class TestsRunEverywhereAndBuildsOnlyWhenNeeded(unittest.TestCase):
         self.assertEqual(ci_changes.PATTERNS, (
             "packaging/**", "flavour.py", "requirements*", "constraints/**",
             ".github/workflows/**", "main.py", "addons/flavours/**", "prism_terminal"))
-        build = ["packaging/prism.spec", "packaging/requirements-build.txt", "flavour.py",
+        build = ["packaging/prism.spec", "packaging/requirements-build.txt",
+                 "packaging/windows/prism.iss", "packaging/windows/installer_check.py", "flavour.py",
                  "requirements.txt", "constraints/windows-x64.txt", ".github/workflows/build.yml",
                  "main.py", "addons/flavours/sales.py", "prism_terminal"]
         quiet = ["main_window.py", "tests/test_x.py", "addons/boq/panel.py", "docs/main.py",

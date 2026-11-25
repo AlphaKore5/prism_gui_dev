@@ -50,8 +50,10 @@ def executable() -> str:
     return os.path.join(DIST, app_meta.NAME, name)
 
 
-def main():
-    exe = executable()
+def main(exe: str | None = None):
+    """`exe` defaults to the build in dist/; packaging/windows/installer_check.py
+    passes the INSTALLED Prism.exe instead."""
+    exe = exe or executable()
     if not os.path.exists(exe):
         sys.exit(f"nothing built at {exe}")
 
