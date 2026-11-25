@@ -110,6 +110,21 @@ class UsageWorker(_Worker):
             self.failed.emit(e)
 
 
+class SendTestErrorWorker(_Worker):
+    """Settings > Help & contact, dev builds only: pulse.send_test_error() on a
+    thread, because its flush waits up to 75 s for a sleeping server."""
+
+    done = Signal(str, int)    # state ("sent", "saved", "off_...", "failed"), delivered
+
+    def run(self):
+        import pulse
+        try:
+            state, delivered = pulse.send_test_error()
+        except Exception:                           # noqa: BLE001
+            state, delivered = "failed", 0          # never leave the label on "sending"
+        self.done.emit(state, delivered)
+
+
 class AuthorizeWorker(_Worker):
     """Ask the licence server whether this run may go ahead.
 

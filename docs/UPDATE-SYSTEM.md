@@ -47,6 +47,11 @@ for as long as they have not updated. So:
   It deliberately does **not** change `HOME` or `USERPROFILE` (it used to, and
   Windows' Downloads, Documents and Desktop are defined through `%USERPROFILE%`,
   so dev builds lost them: RELEASE_ISSUES.md ISS-009).
+- **Dev builds only: Settings > Help & contact > "Send a test error"** sends one marked
+  `PulseTestError` through Pulse (to #prism_errors, by way of the licence server) so the path can be
+  checked from an installed build; the label says sent, saved for later, or why Pulse is off. The card is
+  built only when `channel.is_dev()`, and `pulse.send_test_error()` returns at once otherwise; the code is
+  in prod builds but unreachable. `tests/test_pulse_test_error.py` guards it.
 - **Two kinds of folder, two rules.** Prism's private state (`~/.prism`) goes
   through `"~"` and so lands in the dev folder. Anything a person is meant to open
   (Desktop/Prism Artifacts, Prism Email, Documents/Prism Leads, Drive/OneDrive

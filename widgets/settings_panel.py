@@ -55,6 +55,7 @@ from PySide6.QtWidgets import (
 )
 
 import app_meta
+import channel
 import core_bridge as CB
 import i18n
 import identity
@@ -2439,6 +2440,8 @@ class SettingsPanel(QDialog):
         update_card = self._update_card()
         if update_card is not None:
             col.addWidget(update_card)
+        if channel.is_dev():                 # absent, not hidden, in a prod build
+            col.addWidget(self._test_error_card())
         
         # Legal links
         col.addWidget(self._buttons([
@@ -2449,6 +2452,56 @@ class SettingsPanel(QDialog):
                      on_click=lambda: self._open_legal(
                          i18n.t("Privacy Policy"), "PRIVACY_POLICY.md")),
         ]))
+
+    def _test_error_card(self) -> Card:
+        """DEV BUILDS ONLY, built only when channel.is_dev() (see _more). Sends
+        one marked test error through Pulse so the path to Discord can be
+        checked from an installed build. Off, with the reason shown, when Pulse
+        is not sending."""
+        import pulse
+        card = Card()
+        body = card.body((theme.CARD_PAD, theme.CARD_PAD, theme.CARD_PAD, theme.CARD_PAD),
+                         theme.SPACE_2)
+        self.test_error_btn = C.button(i18n.t("Send a test error"), small=True,
+                                       on_click=self._send_test_error)
+        body.addWidget(self._buttons([self.test_error_btn]))
+        body.addWidget(C.label(
+            i18n.t("Sends one clearly marked test error to Prism's Pulse. Dev builds only."),
+            level="META", wrap=True))
+        why = pulse.inactive_reason()
+        self.test_error_btn.setEnabled(not why)
+        self.test_error_label = C.label(self._test_error_text("off_" + why) if why else "",
+                                        level="SUPPORT", wrap=True)
+        body.addWidget(self.test_error_label)
+        return card
+
+    @staticmethod
+    def _test_error_text(state: str, delivered: int = 0) -> str:
+        return {
+            "sending": i18n.t("Sending…"),
+            "sent": i18n.t("Sent. {n} delivered to Pulse.").format(n=delivered),
+            "saved": i18n.t("Saved on this computer. Prism will send it when the server answers."),
+            "off_setting": i18n.t("Pulse is off. Turn on \u201cSend Prism's error reports\u201d "
+                                  "in Privacy & data."),
+            "off_source": i18n.t("Pulse is not active when Prism runs from source. "
+                                 "Start it with PRISM_PULSE=1."),
+        }.get(state, i18n.t("The test could not be sent."))
+
+    def _send_test_error(self):
+        from workers import SendTestErrorWorker
+        self.test_error_btn.setEnabled(False)
+        self.test_error_label.setText(self._test_error_text("sending"))
+        worker = SendTestErrorWorker()
+        worker.done.connect(self._test_error_done)     # a slot of this dialog: runs on the UI thread
+        self._test_error_worker = worker
+        worker.start()
+
+    def _test_error_done(self, state: str, delivered: int):
+        try:
+            self.test_error_label.setText(self._test_error_text(state, delivered))
+            self.test_error_btn.setEnabled(state in ("sent", "saved", "failed"))
+        except RuntimeError:                           # the page was rebuilt meanwhile
+            pass
 
     def _book_meeting(self):
         """Open the AlphaKore meeting booking link in the browser."""
