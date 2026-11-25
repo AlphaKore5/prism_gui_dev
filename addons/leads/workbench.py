@@ -845,7 +845,7 @@ class LeadsWorkbench(QWidget):
     # nothing is charged per person, Apollo charges about a credit for each one
     # it reveals — so the same spin box is a budget under one and a ceiling
     # under the other, and has to say which.
-    _TARGET_LABEL = {"apollo": "Reveal up to", "exa": "Source up to"}
+    _TARGET_LABEL = {"apollo": "Full names up to", "exa": "Source up to"}
     _TARGET_TIP = {
         "apollo": "Searching Apollo is free; revealing a person's name and "
                   "e-mail costs a little each — and a run stops at this many, "
@@ -892,7 +892,7 @@ class LeadsWorkbench(QWidget):
             reveal = gateway.rate("apollo_reveal", 2)
             if apollo:
                 out["source"] = " ".join((
-                    i18n.t("Searching Apollo is free. Each person revealed costs {p}.").format(p=self._cr(reveal)),
+                    i18n.t("Searching Apollo is free. Each full name revealed costs {p}.").format(p=self._cr(reveal)),
                     i18n.t("If Apollo finds nobody, Exa takes over.")))
                 out["target"] = i18n.t("Up to {c}.").format(c=self._cr(reveal * n))
             else:
@@ -910,7 +910,7 @@ class LeadsWorkbench(QWidget):
         monid = _monid_ready(self.cfg)
         backup = bool(self._key("exa_api_key"))
         if apollo and self._apollo_via_monid():
-            parts = [i18n.t("Searching Apollo is free. Each person revealed is about ₹{p} from your Monid wallet.").format(
+            parts = [i18n.t("Searching Apollo is free. Each full name revealed is about ₹{p} from your Monid wallet.").format(
                 p=f"{_REVEAL_RS:g}")]
             if backup:
                 parts.append(i18n.t("If Apollo finds nobody, Exa takes over."))
@@ -1133,7 +1133,7 @@ class LeadsWorkbench(QWidget):
             text = i18n.t("Searches Apollo, free — about ₹{p} from your Monid wallet for each person "
                           "revealed").format(p=f"{_REVEAL_RS:g}")
         elif self._source == "apollo":
-            text = i18n.t("Searches Apollo — about a credit per person revealed")
+            text = i18n.t("Searches Apollo — about a credit per full name revealed")
         else:
             n, more = self._searches(spec, _companies)
             if not n:
@@ -1157,7 +1157,7 @@ class LeadsWorkbench(QWidget):
         this is a ceiling, and the words say "up to"."""
         if self._source == "apollo":
             price = gateway.rate("apollo_reveal", 2)
-            return i18n.t("Searches Apollo, free — {p} for each person revealed, up to {c}").format(
+            return i18n.t("Searches Apollo, free — {p} for each full name revealed, up to {c}").format(
                 p=self._cr(price), c=self._cr(price * self._target.value()))
         n, more = self._searches(spec, companies)
         if not n:
@@ -2470,9 +2470,9 @@ class LeadsWorkbench(QWidget):
             return self._confirm_pool_search(spec, companies, note)
         if self._source == "apollo" and self._apollo_via_monid():
             n = self._target.value()
-            cost = i18n.t("It searches Apollo, which is free, and reveals each person's name and e-mail "
-                          "from your Monid wallet — about ₹{p} each, for up to {n} people — up to "
-                          "₹{c}.").format(p=f"{_REVEAL_RS:g}", n=n, c=f"{n * _REVEAL_RS:g}")
+            cost = i18n.t("It searches Apollo, which is free, and reveals each person's full name (and "
+                          "e-mail, when Apollo has it) from your Monid wallet — about ₹{p} for each full "
+                          "name, for up to {n} people — up to ₹{c}.").format(p=f"{_REVEAL_RS:g}", n=n, c=f"{n * _REVEAL_RS:g}")
         elif self._source == "apollo":
             cost = i18n.t("It searches Apollo — about one Apollo credit for each "
                           "person revealed, up to {n}.").format(n=self._target.value())
@@ -2558,8 +2558,9 @@ class LeadsWorkbench(QWidget):
         figure is the most it can be."""
         price = gateway.rate("apollo_reveal", 2)
         n = self._target.value()
-        lines = [i18n.t("It searches Apollo, which is free, and reveals each person's name and e-mail "
-                        "— {p} each, for up to {n} people — up to {c}.").format(
+        lines = [i18n.t("It searches Apollo, which is free, and reveals each person's full name (and "
+                        "e-mail, when Apollo has it) — {p} for each full name, for up to {n} people — "
+                        "up to {c}.").format(
                             p=self._cr(price), n=n, c=self._cr(price * n)),
                  i18n.t("A person Apollo does not find is not charged.")]
         if companies:
@@ -3367,7 +3368,7 @@ class LeadsWorkbench(QWidget):
         revealed = int(stats.get("revealed") or 0)
         if not (found or revealed):
             return ""
-        return i18n.t("Apollo: {n} found · {m} revealed (about {m} credits)").format(
+        return i18n.t("Apollo: {n} found · {m} full names revealed (about {m} credits)").format(
             n=found, m=revealed)
 
     @staticmethod

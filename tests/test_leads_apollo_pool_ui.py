@@ -154,7 +154,7 @@ class TheScreenOnThePool(_Workbench):
     def test_the_target_says_reveal_for_apollo_and_names_no_provider_credit(self):
         wb = self.bench()
         wb._set_source("apollo")
-        self.assertEqual(wb._target_row.name.text(), "Reveal up to")
+        self.assertEqual(wb._target_row.name.text(), "Full names up to")
         self.assertNotIn("Apollo credit", wb._target.toolTip())
 
     def test_the_line_under_find_says_search_is_free_and_prices_a_reveal(self):

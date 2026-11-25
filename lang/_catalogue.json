@@ -1835,7 +1835,7 @@
   "Apollo, then Exa": [
    "addons/leads/workbench.py"
   ],
-  "Apollo: {n} found · {m} revealed (about {m} credits)": [
+  "Apollo: {n} found · {m} full names revealed (about {m} credits)": [
    "addons/leads/workbench.py"
   ],
   "App signature hash": [
@@ -7810,10 +7810,10 @@
   "It searches Apollo — about one Apollo credit for each person revealed, up to {n}.": [
    "addons/leads/workbench.py"
   ],
-  "It searches Apollo, which is free, and reveals each person's name and e-mail from your Monid wallet — about ₹{p} each, for up to {n} people — up to ₹{c}.": [
+  "It searches Apollo, which is free, and reveals each person's full name (and e-mail, when Apollo has it) from your Monid wallet — about ₹{p} for each full name, for up to {n} people — up to ₹{c}.": [
    "addons/leads/workbench.py"
   ],
-  "It searches Apollo, which is free, and reveals each person's name and e-mail — {p} each, for up to {n} people — up to {c}.": [
+  "It searches Apollo, which is free, and reveals each person's full name (and e-mail, when Apollo has it) — {p} for each full name, for up to {n} people — up to {c}.": [
    "addons/leads/workbench.py"
   ],
   "It sends a file. Choose one from your Media Library after you pick it — it cannot be published until you do.": [
@@ -14682,13 +14682,13 @@
   "Search your Drive, or browse below…": [
    "dialogs/drive_dialog.py"
   ],
-  "Searches Apollo — about a credit per person revealed": [
+  "Searches Apollo — about a credit per full name revealed": [
    "addons/leads/workbench.py"
   ],
   "Searches Apollo, free — about ₹{p} from your Monid wallet for each person revealed": [
    "addons/leads/workbench.py"
   ],
-  "Searches Apollo, free — {p} for each person revealed, up to {c}": [
+  "Searches Apollo, free — {p} for each full name revealed, up to {c}": [
    "addons/leads/workbench.py"
   ],
   "Searches Exa": [
@@ -14697,10 +14697,10 @@
   "Searches for new people": [
    "addons/leads/workbench.py"
   ],
-  "Searching Apollo is free. Each person revealed costs {p}.": [
+  "Searching Apollo is free. Each full name revealed costs {p}.": [
    "addons/leads/workbench.py"
   ],
-  "Searching Apollo is free. Each person revealed is about ₹{p} from your Monid wallet.": [
+  "Searching Apollo is free. Each full name revealed is about ₹{p} from your Monid wallet.": [
    "addons/leads/workbench.py"
   ],
   "Searching Apollo is free. Revealing a person uses about one Apollo credit.": [
