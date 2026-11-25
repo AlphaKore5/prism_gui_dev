@@ -1,0 +1,24 @@
+# Changes to these paths need the owner's review before they merge into main
+# (the main ruleset requires code-owner review). Everything else only needs CI.
+# Org owners can still merge their own PRs by bypassing, on purpose.
+
+# Licensing, updates and where the app keeps data
+/licensing/               @Beastburner
+/updater.py               @Beastburner
+/apply_update.py          @Beastburner
+/update_manifest.py       @Beastburner
+/paths.py                 @Beastburner
+/core_bridge.py           @Beastburner
+
+# Build, dependencies and CI
+/packaging/               @Beastburner
+/constraints/             @Beastburner
+/requirements.txt         @Beastburner
+/.github/                 @Beastburner
+
+# Credits and calls to Prism's server
+/ai_server.py                      @Beastburner
+/prospector/gateway.py             @Beastburner
+/addons/leads/credits_page.py      @Beastburner
+/addons/boq/credits.py             @Beastburner
+/addons/whatsapp/license_client.py @Beastburner

@@ -152,6 +152,33 @@ something you did not run.
 
 ## Issue log (newest first)
 
+### ISS-028 — `test_gates.py` hung 480 s on the Windows runner after passing every test (2026-11-23) — FIXED in code, Windows CI rerun pending; cause LIKELY, not proven
+- **Seen:** run 45266305406, shard 3/4, windows-latest: `RETRY test_gates.py first attempt: timed out after 480s`; the captured
+  output showed `[100%]` and the summary, so all tests had finished and the process then did not exit. The retry took 45 s.
+  About 1 run in 3. No stack reached the log.
+- **Why no stack — PROVEN (code, and a probe on Linux/Python 3.11):** `run_file` returned on `TimeoutExpired` without reading the
+  watchdog's file, and kept output in a pipe. And the watchdog (`faulthandler.dump_traceback_later`) is cancelled when the
+  interpreter finalises: a probe that hangs in native exit (`on_exit(pause)`) was NOT ended at 3 s (killed at 20 s, empty dump),
+  while a hang in a Python `atexit` or `__del__` was. `conftest` also ends the process with `os._exit` (ISS-026), so a hang there
+  is past the watchdog's reach by design.
+- **What outlives the tests — PROVEN (Linux, 9 runs):** every `MainWindow` arms `QTimer.singleShot(4000, _warm_heavy_imports)`,
+  which imports cadquery (OpenCascade) on a `WarmImportsWorker` QThread. Tests that spin the event loop let it fire: 31 such
+  threads per run, 15 OpenCascade pool threads left alive at the end. On Linux every import finished before the end (also under
+  CPU starvation, 3x slower), so nothing was in flight at exit and no hang reproduced.
+- **Mechanism — LIKELY, NOT PROVEN (cannot run Windows here):** `MainWindow.closeEvent` -> `_retire_workers` waits 10 s on every
+  worker in `workers._running`, then `terminate()`s it. A slow Windows import of cadquery still running then is killed inside
+  `LoadLibrary` / the import lock; a thread killed while holding the loader lock would make `ExitProcess` (`os._exit`) wait
+  forever, with no watchdog left. Confirmed on Linux only that `terminate()` ends a running worker mid-sleep.
+- **Fix:** (1) the suite sets `PRISM_NO_WARM_IMPORTS` (conftest autouse) and `_warm_heavy_imports` honours it, so no test
+  imports cadquery on a thread; (2) `tests/leakcheck.py` + last test of `test_gates.py` fail if a worker QThread, licensing
+  thread, non-daemon thread or (Linux) child process is still running at the end; (3) the runner now writes output to a file,
+  kills the process tree on a timeout (`taskkill /T /F` / process group), prints the watchdog stack if any, and otherwise says
+  whether the tests had finished (conftest writes two stage markers).
+- **Check:** `tests/test_leakcheck.py` (detector, and that the warm-up is off in the suite), `ZNothingOutlivesTheFile` in
+  `tests/test_gates.py`, `ATimedOutFileSaysWhereItWasStuck` in `tests/test_workflow_speed.py`; each mutation-checked.
+- **Still open:** the same `terminate()` runs when a customer closes Prism within seconds of starting on a slow disk (a warm
+  import in flight); not changed here. Verify with several Windows runs without a RETRY line before calling this fixed.
+
 ### ISS-027 — `run_flavour.sh` and RUN_A_FLAVOUR.md claimed a "minted licence" that never existed (2026-11-23) — FIXED in code
 - **What happened:** the flavour launcher said `PRISM_LICENSE_OFFLINE_DEV=1` gave "minted licence, no licence server". It mints
   nothing: it only changes the answer when the licence server cannot be reached. A fresh sandbox therefore had no licence and

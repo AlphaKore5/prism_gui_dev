@@ -344,6 +344,22 @@ def _leads_run_direct_by_default(request, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_real_library_imports_on_background_threads(monkeypatch):
+    """Every MainWindow arms a 4 s timer that imports cadquery (OpenCascade) on a
+    QThread (main_window._warm_heavy_imports). A test that spins the event loop
+    lets it fire: test_gates.py started 31 of them in one run, each loading a
+    ~100 MB native library and leaving 15 OpenCascade pool threads alive. The
+    windows are never closed, so the timers outlive their tests, and a slow
+    machine can still be mid-import when the process exits. On the Windows CI
+    runner test_gates.py then sat 480 s after its last test (run 45266305406,
+    1 run in about 3; the cause of that hang is LIKELY this, not proven). No test
+    needs the warm-up; the one that checks it is scheduled calls the worker
+    itself (tests/test_home_and_speed.py)."""
+    monkeypatch.setenv("PRISM_NO_WARM_IMPORTS", "1")
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _the_os_keyring_is_never_the_real_one(monkeypatch):
     """No test reads or writes the developer's real Keychain / Credential
     Manager / Secret Service. The licence key lives there, and the start-up
@@ -434,15 +450,31 @@ def _a_platform_call_never_reaches_the_network(monkeypatch):
 _EXIT_STATUS = None
 
 
+def _stage(text: str) -> None:
+    """devtools/suite_runner.py sets PRISM_FILE_DONE_LOG. If the file later
+    times out, the last line says whether the tests had finished and how far
+    shutdown got; the watchdog above is cancelled when the interpreter
+    finalises, so a hang in exit leaves no other trace."""
+    path = os.environ.get("PRISM_FILE_DONE_LOG")
+    if path:
+        try:
+            with open(path, "a", encoding="utf-8") as fh:
+                fh.write(text + "\n")
+        except OSError:
+            pass
+
+
 def pytest_sessionfinish(session, exitstatus):
     global _EXIT_STATUS
     _EXIT_STATUS = int(exitstatus)
+    _stage(f"pytest session finished (exit status {_EXIT_STATUS})")
 
 
 @pytest.hookimpl(trylast=True)
 def pytest_unconfigure(config):
     if _EXIT_STATUS is None or os.environ.get("PRISM_TEST_NORMAL_EXIT"):
         return
+    _stage("pytest unconfigured; calling os._exit")
     import sys as _sys
     for stream in (_sys.stdout, _sys.stderr):
         try:
