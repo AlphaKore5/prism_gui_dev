@@ -153,6 +153,31 @@ membership = `hash(device_id + version) mod 100 < rollout`). Patch and hotfix
 lanes branch from the released tag. A signed `revoked` list stops a bad
 version being offered.
 
+## 8c. Flavours: one update channel each
+
+Complete, Studio, Sales and Engineering are separate apps that share `~/.prism`.
+
+| What | Complete (unchanged) | A flavour, e.g. Studio on Windows |
+|---|---|---|
+| Manifest | `manifest.windows-x64.signed` | `manifest.windows-x64-studio.signed` |
+| Assets release | `v<ver>-assets-windows-x64[-N]` | `v<ver>-assets-windows-x64-studio[-N]` |
+| Asset name | `windows-x64__<path>` | `windows-x64-studio__<path>` |
+| Signed `update_channel` | absent | `windows-x64-studio`, required |
+| State file | `update_state.json` | `update_state-studio.json` |
+| Staged copy | `.prism-update-staging/<ver>` | `.prism-update-staging/<ver>-studio` |
+| Windows swap script | `apply.bat` | `apply-studio.bat` |
+
+- `updater.update_channel()` is the one source of the name; `platform_tag()` stays
+  `<os>-<arch>` (the outcome reports use it, and the server's field holds 24 characters).
+- A flavour refuses a manifest without its own `update_channel`. Complete accepts one
+  without the field (that is every manifest it ever had) and refuses another build's.
+  Clients up to 1.8.9 ignore the field, so **a flavour's manifest must never be uploaded
+  under complete's name**: for them the file name is the only difference.
+- A flavour test build made before this (1.8.9 and older) asks for complete's manifest.
+  It cannot be fixed by an update: uninstall it and install a newer one.
+- CI makes the unsigned manifest and the assets in each flavour's own manual build.
+  Nothing signs or publishes them yet: `release_all.py` knows the complete build only.
+
 ## 9. Checklist for any change to updating
 
 Copy into the PR and tick each line, or write why it does not apply.
@@ -176,7 +201,9 @@ Copy into the PR and tick each line, or write why it does not apply.
 ## 10. Known gaps (check before relying on them)
 
 - The Windows and macOS swap paths have never run on real hardware
-  (`apply_update.py` header).
+  (`apply_update.py` header). The Windows build job updates an installed app per
+  flavour on a GitHub runner (`packaging/windows/update_check.py` says what in that is
+  real and what stands in); a customer's antivirus and OneDrive are not there.
 - Rollback is self-reported; it cannot catch a build the OS refuses to start.
 - macOS in-app updating is held until the Apple Developer ID and a real Mac
   test; manifests are per platform, so Windows/Linux can move first.

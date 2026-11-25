@@ -152,6 +152,19 @@ something you did not run.
 
 ## Issue log (newest first)
 
+### ISS-029 — A Studio, Sales or Engineering app would have updated itself into the complete Prism (2026-11-25) — FIXED in code, not yet in a build anyone installed
+- **What happened:** nothing yet, no flavour was ever released. Found by reading: `updater.py` built every URL from
+  `platform_tag()`, so a flavour asked for `manifest.windows-x64.signed` (complete's) and the quiet `auto_stage` would
+  have staged it. `flavour.update_channel()` existed and nothing called it; the tests pinned only the data.
+- **Cause (PROVEN by test):** gate G2 landed as data with "not wired yet", and nothing failed because of it. Worse: the
+  signed manifest did not say which build it is for, and flavours share `~/.prism/update_state.json` and the staging
+  folder, so Complete could also have applied Studio's waiting update.
+- **Fix:** own channel in every name, a signed `update_channel` the client checks, own state file, staging name and
+  swap script per flavour (docs/UPDATE-SYSTEM.md section 8c). Complete is unchanged.
+- **Check:** `tests/test_update_flavours.py` (every build against every other build's manifest, literal URLs) and, in
+  the Windows build job, `packaging/windows/update_check.py` (a real install updated, same flavour afterwards).
+- **Rule:** a table that "nothing reads yet" needs a test that fails while the thing it describes is live without it.
+
 ### ISS-028 — `test_gates.py` hung 480 s on the Windows runner after passing every test (2026-11-23) — FIXED in code, Windows CI rerun pending; cause LIKELY, not proven
 - **Seen:** run 45266305406, shard 3/4, windows-latest: `RETRY test_gates.py first attempt: timed out after 480s`; the captured
   output showed `[100%]` and the summary, so all tests had finished and the process then did not exit. The retry took 45 s.
