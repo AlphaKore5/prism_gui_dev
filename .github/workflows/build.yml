@@ -437,12 +437,11 @@ jobs:
         run: |
           $want = '6.7.1'
           $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
-          # ISCC.exe's numeric file version reads 0.0.0 on the runner image, so
-          # take the product version string, else the version choco recorded.
+          # ISCC.exe's version resource reads 0.0.0 on the runner image (both
+          # the numeric and the string field), so trust the version Chocolatey
+          # installed, and only when ISCC.exe is really there.
           function Get-Have {
             if (-not (Test-Path $iscc)) { return 'none' }
-            $pv = (Get-Item $iscc).VersionInfo.ProductVersion
-            if ($pv -match '(\d+\.\d+\.\d+)') { return $Matches[1] }
             $c = (choco list innosetup --exact --limit-output) -split '\|'
             if ($c.Count -ge 2) { return $c[1].Trim() }
             return 'unknown'
