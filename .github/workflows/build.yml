@@ -703,6 +703,7 @@ jobs:
         run: playwright install --no-shell chromium
 
       - name: Build
+        id: build
         env:   # what each one is: the same step in `build`. No signing secrets.
           PRISM_SERVER_URL: ${{ vars.PRISM_SERVER_URL }}
           PRISM_CHANNEL: ${{ vars.PRISM_CHANNEL }}
@@ -713,6 +714,7 @@ jobs:
         run: python packaging/smoke_test.py
 
       - name: Check the oldest macOS the bundle runs on
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}   # both answers in one run
         run: python packaging/check_macos_minos.py dist/Prism.app "$MACOSX_DEPLOYMENT_TARGET"
 
       - name: Say what this build is

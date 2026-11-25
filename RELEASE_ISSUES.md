@@ -588,3 +588,6 @@ something you did not run.
 - To fix: rebuild both with `MACOSX_DEPLOYMENT_TARGET=14.0` in the engine, then empty `KNOWN`.
 - Also found: the app declared macOS 11 while PySide6 6.12.0, onnxruntime 1.32.0 and av 19.0.2 need 14. It now declares 14.
 - The hosted `macos-14` image was retired on 2026-11-02, so it is LIKELY why GitHub refused it on 2026-11-17 (ISS-023).
+- First Mac run (45609774726, macos-15): the app was built and started, but OpenCV failed the packaged self-test with "recursion is
+  detected", so RapidOCR never worked in a Mac bundle. Cause reproduced on Linux with the real cv2 loader in a Mac bundle's folder
+  layout; `packaging/rthook_cv2.py` sets the loader's own switch. Not proven on a Mac until a later run passes.

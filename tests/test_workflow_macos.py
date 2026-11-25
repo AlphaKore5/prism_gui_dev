@@ -255,6 +255,54 @@ class ThePortAudioScript(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
 
 
+def _has_cv2():
+    import importlib.util
+    return importlib.util.find_spec("cv2") is not None
+
+
+@unittest.skipIf(sys.platform.startswith("win"), "needs the symbolic links a Mac bundle is made of")
+@unittest.skipUnless(_has_cv2(), "OpenCV is not installed")
+class OpenCvLoadsFromAMacBundlesFolders(unittest.TestCase):
+    """The real cv2 loader, laid out the way PyInstaller lays out a Mac bundle:
+    Python files in Resources, the compiled file in Frameworks, links both ways."""
+
+    def _import(self, hook):
+        import importlib.util
+        cv2 = Path(importlib.util.find_spec("cv2").origin).parent
+        with tempfile.TemporaryDirectory() as d:
+            res, fw = Path(d, "Resources", "cv2"), Path(d, "Frameworks", "cv2")
+            res.mkdir(parents=True)
+            fw.mkdir(parents=True)
+            for f in cv2.glob("*.py"):
+                (res / f.name).write_bytes(f.read_bytes())
+                (fw / f.name).symlink_to(res / f.name)
+            for f in cv2.glob("cv2*.so"):
+                (fw / f.name).symlink_to(f)
+                (res / f.name).symlink_to(fw / f.name)
+            code = f"import sys; sys.path.insert(0, {str(fw.parent)!r})\n"
+            if hook:
+                code += ("sys.platform, real = 'darwin', sys.platform\n"
+                         + (ROOT / "packaging" / "rthook_cv2.py").read_text(encoding="utf-8")
+                         + "\nsys.platform = real\n")
+            code += "import cv2; print(cv2.__file__); cv2.resize"
+            libs = os.pathsep.join(str(p) for p in cv2.parent.glob("opencv*.libs"))   # Linux wheels
+            return subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                                  env=dict(os.environ, LD_LIBRARY_PATH=libs)), str(fw)
+
+    def test_without_the_hook_it_is_the_failure_the_mac_showed(self):
+        r, _ = self._import(hook=False)
+        self.assertIn("recursion is detected", r.stderr)
+
+    def test_with_the_hook_it_loads(self):
+        r, fw = self._import(hook=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn(fw, r.stdout)
+
+    def test_the_spec_runs_the_hook(self):
+        spec = (ROOT / "packaging" / "prism.spec").read_text(encoding="utf-8")
+        self.assertIn('os.path.join(SPEC_DIR, "rthook_cv2.py")', spec)
+
+
 class OurPythonsOpenSslIsLeftAlone(unittest.TestCase):
     """packaging/build.py swaps in Homebrew's OpenSSL for a Homebrew-linked
     Python only. A python.org Python carries its own."""

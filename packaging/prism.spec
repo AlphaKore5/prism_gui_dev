@@ -617,6 +617,7 @@ a = Analysis(
     runtime_hooks=[
         os.path.join(SPEC_DIR, "rthook_distutils.py"),
         os.path.join(SPEC_DIR, "rthook_ssl_certs.py"),
+        os.path.join(SPEC_DIR, "rthook_cv2.py"),
     ],
     excludes=excludes,
     win_no_prefer_redirects=False,
