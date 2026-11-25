@@ -126,7 +126,7 @@ class TheUpdaterFetchesEachFileFromItsOwnRelease(unittest.TestCase):
     def test_later_parts_continue_in_numbered_releases(self):
         self.assertEqual(updater._assets_release_tag("1.6.3", "windows-x64", 2),
                          "v1.6.3-assets-windows-x64-2")
-        with mock.patch.object(updater, "platform_tag", return_value="linux-x64"):
+        with mock.patch.object(updater, "update_channel", return_value="linux-x64"):
             one = updater._file_url("1.6.3", "_internal/a.dat")
             two = updater._file_url("1.6.3", "_internal/a.dat", 2)
         self.assertIn("/v1.6.3-assets-linux-x64/linux-x64__", one)

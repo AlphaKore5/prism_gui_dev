@@ -42,6 +42,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("-o", "--output", required=True, help="Where to write the JSON manifest")
     p.add_argument("--archive", help="Optional distributable archive (tar.gz/zip/dmg) "
                                      "to record a whole-download fallback entry for")
+    p.add_argument("--update-channel", metavar="NAME",
+                   help="Flavour builds only (e.g. windows-x64-studio): the update channel "
+                        "this manifest is for. It is signed with the rest, and a flavour's "
+                        "updater refuses a manifest without its own.")
     args = p.parse_args(argv)
 
     if not os.path.isdir(args.root_dir):
@@ -85,6 +89,9 @@ def main(argv: list[str] | None = None) -> int:
         if not os.path.isfile(args.archive):
             p.error(f"{args.archive!r} is not a file")
         manifest = update_manifest.add_archive(manifest, args.archive)
+
+    if args.update_channel:
+        manifest["update_channel"] = args.update_channel
 
     with open(args.output, "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2, sort_keys=True)

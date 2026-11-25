@@ -149,9 +149,10 @@ def spec_excludes(flavour: str | None = None) -> list[str]:
             + package_excludes(flavour))
 
 
-# Who each build says it is (gate G2). Read only by packaging/build.py, for the
-# Windows installer's folder and display name; app_meta, updater.py and the
-# archive names do not use it yet. `name` is the install folder and the
+# Who each build says it is (gate G2). Read by packaging/build.py, for the
+# Windows installer's folder and display name, and through update_channel() and
+# file_suffix() below by the updater; app_meta and the archive names do not use
+# it yet. `name` is the install folder and the
 # archive stem (no spaces, like today's "Prism"), `display` what the person
 # sees, `bundle_id` the macOS bundle / Linux .desktop id, `channel` the suffix
 # on the update channel name. "complete" is today's product and MUST stay
@@ -183,6 +184,15 @@ def update_channel(platform_tag: str, flavour: str | None = None) -> str:
     `v<ver>-assets-<this>` follow from it."""
     suffix = identity(flavour)["channel"]
     return f"{platform_tag}-{suffix}" if suffix else platform_tag
+
+
+def file_suffix(flavour: str | None = None) -> str:
+    """"" for "complete", else "-<channel>": what the updater adds to the names
+    that two flavours on one computer would otherwise share. They share ~/.prism
+    and, on Windows, the folder their program folders sit in, so without it one
+    flavour's staged update was another flavour's update to apply."""
+    channel = identity(flavour)["channel"]
+    return f"-{channel}" if channel else ""
 
 
 # main.py's frozen self-test (PRISM_SELFTEST) proves each tool a build ships.

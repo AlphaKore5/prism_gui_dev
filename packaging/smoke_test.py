@@ -50,13 +50,8 @@ def executable() -> str:
     return os.path.join(DIST, app_meta.NAME, name)
 
 
-def main(exe: str | None = None):
-    """`exe` defaults to the build in dist/; packaging/windows/installer_check.py
-    passes the INSTALLED Prism.exe instead."""
-    exe = exe or executable()
-    if not os.path.exists(exe):
-        sys.exit(f"nothing built at {exe}")
-
+def selftest_env() -> dict[str, str]:
+    """The environment a built Prism runs its self-test in: a throwaway home."""
     env = dict(os.environ, PRISM_SELFTEST="1")
     # No display on CI runners; Qt's offscreen platform needs no X server.
     env.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -76,8 +71,18 @@ def main(exe: str | None = None):
     # expanduser reads HOME on POSIX and USERPROFILE on Windows — set both.
     env["HOME"] = home
     env["USERPROFILE"] = home
+    return env
 
-    print(f"» {exe} (PRISM_SELFTEST=1, HOME={home})")
+
+def main(exe: str | None = None) -> str:
+    """`exe` defaults to the build in dist/; packaging/windows/installer_check.py
+    passes the INSTALLED Prism.exe instead. Returns what the self-test printed."""
+    exe = exe or executable()
+    if not os.path.exists(exe):
+        sys.exit(f"nothing built at {exe}")
+    env = selftest_env()
+
+    print(f"» {exe} (PRISM_SELFTEST=1, HOME={env['HOME']})")
     result = subprocess.run([exe], env=env, capture_output=True,
                             encoding="utf-8", errors="replace", timeout=180)
     print(result.stdout.strip())
@@ -86,6 +91,7 @@ def main(exe: str | None = None):
     if result.returncode != 0:
         sys.exit(f"the packaged app failed to start (exit {result.returncode})")
     print("✓ the packaged app starts, loads its resources and builds its window")
+    return result.stdout
 
 
 if __name__ == "__main__":

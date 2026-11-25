@@ -13,8 +13,12 @@ What it proves, on the runner:
     beside it (updater.bundle_root, updater.stage_root);
   * the installed Prism passes the packaged self-test (packaging/smoke_test.py,
     sandbox HOME);
-  * after a simulated in-app update (apply_update.perform_swap, which adds a
-    file Setup never installed and leaves the backup and marker behind), the
+  * an in-app update to a higher version, through the updater's own code and
+    Windows swap script, from a local server with a throwaway key, gives a
+    Prism of the SAME flavour that passes the self-test (update_check.py says
+    what in that is real and what stands in);
+  * after another, simulated one (apply_update.perform_swap, which adds a file
+    Setup never installed and leaves the backup and marker behind), the
     uninstaller still exists and removes the program folder and the updater's
     leftovers, and a file in the user's data folder (%USERPROFILE%\\.prism)
     is still there.
@@ -103,6 +107,7 @@ def main() -> int:
     import build
     import flavour
     import smoke_test
+    import update_check
     import update_manifest
     import updater
 
@@ -183,7 +188,14 @@ def main() -> int:
     # ── the installed Prism starts ───────────────────────────────────────────
     smoke_test.main(exe)
 
-    # ── an in-app update, as apply_update does it ────────────────────────────
+    # ── a real in-app update to a higher version, and the updated Prism starts ──
+    update_check.run(install_dir, exe, flavour_name=build.FLAVOUR_BUILT, work=work)
+    shelf = f"add-ons registered ({len(flavour.addon_keys(build.FLAVOUR_BUILT))})"
+    if shelf not in smoke_test.main(exe):
+        _fail(f"the updated Prism did not report {shelf!r}: is it still {ident['display']}?")
+    print(f"✓ the updated Prism starts and is still {ident['display']}")
+
+    # ── what an update leaves behind, for the uninstaller to find ────────────
     staged = os.path.join(staging, app_meta.VERSION)
     shutil.copytree(install_dir, staged)
     with open(os.path.join(staged, "_internal", "added-by-an-update.txt"), "w") as f:
