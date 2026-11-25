@@ -700,6 +700,37 @@ class ListsTab(unittest.TestCase):
         self.assertTrue(tab._scroll.isHidden())
 
 
+def _delete_built(workbenches: list, before: "set | None" = None) -> None:
+    """Delete each workbench a test built, with the window it sits in (a LeadsPanel), right now.
+
+    Found 25-Nov-2026: nothing deleted them, so the file ended with ~8,900 live top-level widgets and Windows killed
+    the run with an access violation in a Qt-owned thread, at a different test each time (~140-265), on main too.
+    `deleteLater()` cannot be used: it needs the event loop, and no test may run it (CONTRIBUTING; flushing posted
+    events fired an earlier test's deferred dialog and hung the suite). shiboken6.delete() runs the C++ destructor
+    now, which takes every child — the dialogs, menus and pages the workbench owns — with it."""
+    import shiboken6
+    tops = []
+    for wb in workbenches:
+        if not shiboken6.isValid(wb):
+            continue
+        top = wb
+        while top.parentWidget() is not None:
+            top = top.parentWidget()
+        if all(top is not t for t in tops):
+            tops.append(top)
+    # The person and company panels open windows of their own with no parent (a drawer, a dialog), so deleting the
+    # workbench does not take them: anything top-level that appeared during the test goes too.
+    if before is not None:
+        for w in QApplication.topLevelWidgets():
+            if id(w) not in before and w.parentWidget() is None and all(w is not t for t in tops):
+                tops.append(w)
+    for top in tops:
+        if shiboken6.isValid(top):
+            top.hide()
+            shiboken6.delete(top)
+    workbenches.clear()
+
+
 class _Workbench(unittest.TestCase):
     """A workbench that only ever touches temp folders — sheets, sessions,
     saved searches, saved contacts and CSV imports — plus a finished run to
@@ -735,9 +766,24 @@ class _Workbench(unittest.TestCase):
             return True
         WB.LeadsWorkbench._confirm_search = confirm
 
+        # Every workbench a test builds is deleted when the test ends (see tearDown). Recorded here, not asked of
+        # each test: ~140 tests build one.
+        self._built = []
+        self._init = WB.LeadsWorkbench.__dict__["__init__"]
+        built, init = self._built, self._init
+
+        def record(wb, *args, **kwargs):
+            init(wb, *args, **kwargs)
+            built.append(wb)
+        WB.LeadsWorkbench.__init__ = record
+        # Registered first, so it runs LAST: a test's own cleanups (closing a dialog it opened) run before it and
+        # still find their widgets alive.
+        self.addCleanup(_delete_built, self._built, {id(w) for w in QApplication.topLevelWidgets()})
+
     def tearDown(self):
         for name, value in self._saved_attrs.items():
             setattr(self._WB.LeadsWorkbench, name, value)
+        self._WB.LeadsWorkbench.__init__ = self._init
 
     def _run(self):
         """A finished sheet run: two qualified leads, one draft already sent."""
