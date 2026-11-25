@@ -614,6 +614,15 @@ def _fix_macos_cv2_openssl_collision(app_bundle: str) -> None:
     if not IS_MAC:
         return
     import glob
+    # A python.org Python (GitHub's setup-python installs that one on Apple
+    # Silicon) carries its own OpenSSL, 3.0.x, older than the 3.4.0 inside cv2's
+    # wheel, so `_ssl` finds every symbol in either copy: nothing to swap.
+    # Homebrew's copy would be wrong there: it is built for the build Mac's own
+    # macOS version, and it refers to its libcrypto by a /opt/homebrew path.
+    if glob.glob(os.path.join(sys.base_prefix, "lib", "libssl*.dylib")):
+        print("[prism] macOS OpenSSL fix: this Python carries its own OpenSSL, "
+              "nothing to swap")
+        return
     real_lib = {}
     for name in ("libssl.3.dylib", "libcrypto.3.dylib"):
         found = glob.glob(f"/opt/homebrew/opt/openssl@3/lib/{name}") or \

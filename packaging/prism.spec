@@ -617,6 +617,7 @@ a = Analysis(
     runtime_hooks=[
         os.path.join(SPEC_DIR, "rthook_distutils.py"),
         os.path.join(SPEC_DIR, "rthook_ssl_certs.py"),
+        os.path.join(SPEC_DIR, "rthook_cv2.py"),
     ],
     excludes=excludes,
     win_no_prefer_redirects=False,
@@ -862,6 +863,8 @@ if IS_MAC:
                 "into a task.",
             "NSAppleEventsUsageDescription":
                 "Prism opens Chrome to drive the AI tools you are signed in to.",
-            "LSMinimumSystemVersion": "11.0",
+            # Same number as build-macos in .github/workflows/build.yml, which
+            # checks it against every binary (packaging/check_macos_minos.py).
+            "LSMinimumSystemVersion": "14.0",
         },
     )

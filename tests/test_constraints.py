@@ -20,6 +20,12 @@ def _read(rel):
         return f.read()
 
 
+# macOS joins as soon as its file is committed.
+_PLATFORMS = {p: s for p, s in (("linux-x64", "linux"), ("windows-x64", "win32"),
+                                ("macos-arm64", "darwin"))
+              if p != "macos-arm64" or os.path.isfile(os.path.join(ROOT, "constraints", p + ".txt"))}
+
+
 def _pins(platform):
     out = {}
     for line in _read(f"constraints/{platform}.txt").splitlines():
@@ -60,16 +66,52 @@ class TheBuildInstallsExactVersions(unittest.TestCase):
     def test_every_matrix_leg_names_a_file_that_exists(self):
         wf = _read(".github/workflows/build.yml")
         legs = set(re.findall(r"^\s+pins:\s*(\S+)", wf, re.M))
-        self.assertEqual({"linux-x64", "windows-x64"}, legs)
-        for leg in legs:
+        self.assertEqual({"linux-x64", "windows-x64", "macos-arm64"}, legs)
+        # macOS: recorded by macos-pins.yml. Until then: the next test.
+        for leg in legs - {"macos-arm64"}:
             self.assertTrue(os.path.isfile(os.path.join(ROOT, "constraints", leg + ".txt")), leg)
 
+    @unittest.skipIf(os.name == "nt", "runs the Mac job's bash step")
+    def test_without_its_file_a_mac_test_build_warns_and_a_tag_stops(self):
+        import subprocess
+        import tempfile
+
+        import yaml
+        steps = yaml.safe_load(_read(".github/workflows/build.yml"))["jobs"]["build-macos"]["steps"]
+        names = [s.get("name") for s in steps]
+        step = steps[names.index("The macOS pin file")]
+        self.assertNotIn("if", step)
+        self.assertLess(names.index("The macOS pin file"), names.index("Install dependencies"))
+        run = step["run"].replace("${{ matrix.pins }}", "macos-arm64")
+        for ref, has_file, code, said in (("branch", False, 0, "::warning::NOT PINNED"),
+                                          ("tag", False, 1, "::error::"),
+                                          ("branch", True, 0, ""), ("tag", True, 0, "")):
+            with tempfile.TemporaryDirectory() as d:
+                os.mkdir(os.path.join(d, "constraints"))
+                pins = os.path.join(d, "constraints", "macos-arm64.txt")
+                if has_file:
+                    with open(pins, "w") as f:
+                        f.write("a==1\n")
+                r = subprocess.run(["bash", "-e", "-c", run], cwd=d, capture_output=True, text=True,
+                                   env={"PATH": os.environ["PATH"], "GITHUB_REF_TYPE": ref})
+                self.assertEqual(r.returncode, code, (ref, has_file, r.stdout))
+                self.assertIn(said, r.stdout)
+                if not said:
+                    self.assertEqual(r.stdout, "")
+                if has_file:
+                    with open(pins) as f:
+                        self.assertEqual(f.read(), "a==1\n")
+
+    def test_only_the_recording_workflow_installs_unpinned(self):
+        wf = _read(".github/workflows/macos-pins.yml")
+        self.assertIn("pip install -r requirements.txt -r packaging/requirements-build.txt\n", wf)
+
     def test_every_line_is_an_exact_pin(self):
-        for plat in ("linux-x64", "windows-x64"):
+        for plat in _PLATFORMS:
             self.assertGreater(len(_pins(plat)), 100, plat)
 
     def test_every_direct_requirement_is_pinned(self):
-        for plat, sysp in (("linux-x64", "linux"), ("windows-x64", "win32")):
+        for plat, sysp in _PLATFORMS.items():
             pins = _pins(plat)
             missing = [n for n in _direct(sysp) if n not in pins]
             self.assertEqual([], missing,

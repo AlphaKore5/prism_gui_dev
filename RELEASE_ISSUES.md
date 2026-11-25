@@ -128,6 +128,8 @@ something you did not run.
       machine only, Uninstall (Prism only / Prism and everything it stored) really removes what it lists and nothing else (ISS-016).
 
 **Publishing**
+- [ ] macOS: CI makes an unsigned DMG for testers (artifact `macos-testers-complete`) and does not publish it. A green
+      "Publish release" says nothing about the Mac.
 - [ ] Files first, signed manifest **last** (ISS-004). A manifest with missing files is a customer error.
 - [ ] All three platforms: signed manifest, every part complete, verified from outside
       (dev key accepted, prod key rejected for dev; the reverse for prod).
@@ -575,3 +577,17 @@ something you did not run.
   copy when ODA is absent.
 - Check: `tests/test_spec_slim.py` (per-platform collection) and `main._trimmed_bundle_checks()` in the frozen self-test
   ("DWG converter bundled (<tag>)"), which proves the path inside the real build. Unproven until a CI build passes it.
+
+## 2026-11-25 — The bundled Mac `dwg2dxf` needs macOS 26 (found while bringing the Mac build back) — KNOWN, NOT FIXED
+
+- Seen: `packaging/check_macos_minos.py` on the engine at db6dc6b reads minos 26.0 from `core/vendor/dwg2dxf/macos-arm64/dwg2dxf`
+  and `libredwg.0.dylib` (Homebrew builds for the macOS of the machine it runs on). **Expected effect, not run on an older Mac:
+  opening DWG files fails on macOS 14 and 15.** The app supports macOS 14 and later (owner, 2026-11-25).
+- Guard: the Mac build fails if any binary needs a newer macOS than 14.0, except exactly these two files up to exactly 26.0
+  (`KNOWN` in that script). `tests/test_workflow_macos.py` pins the list and fails when the engine's files no longer match it.
+- To fix: rebuild both with `MACOSX_DEPLOYMENT_TARGET=14.0` in the engine, then empty `KNOWN`.
+- Also found: the app declared macOS 11 while PySide6 6.12.0, onnxruntime 1.32.0 and av 19.0.2 need 14. It now declares 14.
+- The hosted `macos-14` image was retired on 2026-11-02, so it is LIKELY why GitHub refused it on 2026-11-17 (ISS-023).
+- First Mac run (45609774726, macos-15): the app was built and started, but OpenCV failed the packaged self-test with "recursion is
+  detected", so RapidOCR never worked in a Mac bundle. Cause reproduced on Linux with the real cv2 loader in a Mac bundle's folder
+  layout; `packaging/rthook_cv2.py` sets the loader's own switch. Not proven on a Mac until a later run passes.
