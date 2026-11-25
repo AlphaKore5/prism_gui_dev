@@ -224,6 +224,17 @@ def _apollo_find(lead, key: str):
         raise FinderRefused(_apollo_refusal(exc)) from exc
 
 
+def _apollo_find_monid(lead, key: str):
+    """The same Apollo finder, asked through the owner's Monid wallet (`apollo /people/match`, about $0.026 and
+    only when Apollo knows the person) — the finder when there is no Apollo key of their own. A wallet Monid
+    refuses is FinderRefused, asked once a batch like any other."""
+    from .apollo import ApolloError, find_email, monid_transport
+    try:
+        return find_email(lead, "", transport=monid_transport(key))
+    except ApolloError as exc:
+        raise FinderRefused(str(exc)) from exc
+
+
 def _hunter_reset(key: str) -> str:
     """"27 Sep": when Hunter's searches come back — its account call, which
     costs nothing — or ""."""
@@ -331,9 +342,12 @@ def _hunter_find_monid(lead, key: str):
 # outright, so it is asked once a batch and then left alone: see
 # AFinderThatRefusesTheAccountIsAskedOnce). Both charge only when they know
 # the person.
+#
+# 25-Nov-2026, the owner: "no room for hunter now" — Apollo is THE finder. Its reveal sells the full name with
+# the address for about what Hunter charges for the address alone, so Hunter is out of the chain (its code stays
+# for a later decision). An Apollo key of their own, or the Monid wallet when they have none.
 _FINDERS = [
-    ("hunter_api_key",  "Hunter", _hunter_find),        # our main finder — monthly credits, FIND only
-    ("apollo_api_key",  "Apollo", _apollo_find),        # fallback — 1 credit per person FOUND
+    ("apollo_api_key",  "Apollo", _apollo_find),        # 1 credit (or ~$0.026 through Monid) per person FOUND
 ]
 # Every finder/verifier config key — collected from config/env by collect_keys.
 VERIFIER_KEYS = [k for k, _, _ in _FINDERS] + [k for k, _, _ in _VERIFIERS]
@@ -353,10 +367,9 @@ def collect_keys(cfg: dict | None = None) -> dict:
         v = (cfg.get(k) or os.environ.get(k.upper()) or "").strip()
         if v:
             out[k] = v
-    # No Hunter key of their own: a Monid key buys the same Hunter finder (find_and_verify reads this as
-    # Hunter — the finders stay Hunter, then Apollo). With one, Hunter is asked directly and Monid is not
-    # asked for the same person twice.
-    if "hunter_api_key" not in out:
+    # No Apollo key of their own: a Monid key buys the same Apollo finder (find_and_verify reads it as Apollo).
+    # With one, Apollo is asked directly and Monid is not asked for the same person twice.
+    if "apollo_api_key" not in out:
         monid = (cfg.get("monid_api_key") or os.environ.get("MONID_API_KEY") or "").strip()
         if monid:
             out["monid_api_key"] = monid
@@ -586,8 +599,8 @@ def find_and_verify(lead, keys: dict | None = None, refused: dict | None = None)
     if (lead.name or "") and somewhere and check not in ("valid", "catch-all"):
         for cfg_key, name, fn in _FINDERS:
             k = keys.get(cfg_key)
-            if not k and cfg_key == "hunter_api_key" and keys.get("monid_api_key"):
-                k, fn = keys["monid_api_key"], _hunter_find_monid       # Hunter, through the Monid wallet
+            if not k and cfg_key == "apollo_api_key" and keys.get("monid_api_key"):
+                k, fn = keys["monid_api_key"], _apollo_find_monid       # Apollo, through the Monid wallet
             if not k or (refused is not None and name in refused):
                 continue
             # The finder that supplied the address we are holding has nothing

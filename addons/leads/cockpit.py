@@ -92,8 +92,19 @@ def status_of(dos, draft=None) -> str:
 def needs_email(dos) -> bool:
     """True while "Find e-mails" still has something to do for this lead: no
     address at all, or one nobody has confirmed (a guess, a catch-all, an
-    invalid). A verified address is done — asking again only spends credits."""
+    invalid). A verified address is done — asking again only spends credits. An Apollo preview row (a free
+    search card) needs one too: Find e-mails reveals it, full name and e-mail together (the owner, 25-Nov-2026)."""
+    if needs_reveal(dos):
+        return True
     return ((dos.lead.extra or {}).get("email_check") or "") != "valid"
+
+
+def needs_reveal(dos) -> bool:
+    """True for an Apollo preview row: a first name and a surname's initial from the free search, revealed only
+    when the owner picks it — Find e-mails (the owner, 25-Nov-2026: "do it the apollo way", then "reveal should
+    mean find the email for this contact")."""
+    from prospector import apollo
+    return apollo.is_preview(getattr(dos, "lead", None))
 
 
 def needs_phone(dos) -> bool:
@@ -101,6 +112,8 @@ def needs_phone(dos) -> bool:
     no phone of any kind and work somewhere a company's number can be looked up.
     A lead that came with a number, or has one already, is left as it is."""
     from prospector import phones
+    if needs_reveal(dos):
+        return False
     return phones.needs_phone(getattr(dos, "lead", None))
 
 
@@ -989,7 +1002,7 @@ class LeadsCockpit(QWidget):
     ticked rows out to the workbench's workers."""
 
     verifyRequested = Signal(list)
-    emailsRequested = Signal(list)
+    emailsRequested = Signal(list)          # Find e-mails — an Apollo preview row is revealed, anyone else found
     phonesRequested = Signal(list)          # Find phones: each company's published number
     exportRequested = Signal(list)
     saveListRequested = Signal(list)
@@ -1832,16 +1845,17 @@ class LeadsCockpit(QWidget):
                                       "credit is used for each address a "
                                       "verifier answers for.")
             self._b_emails.setToolTip("Find each selected person's real e-mail "
-                                      "and check it. A credit is used only when "
-                                      "a finder knows the person. Nothing is "
-                                      "guessed.")
+                                      "with Apollo — for someone Apollo's search "
+                                      "found, their full name comes with it. "
+                                      "Credits are used only when Apollo knows "
+                                      "the person. Nothing is guessed.")
         else:
             self._b_verify = QPushButton("Verify free")
             self._b_emails.setToolTip("Find each selected person's real e-mail "
-                                      "with Hunter, then Apollo, and check it with "
-                                      "the free verifiers. A credit is used only "
-                                      "when a finder knows the person. Nothing is "
-                                      "guessed.")
+                                      "with Apollo (their full name comes with it "
+                                      "for someone Apollo's search found). Only "
+                                      "the people Apollo knows are charged. "
+                                      "Nothing is guessed.")
         # The phone each selected person's COMPANY publishes (its website, or a
         # directory), one lookup per company. Published, not called or verified.
         self._b_phones = QPushButton("Find phones")
@@ -2780,6 +2794,7 @@ class LeadsCockpit(QWidget):
         # Find phones found) has nothing left to look up.
         self._phones_wanted = any(needs_phone(d) for d in self._dossiers + picked)
         self._b_phones.setEnabled(any(needs_phone(d) for d in picked))
+
         # The header's box speaks for THIS page, as Apollo's does.
         ticked = len([i for i in self._checked if i not in self._hidden])
         self._head.set_check_state(Qt.Unchecked if ticked == 0 else

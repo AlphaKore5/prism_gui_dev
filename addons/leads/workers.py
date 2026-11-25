@@ -453,6 +453,38 @@ class LeadsPhoneWorker(_Worker):
             self.failed.emit(str(e))
 
 
+class LeadsRevealWorker(_Worker):
+    """Reveal the preview rows the owner ticked (the Apollo way, 25-Nov-2026): Apollo's full name, e-mail and
+    company website for each, written into the same rows. Through whichever way in this machine has — the credit
+    pool (the licence server asks Apollo), the owner's Monid wallet, or an Apollo key of their own. `done` carries
+    apollo.reveal_leads' counts."""
+    progress = Signal(int, int)             # people asked so far, of how many
+    done = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, leads: list, cfg: dict):
+        super().__init__()
+        self.leads, self.cfg = list(leads or []), _run_cfg(cfg)
+
+    def run(self):
+        try:
+            from prospector import apollo, gateway, monid_run
+            key = apollo.api_key(self.cfg)
+            transport = None
+            if not key and gateway.pooled():
+                if not gateway.ready("apollo"):
+                    self.failed.emit("Revealing people isn't switched on for your account yet. Nothing was "
+                                     "charged — contact Alphakore and we'll turn it on.")
+                    return
+                transport = apollo.pool_transport()
+            elif not key and monid_run.available(self.cfg):
+                transport = apollo.monid_transport(monid_run.api_key(self.cfg))
+            self.done.emit(apollo.reveal_leads(self.leads, key, transport=transport,
+                                               on_progress=lambda i, n: self.progress.emit(i, n)))
+        except Exception as e:                          # noqa: BLE001
+            self.failed.emit(str(e))
+
+
 class LeadsMobileWorker(_Worker):
     """Find each SELECTED person's own mobile number (Apollo, through the licence
     server), off the UI thread. Apollo answers in minutes, so this holds a thread
@@ -730,8 +762,7 @@ class SourceWorker(_Worker):
         free, so that line counts pages and people; revealing is billed, so
         that line counts credits against the target."""
         if stage == "reveal":
-            self.progress.emit(
-                f"Revealing {done} of {total or self.target} (Apollo credits)")
+            self.progress.emit(f"Revealing {done} of {total or self.target}…")
         else:
             self.progress.emit(f"Searching Apollo — page {done} · {found} found")
 
@@ -811,7 +842,7 @@ class SourceWorker(_Worker):
                         leads += apollo.search_people(
                             part if part is not None else (self.spec or {}), key,
                             target=room, budget=left, skip=skip, stats=got,
-                            on_progress=self._apollo_progress, transport=transport)
+                            on_progress=self._apollo_progress, transport=transport, reveal=False)
                     except apollo.ApolloError as exc:
                         if transport is None and monid_run.available(self.cfg) and (
                                 str(exc) == apollo.BAD_KEY or _plan_refusal(exc, apollo)):
@@ -826,7 +857,7 @@ class SourceWorker(_Worker):
                                 leads += apollo.search_people(
                                     part if part is not None else (self.spec or {}), key,
                                     target=room, budget=max(0, self.target - spent), skip=skip, stats=got,
-                                    on_progress=self._apollo_progress, transport=transport)
+                                    on_progress=self._apollo_progress, transport=transport, reveal=False)
                             except apollo.ApolloError as again:
                                 lost = again
                                 break

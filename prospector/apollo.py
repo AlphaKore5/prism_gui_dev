@@ -463,7 +463,39 @@ def _card(person, industry: str) -> dict:
             "company": _text(org.get("name")) or _text(person.get("organization_name")),
             "domain": _text(org.get("primary_domain")) or _host(org.get("website_url")),
             "linkedin": _text(person.get("linkedin_url")),
-            "industry": industry}
+            "industry": industry,
+            # What the free search shows and a preview row keeps (the Apollo way, 25-Nov-2026): the surname's
+            # initial, the title, and whether Apollo holds an e-mail or a direct phone for them.
+            "last_hint": _text(person.get("last_name_obfuscated")),
+            "title": _text(person.get("title")),
+            "has_email": bool(person.get("has_email")),
+            "has_phone": bool(person.get("has_direct_phone")) and person.get("has_direct_phone") != "No"}
+
+
+PREVIEW = "apollo_preview"      # lead.extra flag: a free search card, not revealed (no full name, no e-mail)
+
+
+def is_preview(lead) -> bool:
+    """A person Apollo's free search found and nobody has revealed yet: a first name and a surname's initial, no
+    e-mail. Finding their e-mail or mobile would be asked with half a name, so those wait for Reveal."""
+    return bool((getattr(lead, "extra", None) or {}).get(PREVIEW))
+
+
+def _preview_of(card: dict) -> Lead:
+    """A free search card as a row the owner can see and tick: "Ana R." at Acme, Head of Operations. It costs
+    nothing; Reveal buys the full name and e-mail (reveal_leads)."""
+    shown = " ".join(x for x in (card["first"], card["last_hint"]) if x) or card["first"]
+    lead = Lead(name=card["name"] or shown, title=card["title"], company=card["company"],
+                industry=card["industry"])
+    lead.extra["apollo_id"] = card["id"]
+    lead.extra["linkedin"] = card["linkedin"]
+    if card["domain"]:
+        lead.extra["company_domain"] = card["domain"]
+    lead.extra["apollo_has_email"] = card["has_email"]
+    lead.extra["apollo_has_phone"] = card["has_phone"]
+    if not card["name"]:
+        lead.extra[PREVIEW] = True                      # the surname came back whole: nothing left to reveal
+    return lead
 
 
 def _stub(card: dict) -> Lead:
@@ -492,7 +524,7 @@ def _details(card: dict) -> dict:
 
 
 def search_people(spec, api_key, *, target=25, skip=None, stats=None, on_progress=None,
-                  max_pages=20, per_page=100, budget=None, transport=None) -> list:
+                  max_pages=20, per_page=100, budget=None, transport=None, reveal=True) -> list:
     """Up to `target` people from Apollo who pass the whole spec, for at most
     `budget` credits (the target itself unless a caller says otherwise).
 
@@ -599,7 +631,7 @@ def search_people(spec, api_key, *, target=25, skip=None, stats=None, on_progres
             on_progress("search", counts["search_calls"], max_pages, len(leads))
         return True
 
-    def reveal(batch: list) -> None:
+    def reveal_batch(batch: list) -> None:
         counts["reveal_calls"] += 1
         data = send(BULK_MATCH, {"details": [_details(c) for c in batch]})
         matches = data.get("matches") if isinstance(data, dict) else None
@@ -621,6 +653,14 @@ def search_people(spec, api_key, *, target=25, skip=None, stats=None, on_progres
             if len(leads) >= target:
                 break
 
+    if not reveal:
+        # The Apollo way (the owner, 25-Nov-2026): search only. Up to `target` free cards come back as preview
+        # rows; nobody is revealed and nothing is charged — the owner ticks who is worth a full name (reveal_leads).
+        while len(queue) < target and page():
+            pass
+        counts["short_by"] = max(0, target - len(queue))
+        return [_preview_of(c) for c in queue[:target]]
+
     while needed() and room():
         # Never queue more cards than the budget can still pay to reveal —
         # paging past that is free, but it is search calls (and minutes) spent
@@ -633,7 +673,7 @@ def search_people(spec, api_key, *, target=25, skip=None, stats=None, on_progres
         batch = queue[:min(_BATCH, want)]
         del queue[:len(batch)]
         try:
-            reveal(batch)
+            reveal_batch(batch)
         except _Unreachable:
             counts["errors"] += 1
             break
@@ -644,9 +684,65 @@ def search_people(spec, api_key, *, target=25, skip=None, stats=None, on_progres
     return leads
 
 
+def _details_of(lead) -> dict:
+    """One bulk_match entry for a preview row: its Apollo id first (the surest match), then what else it holds.
+    The surname's initial is never sent: Apollo would match somebody else."""
+    x = lead.extra or {}
+    detail = {"id": x.get("apollo_id") or "", "linkedin_url": x.get("linkedin") or "",
+              "first_name": (lead.name or "").split(" ")[0], "domain": x.get("company_domain") or ""}
+    detail = {k: v for k, v in detail.items() if v}
+    if lead.company and "domain" not in detail:
+        detail["organization_name"] = lead.company
+    return detail
+
+
+def reveal_leads(leads, api_key, *, transport=None, on_progress=None) -> dict:
+    """Reveal the preview rows the owner ticked: each becomes the person Apollo knows — full name, e-mail when
+    Apollo has one, LinkedIn, the company's website — in place, so the row the owner picked is the row that fills
+    in. One credit (or the pool's price) for each person Apollo finds; a person it does not find costs nothing and
+    stays a preview. {"asked", "found", "missing"}; `found` is what was charged.
+
+    Raises ApolloError when the very first call is refused (a key, a plan, an empty wallet): nothing was bought,
+    and the owner must be told why. Once some are revealed, a refusal ends the run keeping them."""
+    key = (api_key or "").strip()
+    if not key and transport is None:
+        raise ApolloError(NO_KEY)
+    send = transport or (lambda path, body: _post(path, body, key))
+    todo = [l for l in leads if is_preview(l) and (l.extra or {}).get("apollo_id")]
+    out = {"asked": len(todo), "found": 0, "missing": 0}
+    for start in range(0, len(todo), _BATCH):
+        batch = todo[start:start + _BATCH]
+        try:
+            data = send(BULK_MATCH, {"details": [_details_of(l) for l in batch]})
+        except ApolloError:
+            if out["found"]:
+                out["stopped"] = True                   # keep what was bought; say the rest was not
+                break
+            raise
+        matches = data.get("matches") if isinstance(data, dict) else None
+        matches = matches if isinstance(matches, list) else []
+        for lead, person in zip(batch, list(matches) + [None] * (len(batch) - len(matches))):
+            full = _lead_of(person, lead.industry) if isinstance(person, dict) and person else None
+            if full is None:
+                out["missing"] += 1
+                continue
+            out["found"] += 1
+            lead.name, lead.title = full.name, full.title or lead.title
+            lead.company = full.company or lead.company
+            if full.email:
+                lead.email = full.email
+            if full.industry and not lead.industry:
+                lead.industry = full.industry
+            lead.extra.update({k: v for k, v in full.extra.items() if v not in (None, "")})
+            lead.extra.pop(PREVIEW, None)
+        if on_progress:
+            on_progress(min(start + _BATCH, len(todo)), len(todo))
+    return out
+
+
 # ── the verify waterfall's finder ─────────────────────────────────────────────
 
-def find_email(lead, api_key) -> tuple:
+def find_email(lead, api_key, *, transport=None) -> tuple:
     """Apollo's `people/match` for ONE lead — the profile link or the Apollo id
     when the lead carries one (the surest match), else the name with the company
     domain or name. Returns (email, "valid" | "unknown"), and ("", "") when
@@ -659,8 +755,9 @@ def find_email(lead, api_key) -> tuple:
     One credit, and only when Apollo finds the person — which is why verify
     calls it for the hot/warm slice alone."""
     key = (api_key or "").strip()
-    if not key:
+    if not key and transport is None:
         return "", ""
+    send = transport or (lambda path, body: _post(path, body, key))
     extra = getattr(lead, "extra", None) or {}
     # Apollo already sold us this one. people/match, asked by the id the reveal
     # left behind, would find the same person and return the same address for a
@@ -688,10 +785,10 @@ def find_email(lead, api_key) -> tuple:
             or (name and (domain or company))):
         return "", ""
     try:
-        data = _post(MATCH, body, key)
+        data = send(MATCH, body)
     except ApolloError as exc:
-        if exc.code in (401, 403):
-            raise
+        if exc.code in (401, 403) or transport is not None:
+            raise                   # a key, or a Monid wallet, refused: every other person would be too
         return "", ""
     person = data.get("person") if isinstance(data, dict) else None
     if not isinstance(person, dict):

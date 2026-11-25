@@ -1,7 +1,8 @@
-"""Hunter's e-mail finder, bought through the owner's Monid wallet (24-Nov-2026).
+"""The e-mail finder bought through the owner's Monid wallet.
 
-The finders stay Hunter, then Apollo (the owner's 24-Sep rule, pinned in test_prospector_no_guess): a Monid
-key is a way to BUY Hunter when there is no Hunter key — not a third finder. Held here:
+Changed 25-Nov-2026 (the owner: "no room for hunter now"): Apollo is the only finder, and a Monid key buys
+APOLLO's finder when there is no Apollo key. Hunter's own Monid finder (`_hunter_find_monid`) is kept, out of
+the chain, and TheFinder below still holds what it does. Held here:
 
   · a Monid key alone gives Hunter's finder; a Hunter key of their own is used directly, never asked twice;
   · the request is the finder's own (name + domain, or the company's name when there is no domain);
@@ -34,6 +35,10 @@ def fixture(name):
 
 
 HIT, MISS = fixture("hunter_email_finder.json"), fixture("hunter_email_finder_miss.json")
+# Apollo's /people/match through Monid: the person, with the address Apollo holds for them.
+APOLLO_HIT = {"output": {"person": {"id": "ap1", "first_name": "Asha", "last_name": "Rao", "name": "Asha Rao",
+                                    "email": "asha.rao@acme.example", "email_status": "verified",
+                                    "organization": {"name": "Acme Motors", "primary_domain": "acme.example"}}}}
 
 
 def lead(name="Asha Rao", company="Acme Motors", domain="acme.example"):
@@ -66,15 +71,18 @@ class TheKeys(unittest.TestCase):
         with mock.patch.dict(os.environ, {"MONID_API_KEY": "from-env"}):
             self.assertEqual(V.collect_keys({}), {"monid_api_key": "from-env"})
 
-    def test_with_a_hunter_key_of_their_own_monid_is_not_asked_for_the_same_person(self):
-        got = V.collect_keys({"hunter_api_key": "hk", "monid_api_key": "mk"})
-        self.assertEqual(got, {"hunter_api_key": "hk"})
+    def test_with_an_apollo_key_of_their_own_monid_is_not_asked_for_the_same_person(self):
+        got = V.collect_keys({"apollo_api_key": "ak", "monid_api_key": "mk"})
+        self.assertEqual(got, {"apollo_api_key": "ak"})
+
+    def test_a_hunter_key_is_no_longer_a_finder_key(self):
+        self.assertEqual(V.collect_keys({"hunter_api_key": "hk"}), {})
 
     def test_no_keys_is_no_keys(self):
         self.assertEqual(V.collect_keys({}), {})
 
-    def test_the_finders_are_still_hunter_then_apollo(self):
-        self.assertEqual([name for _k, name, _f in V._FINDERS], ["Hunter", "Apollo"])
+    def test_apollo_is_the_only_finder(self):
+        self.assertEqual([name for _k, name, _f in V._FINDERS], ["Apollo"])
 
 
 class TheFinder(unittest.TestCase):
@@ -131,20 +139,21 @@ class InTheFinderLoop(unittest.TestCase):
 
     def run_loop(self, keys, who=None, refused=None, **kw):
         who = who or lead()
+        kw.setdefault("answer", APOLLO_HIT)
         call = Calls(**kw)
         with mock.patch.object(MR, "call", call), mock.patch.object(V, "verify_email", return_value=""):
             V.find_and_verify(who, keys, refused)
         return who, call
 
-    def test_a_monid_key_alone_finds_the_address_and_records_it_as_hunters(self):
+    def test_a_monid_key_alone_finds_the_address_through_apollo_and_records_it_as_apollos(self):
         who, call = self.run_loop({"monid_api_key": "mk"})
         self.assertEqual(who.email, "asha.rao@acme.example")
-        self.assertEqual(who.extra["email_source"], "hunter")
-        self.assertEqual(len(call.asked), 1)
+        self.assertEqual(who.extra["email_source"], "apollo")
+        self.assertEqual([(c["provider"], c["endpoint"]) for c in call.asked], [("apollo", "/people/match")])
 
-    def test_a_hunter_that_already_sold_the_address_is_not_asked_again(self):
+    def test_an_apollo_that_already_sold_the_address_is_not_asked_again(self):
         who = lead()
-        who.email, who.extra["email_source"] = "old@acme.example", "hunter"
+        who.email, who.extra["email_source"] = "old@acme.example", "apollo"
         _who, call = self.run_loop({"monid_api_key": "mk"}, who=who)
         self.assertEqual(call.asked, [])
 
@@ -152,13 +161,13 @@ class InTheFinderLoop(unittest.TestCase):
         refused: dict = {}
         _w, call = self.run_loop({"monid_api_key": "mk"}, refused=refused,
                                  refuse=MR.MonidError("Your Monid wallet is empty. Top it up at monid.ai, then try again."))
-        self.assertIn("wallet is empty", refused["Hunter"])
+        self.assertIn("wallet is empty", refused["Apollo"])
         _w2, call2 = self.run_loop({"monid_api_key": "mk"}, who=lead(name="Ravi Shah"), refused=refused)
         self.assertEqual(len(call.asked), 1)
         self.assertEqual(call2.asked, [])                                 # the second person was never asked
 
     def test_nobody_found_keeps_no_address(self):
-        who, _call = self.run_loop({"monid_api_key": "mk"}, answer=MISS)
+        who, _call = self.run_loop({"monid_api_key": "mk"}, answer={"output": {}})
         self.assertEqual(who.email, "")
 
 

@@ -150,21 +150,24 @@ class TheScreenOnThePool(_Workbench):
         wb._set_source("apollo")
         self.assertEqual(wb._source, "exa")
 
-    def test_the_target_says_reveal_for_apollo_and_names_no_provider_credit(self):
+    # The Apollo way (the owner, 25-Nov-2026): an Apollo search is free and SHOWS people; a full name is paid for
+    # only when the owner reveals that person. These replace the tests of the old auto-reveal.
+    def test_the_target_says_how_many_a_search_shows_and_names_no_provider_credit(self):
         wb = self.bench()
         wb._set_source("apollo")
-        self.assertEqual(wb._target_row.name.text(), "Full names up to")
+        self.assertEqual(wb._target_row.name.text(), "Show up to")
         self.assertNotIn("Apollo credit", wb._target.toolTip())
 
-    def test_the_line_under_find_says_search_is_free_and_prices_a_reveal(self):
+    def test_the_line_under_find_says_the_search_is_free_and_prices_a_reveal_per_person(self):
         wb = self.bench()
         wb._set_source("apollo")
         wb._target.setValue(40)
         text = wb._pool_search_meta(wb._filters.spec(), [])
         self.assertIn("free", text)
-        self.assertIn("up to 80 credits", text)                    # 40 people x the 2-credit default
+        self.assertIn("2 credits for each e-mail you find", text)
+        self.assertNotIn("80 credits", text)                       # nobody is revealed by the search itself
 
-    def test_the_question_before_a_search_says_what_it_can_cost(self):
+    def test_the_question_before_a_search_says_it_is_free_and_that_reveals_are_picked(self):
         wb = self.bench()
         wb._set_source("apollo")
         wb._target.setValue(40)
@@ -175,8 +178,9 @@ class TheScreenOnThePool(_Workbench):
         self.assertEqual(title, "Find new people")
         self.assertIn("free", lines[0])
         self.assertIn("40 people", lines[0])
-        self.assertIn("up to 80 credits", lines[0])
-        self.assertIn("not charged", lines[1])
+        self.assertIn("Nothing is charged for the search", lines[0])
+        self.assertIn("people you pick", lines[1])
+        self.assertIn("2 credits each", lines[1])
 
     def test_the_question_names_what_the_exa_backup_can_cost(self):
         # The owner, 25-Nov-2026: "Keep backup, show cost".
@@ -201,11 +205,14 @@ class TheScreenOnThePool(_Workbench):
     def test_more_than_the_balance_is_said(self):
         wb = self.bench(balance=10)
         wb._set_source("apollo")
-        wb._target.setValue(40)
+        # A search is free now; the balance is weighed where the money is: the question before a Reveal.
         said = []
-        wb._confirm_pool = lambda title, lines: (said.append(lines), False)[1]
-        self._saved_attrs["_confirm_search"](wb, wb._filters.spec(), [], "")
-        self.assertTrue(any("more than you have" in line for line in said[0]))
+        wb._confirm_pool = lambda title, lines: (said.append((title, lines)), False)[1]
+        self.assertFalse(wb._confirm_reveal(40))
+        [(title, lines)] = said
+        self.assertEqual(title, "Find e-mails")
+        self.assertIn("up to 80 credits", lines[0])               # 40 people x the 2-credit default
+        self.assertTrue(any("more than you have" in line for line in lines))
 
     def test_an_apollo_search_is_blocked_only_by_apollo_being_off_not_by_exa_being_off(self):
         wb = self.bench()
@@ -228,7 +235,8 @@ class TheScreenOnThePool(_Workbench):
         wb = self.bench()
         wb._set_source("apollo")
         wb._target.setValue(300)
-        self.assertEqual(wb._settings_hints()["target"], "Up to 600 credits.")
+        self.assertEqual(wb._settings_hints()["target"], "")        # showing 300 people is free
+        self.assertIn("2 credits", wb._settings_hints()["source"])
 
     def test_exa_only_names_its_own_price(self):
         wb = self.bench()
@@ -259,7 +267,8 @@ class TheScreenOnThePool(_Workbench):
         wb = self.bench()
         wb._set_source("apollo")
         wb._target.setValue(50)
-        self.assertEqual(wb._target_meta.text(), "Up to 100 credits.")
+        self.assertEqual(wb._target_meta.text(), "")                # a search's size costs nothing
+        self.assertIn("people you pick", wb._source_meta.text())
 
 
 class TheSettingsWindowOnYourOwnKeys(_Workbench):
@@ -279,7 +288,7 @@ class TheSettingsWindowOnYourOwnKeys(_Workbench):
         wb, said = self.hints({"monid_api_key": "mk", "exa_api_key": "ek"}, "apollo")
         self.assertIn("Monid wallet", said["source"])
         self.assertIn("Exa takes over", said["source"])
-        self.assertIn("\u20b9", said["target"])
+        self.assertIn("\u20b9", said["source"])
         self.assertIn("Monid wallet", said["mobiles"])
 
     def test_without_an_exa_key_it_does_not_promise_a_backup(self):
@@ -291,14 +300,16 @@ class TheSettingsWindowOnYourOwnKeys(_Workbench):
         self.assertIn("Apollo credit", said["source"])
         self.assertEqual(said["mobiles"], "")                         # no Monid wallet, no mobile lookup to price
 
-    def test_a_monid_wallet_without_a_hunter_key_renames_verify_because_it_finds(self):
+    # 25-Nov-2026, the owner: "no room for hunter now" — Apollo is the finder, through the Monid wallet.
+    def test_a_monid_wallet_without_an_apollo_key_renames_verify_because_it_finds(self):
         wb, said = self.hints({"monid_api_key": "mk"})
         wb._refresh_settings_hints()
         self.assertEqual(wb._verify_row.name.text(), "Find e-mails")
-        self.assertIn("Hunter", said["verify"])
+        self.assertIn("Apollo", said["verify"])
+        self.assertNotIn("Hunter", said["verify"])
 
-    def test_a_hunter_key_keeps_the_verify_name_and_adds_no_line(self):
-        wb, said = self.hints({"monid_api_key": "mk", "hunter_api_key": "hk"})
+    def test_an_apollo_key_keeps_the_verify_name_and_adds_no_line(self):
+        wb, said = self.hints({"monid_api_key": "mk", "apollo_api_key": "ak"})
         wb._refresh_settings_hints()
         self.assertEqual(said["verify"], "")
         self.assertNotEqual(wb._verify_row.name.text(), "Find e-mails")

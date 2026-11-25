@@ -10,8 +10,10 @@ of hunter + apollo only to find mails." These tests hold Prism to it:
   · enrich never writes an address (only the company's real domain);
   · an address an older build guessed is recognised exactly — and set aside,
     never shown, sent or exported — while a real one from a sheet never is;
-  · the finders are Hunter, then Apollo; Hunter asks by the company's name
-    when no domain is known; nobody found means no address;
+  · the finder is Apollo (25-Nov-2026, the owner: "no room for hunter now";
+    it was Hunter, then Apollo). Hunter's own finder is kept out of the chain,
+    and what it does when asked is still held here, with it put back for the
+    test; nobody found means no address;
   · the sheet says where each address came from (Email source), its LinkedIn
     column holds LinkedIn only, and the Exa page a person was found on is its
     own column (Profile link);
@@ -100,13 +102,28 @@ class NothingIsGuessed(unittest.TestCase):
             self.assertFalse(E.is_guess(found), source)
 
 
-class TheFindersAreHunterThenApollo(unittest.TestCase):
+class TheFinderIsApollo(unittest.TestCase):
 
-    def test_hunter_then_apollo_and_nothing_else(self):
-        # 27-Sep-2026: the code used to disagree with this file's own module
-        # docstring ("the finders are Hunter, then Apollo") — Apollo ran
-        # first. Fixed to match (the owner: "our main will always be hunter").
-        self.assertEqual([name for _k, name, _f in V._FINDERS], ["Hunter", "Apollo"])
+    def test_apollo_and_nothing_else(self):
+        # Changed 25-Nov-2026, the owner: "no room for hunter now" — Apollo's reveal sells the full name with the
+        # address for about what Hunter charged for the address alone (was 27-Sep-2026: "our main will always be
+        # hunter").
+        self.assertEqual([name for _k, name, _f in V._FINDERS], ["Apollo"])
+
+
+# Hunter put back in the chain, ahead of Apollo, for the tests of what Hunter itself does when it is asked.
+def _with_hunter(case):
+    finders = [("hunter_api_key", "Hunter", V._hunter_find), ("apollo_api_key", "Apollo", V._apollo_find)]
+    patch = mock.patch.object(V, "_FINDERS", finders)
+    patch.start()
+    case.addCleanup(patch.stop)
+
+
+class TheFindersAreHunterThenApollo(unittest.TestCase):
+    """What Hunter does as a finder, kept for if it returns to the chain (it is out since 25-Nov-2026)."""
+
+    def setUp(self):
+        _with_hunter(self)
 
     def test_a_website_subdomain_is_not_asked_for_mail(self):
         self.assertEqual(V._registrable("new.abb.com"), "abb.com")
@@ -316,7 +333,11 @@ class AFinderThatRefusesTheAccountIsAskedOnce(unittest.TestCase):
     Hunter 429 (the month's searches used up). Both were read as "nobody
     found", every person was asked of both, and he was told nothing. A refusal
     of the ACCOUNT is now asked once a batch and named; one person nobody
-    knows, or a per-second limit, is still just "not found"."""
+    knows, or a per-second limit, is still just "not found". Hunter is put back in the chain for its tests
+    (it is out since 25-Nov-2026)."""
+
+    def setUp(self):
+        _with_hunter(self)
 
     _FREE_PLAN = {"error": "The api/v1/people/match API is not included in your "
                            "Free plan and is not accessible, even with a master key.",
