@@ -437,7 +437,16 @@ jobs:
         run: |
           $want = '6.7.1'
           $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
-          function Get-Have { if (Test-Path $iscc) { $v = (Get-Item $iscc).VersionInfo; "{0}.{1}.{2}" -f $v.FileMajorPart, $v.FileMinorPart, $v.FileBuildPart } else { 'none' } }
+          # ISCC.exe's numeric file version reads 0.0.0 on the runner image, so
+          # take the product version string, else the version choco recorded.
+          function Get-Have {
+            if (-not (Test-Path $iscc)) { return 'none' }
+            $pv = (Get-Item $iscc).VersionInfo.ProductVersion
+            if ($pv -match '(\d+\.\d+\.\d+)') { return $Matches[1] }
+            $c = (choco list innosetup --exact --limit-output) -split '\|'
+            if ($c.Count -ge 2) { return $c[1].Trim() }
+            return 'unknown'
+          }
           $have = Get-Have
           if ($have -ne $want) {
             Write-Host "Inno Setup on the image: $have; installing $want"
