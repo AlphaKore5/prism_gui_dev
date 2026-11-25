@@ -252,7 +252,7 @@ class TheScreenOnThePool(_Workbench):
     def test_the_email_and_mobile_lines_use_the_rate_card_not_a_rupee_guess(self):
         said = self.bench()._settings_hints()
         self.assertIn("2 credits for each address found", said["verify"])
-        self.assertIn("10 credits for each number found", said["mobiles"])
+        self.assertIn("4 credits for each number found", said["mobiles"])
         self.assertNotIn("\u20b9", " ".join(said.values()))
 
     def test_the_hints_are_written_on_the_labels_and_follow_the_ceiling(self):

@@ -156,7 +156,7 @@ class FindMobilesOnTheScreen(_Workbench):
         [(title, lines)] = said
         self.assertEqual(title, "Find mobiles")
         self.assertIn("3 people", lines[0])
-        self.assertIn("up to 30 credits", lines[0])             # 3 x the 10-credit default
+        self.assertIn("up to 12 credits", lines[0])             # 3 x the 4-credit default
         self.assertIn("only for a number found", lines[1])
         self.assertIn("three data sources", lines[1])               # not "Apollo": the server asks three, cheapest first
         self.assertIn("a minute or two", lines[1])

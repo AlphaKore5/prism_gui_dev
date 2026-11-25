@@ -905,7 +905,7 @@ class LeadsWorkbench(QWidget):
             out["verify"] = i18n.t("Hot and warm leads. {c} for each address found.").format(
                 c=self._cr(gateway.rate("email_find", 2)))
             out["mobiles"] = i18n.t("Find mobiles: up to {n} people a press, {c} for each number found.").format(
-                n=mobiles.LIMIT, c=self._cr(gateway.rate("phone_mobile", 10)))
+                n=mobiles.LIMIT, c=self._cr(gateway.rate("phone_mobile", 4)))
             return out
         monid = _monid_ready(self.cfg)
         backup = bool(self._key("exa_api_key"))
@@ -3057,7 +3057,7 @@ class LeadsWorkbench(QWidget):
     def _confirm_mobiles(self, n: int) -> bool:
         """Every lookup asks first, in credits. Priced per number FOUND, so the figure is a
         ceiling. Tests patch this."""
-        price = gateway.rate("phone_mobile", 10)
+        price = gateway.rate("phone_mobile", 4)
         return self._confirm_pool(i18n.t("Find mobiles"), [
             i18n.t("Look up the mobile number for {n} people — up to {c}.").format(
                 n=n, c=self._cr(n * price)),
