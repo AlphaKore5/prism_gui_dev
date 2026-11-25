@@ -1693,7 +1693,12 @@ class MainWindow(QMainWindow):
             self.statusBar().clearMessage()
             if not auth.allowed:
                 if auth.code == "FEATURE_NOT_LICENSED":
-                    licensing.require(feature, self)     # show the pitch
+                    # Show the pitch. After a plan downgrade the renewed lease
+                    # refuses while the token still lists the feature (until
+                    # the next licence refresh), so require() passes and
+                    # shows nothing: say why instead of doing nothing.
+                    if licensing.require(feature, self):
+                        QMessageBox.information(self, "Licence", auth.message)
                 else:
                     QMessageBox.warning(self, "Licence", auth.message)
                 return
