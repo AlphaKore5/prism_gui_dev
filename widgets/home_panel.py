@@ -1036,6 +1036,8 @@ class HomePanel(QWidget):
         ]
 
         for key, label, icon_name in chips_data:
+            if registry.is_absent(key):        # a Studio build has no BOQ to analyze
+                continue
             chip = QPushButton(label)
             chip.setObjectName("tryChip")
             self._chip_icon(chip, icon_name)
