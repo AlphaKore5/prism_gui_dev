@@ -732,7 +732,14 @@ class PersonPanel(QWidget):
             self.email_source = _label(i18n.t("Source: {src}").format(
                 src=i18n.t(email_source_of(lead))), "pMuted")
             col.addWidget(self.email_source)
-        if tone[3] != "verified":
+        from prospector import apollo
+        if apollo.is_preview(lead):
+            # An Apollo search card: a first name and a surname's initial. Its e-mail comes WITH the reveal, so
+            # the drawer offers that, and not a lookup with half a name (the Apollo way, 25-Nov-2026).
+            self.reveal = _link(i18n.t("Reveal full name and e-mail…"),
+                                lambda: self.enrichRequested.emit(self.view.row, ["reveal"]))
+            col.addWidget(self.reveal)
+        elif tone[3] != "verified":
             self.find_email = _link(i18n.t("Find their e-mail…"),
                                     lambda: self.enrichRequested.emit(self.view.row, ["email"]))
             col.addWidget(self.find_email)
@@ -763,7 +770,9 @@ class PersonPanel(QWidget):
                 col.addWidget(_link(i18n.t("Open the page it came from"),
                                     lambda: self.open_url(found.get("source_url") or "")))
         elif phones.needs_phone(lead):
-            self.find_phone = _link(i18n.t("Find their phone…"),
+            # The number their COMPANY publishes (its website, a directory) — not theirs; their own is
+            # "Find their mobile…" below. Named so the two are not read as the same thing (25-Nov-2026).
+            self.find_phone = _link(i18n.t("Find their company's phone…"),
                                     lambda: self.enrichRequested.emit(self.view.row, ["phone"]))
             col.addWidget(self.find_phone)
         # Their OWN mobile (Apollo, through Prism's credits). When it could not become the

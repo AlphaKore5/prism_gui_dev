@@ -177,6 +177,36 @@ class TheRevealButton(_Workbench):
         self.assertIn("up to 6 credits", lines[0])
         self.assertEqual(started, [])
 
+    def test_the_drawer_reveal_link_goes_to_the_same_reveal(self):
+        wb, leads = self.bench(1)
+        asked = []
+        wb._reveal_selected = lambda dossiers: asked.append([d.lead for d in dossiers])
+        dos = type("D", (), {"lead": leads[0]})()
+        wb._panel_enrich(dos, ["reveal"])
+        self.assertEqual(asked, [[leads[0]]])
+
+
+class TheDrawer(unittest.TestCase):
+    """A preview row's drawer offers the reveal, not an e-mail lookup with half a name; the company's published
+    number is named as the company's."""
+
+    def drawer_links(self, lead):
+        from PySide6.QtWidgets import QApplication, QPushButton
+        QApplication.instance() or QApplication(sys.argv)
+        from addons.leads import person as P
+        from prospector.models import Dossier
+        panel = P.PersonPanel()
+        self.addCleanup(panel.deleteLater)
+        panel.show_person(P.PersonView(row=Dossier(lead=lead)))
+        return [b.text() for b in panel.findChildren(QPushButton)]
+
+    def test_a_preview_offers_reveal_and_no_email_lookup(self):
+        lead = apollo._preview_of(apollo._card(card(1), ""))
+        texts = self.drawer_links(lead)
+        self.assertIn("Reveal full name and e-mail…", texts)
+        self.assertNotIn("Find their e-mail…", texts)
+        self.assertNotIn("Find their mobile…", texts)
+
 
 if __name__ == "__main__":
     unittest.main()

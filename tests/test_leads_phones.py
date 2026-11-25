@@ -747,7 +747,7 @@ class ThePersonPanelSaysWhatTheNumberIs(unittest.TestCase):
         self.assertEqual(len(link), 1)
         link[0].click()
         self.assertEqual(self.opened, ["https://acme.example/contact"])
-        self.assertFalse([b for b in p._left.findChildren(QPushButton) if b.text() == "Find their phone…"])
+        self.assertFalse([b for b in p._left.findChildren(QPushButton) if b.text() == "Find their company's phone…"])
 
     def test_an_office_line_is_not_shown_as_a_mobile_neither_new_nor_saved_before_the_fix(self):
         """27-Sep-2026, the owner's screenshot: Siemens' Bengaluru switchboard, "+91 80334 22000",
@@ -775,13 +775,13 @@ class ThePersonPanelSaysWhatTheNumberIs(unittest.TestCase):
     def test_no_phone_offers_to_find_it_and_asks_for_it(self):
         p = self.panel(lead())
         self.assertIn("No phone yet", self.texts(p))
-        [find] = [b for b in p._left.findChildren(QPushButton) if b.text() == "Find their phone…"]
+        [find] = [b for b in p._left.findChildren(QPushButton) if b.text() == "Find their company's phone…"]
         find.click()
         self.assertEqual(self.asked, [["phone"]])
 
     def test_a_person_at_no_company_is_not_offered_a_lookup(self):
         p = self.panel(lead(company=""))
-        self.assertFalse([b for b in p._left.findChildren(QPushButton) if b.text() == "Find their phone…"])
+        self.assertFalse([b for b in p._left.findChildren(QPushButton) if b.text() == "Find their company's phone…"])
         self.assertFalse(p.enrich_boxes["phone"].isEnabled())
 
 

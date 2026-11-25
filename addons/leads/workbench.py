@@ -1996,7 +1996,7 @@ class LeadsWorkbench(QWidget):
             self._status.setText(i18n.t(
                 "Wait for the job that is running to finish, then try again."))
             return
-        self._enrich_queue = [(dos, f) for f in ("email", "phone", "mobile", "company", "qualify")
+        self._enrich_queue = [(dos, f) for f in ("reveal", "email", "phone", "mobile", "company", "qualify")
                               if f in (fields or ())]
         self._next_enrichment()
 
@@ -2005,7 +2005,9 @@ class LeadsWorkbench(QWidget):
         or nothing to do) hands on to the next at once."""
         while self._enrich_queue and not self._jobs:
             dos, what = self._enrich_queue.pop(0)
-            if what == "email":
+            if what == "reveal":
+                self._reveal_selected([dos])
+            elif what == "email":
                 self._find_emails([dos])
             elif what == "phone":
                 self._find_phones([dos])
