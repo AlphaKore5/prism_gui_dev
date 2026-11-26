@@ -120,20 +120,23 @@ class FlavourRelease(Recorder):
                           "manifest.windows-x64-studio.unsigned.json"):
                     open(os.path.join(d, n), "w").write("x")
         with mock.patch.object(R, "run", side_effect=self.fake_run), \
+             mock.patch.object(R, "_asset_sizes", return_value={}), \
              mock.patch.object(R, "_release_exists", return_value=exists):
             R.create_flavour_release("org/dev", "v2.0.0-studio", "123", "studio", SHA,
                                      self.work, [("windows-x64", "windows-latest")])
         return self.gh()
 
-    def test_created_at_the_commit_not_latest_then_the_installers_uploaded(self):
+    def test_created_at_the_commit_not_latest_then_each_file_uploaded_on_its_own(self):
         calls = self.create()
-        self.assertEqual(len(calls), 2)
+        self.assertEqual(len(calls), 3)
         self.assertIn(f"--target {SHA}", calls[0])
         self.assertIn("--latest=false", calls[0])
         self.assertIn("Prism Studio 2.0.0", calls[0])
-        self.assertTrue(calls[1].startswith("gh release upload v2.0.0-studio -R org/dev --clobber"))
-        self.assertIn("Prism-studio-2.0.0-windows-x64-setup.exe", calls[1])
-        self.assertIn("manifest.windows-x64-studio.unsigned.json", calls[1])
+        uploads = calls[1:]
+        for c in uploads:
+            self.assertTrue(c.startswith("gh release upload v2.0.0-studio -R org/dev --clobber "))
+        self.assertTrue(any(c.endswith("Prism-studio-2.0.0-windows-x64-setup.exe") for c in uploads))
+        self.assertTrue(any(c.endswith("manifest.windows-x64-studio.unsigned.json") for c in uploads))
 
     def test_the_installers_come_from_the_flavours_own_artifact(self):
         def download(cmd, **kw):
@@ -143,12 +146,13 @@ class FlavourRelease(Recorder):
                 os.makedirs(dest)
                 open(os.path.join(dest, "Prism-studio-2.0.0-windows-x64-setup.exe"), "w").write("x")
         with mock.patch.object(R, "run", side_effect=download), \
+             mock.patch.object(R, "_asset_sizes", return_value={}), \
              mock.patch.object(R, "_release_exists", return_value=True):
             R.create_flavour_release("org/dev", "v2.0.0-studio", "123", "studio", SHA,
                                      self.work, [("windows-x64", "windows-latest")])
         calls = self.gh()
         self.assertEqual(calls[0].split(" -D")[0], "gh run download 123 -R org/dev -n prism-studio-windows-latest")
-        self.assertIn("Prism-studio-2.0.0-windows-x64-setup.exe", calls[1])
+        self.assertTrue(calls[1].endswith("Prism-studio-2.0.0-windows-x64-setup.exe"))
 
     def test_an_existing_release_is_not_created_again(self):
         self.assertFalse(any(c.startswith("gh release create") for c in self.create(exists=True)))
@@ -169,6 +173,44 @@ class Carry(Recorder):
         self.assertTrue(calls[2].startswith("gh release upload v2.0.0-studio -R org/dev --clobber"))
         self.assertIn("manifest.windows-x64-sales.signed", calls[2])
         self.assertNotIn("notes.txt", calls[2])
+
+
+class UploadOneByOne(Recorder):
+    def files(self, *names):
+        out = []
+        for n in names:
+            f = os.path.join(self.work, n)
+            open(f, "w").write("x" * 10)
+            out.append(f)
+        return out
+
+    def test_a_file_already_there_at_the_same_size_is_not_sent_again(self):
+        a, b = self.files("a.exe", "b.zip")
+        with mock.patch.object(R, "run", side_effect=self.fake_run), \
+             mock.patch.object(R, "_asset_sizes", return_value={"a.exe": 10, "b.zip": 3}):
+            R.upload_one_by_one("org/dev", "v2.0.0-studio", [a, b])
+        self.assertEqual(len(self.gh()), 1)         # b.zip is another size: sent again
+        self.assertTrue(self.gh()[0].endswith("b.zip"))
+
+    def test_a_timed_out_file_is_tried_again_then_gives_up(self):
+        import subprocess
+        (a,) = self.files("a.exe")
+        fails = []
+        def flaky(cmd, **kw):
+            fails.append(cmd)
+            if len(fails) < 3:
+                raise subprocess.CalledProcessError(1, cmd)
+        with mock.patch.object(R, "run", side_effect=flaky), \
+             mock.patch.object(R.time, "sleep") as nap, \
+             mock.patch.object(R, "_asset_sizes", return_value={}):
+            R.upload_one_by_one("org/dev", "t", [a])
+        self.assertEqual(len(fails), 3)
+        self.assertEqual(nap.call_count, 2)
+        with mock.patch.object(R, "run", side_effect=subprocess.CalledProcessError(1, "x")), \
+             mock.patch.object(R.time, "sleep"), \
+             mock.patch.object(R, "_asset_sizes", return_value={}):
+            with self.assertRaises(subprocess.CalledProcessError):
+                R.upload_one_by_one("org/dev", "t", [a], tries=2)
 
 
 class CarryNeverOverwritesThisReleasesOwn(Recorder):

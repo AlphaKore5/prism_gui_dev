@@ -71,6 +71,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 
 # Windows consoles are cp1252 and cannot encode the characters below — see
 # packaging/build.py for the CI failure that found this. Degrade, don't die.
@@ -451,7 +452,36 @@ def create_flavour_release(repo: str, tag: str, run_id: str, flavour: str,
                  display=FL.identity(flavour)["display"], version=version,
                  repo=repo, target=target[:7]),
              "--latest=false"])
-    run(["gh", "release", "upload", tag, "-R", repo, "--clobber"] + files)
+    upload_one_by_one(repo, tag, files)
+
+
+def _asset_sizes(repo: str, tag: str) -> dict:
+    """{asset name: size in bytes} of what `tag` already holds."""
+    out = subprocess.run(
+        ["gh", "release", "view", tag, "-R", repo, "--json", "assets",
+         "--jq", ".assets[]|[.name,.size]|@tsv"],
+        capture_output=True, text=True, check=True).stdout
+    return {n: int(sz) for n, sz in (ln.split("\t") for ln in out.splitlines() if ln)}
+
+
+def upload_one_by_one(repo: str, tag: str, files: list[str], tries: int = 4) -> None:
+    """Upload each file on its own, again if it times out, never one that is
+    already there at the same size. All of a flavour's installers in ONE
+    `gh release upload` share the uplink and starve each other: the first
+    attempt (v2.0.0-studio, 26 Nov 2026) died with "HTTP 408: Upload body timed
+    out due to inactivity" after ~2.3 GB, and nothing was resumable."""
+    have = _asset_sizes(repo, tag)
+    for path in files:
+        if have.get(os.path.basename(path)) == os.path.getsize(path):
+            continue
+        for attempt in range(1, tries + 1):
+            try:
+                run(["gh", "release", "upload", tag, "-R", repo, "--clobber", path])
+                break
+            except subprocess.CalledProcessError:
+                if attempt == tries:
+                    raise
+                time.sleep(5 * attempt)
 
 
 def carry_signed_manifests(repo: str, tag: str, from_tags: list[str],
