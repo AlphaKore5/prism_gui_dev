@@ -400,6 +400,7 @@ class MainWindow(QMainWindow):
         self._task_runs: list[dict] = []
         self._queue_stopped = False               # a licence refusal kills the rest
         self._auto_run = False                    # set once Start the work is pressed
+        self._lite_run = False                    # the simpler reel was chosen for the run being started
         # Plan AND start, no stop at the plan (owner, 19 Nov 2026: "dont
         # stop at plan just sent it directly", then for every way in). Set by
         # _route(); cleared on planning failure, cancel and reset.
@@ -2948,6 +2949,15 @@ class MainWindow(QMainWindow):
 
         skip_stages = sorted(dropped)
 
+        # A reel whose estimate is over the balance: ask, before anything is
+        # written or spent. Never a silent downgrade.
+        self._lite_run = False
+        if "Prism Studio" in run_agents.values():
+            choice = self._offer_simpler_reel()
+            if choice == "cancel":
+                return
+            self._lite_run = choice == "lite"
+
         # Pressing Start the work commits the whole queue, not just the plan on
         # screen. From here every later task plans and runs without stopping.
         # Armed only now, after every confirmation above has been answered:
@@ -2983,6 +2993,46 @@ class MainWindow(QMainWindow):
             worker.start()
             return
         self._authorize_and_start(run_agents, run_steps, skip_stages)
+
+    def _offer_simpler_reel(self) -> str:
+        """"lite", "full" or "cancel". Asked only when the plan's estimate is
+        over a balance the server has told us; an unknown balance is not
+        nagged about. The estimate is the plan's own (it undercounts the
+        design step), so the words say "about"."""
+        est = (self.routing or {}).get("_estimate") or {}
+        st = ai_server.status_now() if ai_server.active() else {}
+        have = st.get("balance_mc") if st.get("ready") else None
+        need = int(est.get("typical_mc") or 0)
+        if have is None or need <= 0 or need <= int(have):
+            return "full"
+        credits = lambda mc: max(1, round(int(mc) / 1000))      # noqa: E731
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Question)
+        box.setWindowTitle(i18n.t("Prism Studio"))
+        box.setText(i18n.t(
+            "This reel is estimated at about {need} credits and you have about "
+            "{have}. Make a simpler version that fits your credits?").format(
+            need=credits(need), have=credits(have)))
+        simple = int(est.get("simple_mc") or 0)
+        more = (i18n.t("The simpler version still writes the script and draws "
+                       "the pictures (about {n} credits), but skips the paid "
+                       "art-direction step and films a plain layout from them.")
+                .format(n=credits(simple)) if simple > 0 else
+                i18n.t("The simpler version still writes the script and draws "
+                       "the pictures, but skips the paid art-direction step "
+                       "and films a plain layout from them. It costs much less."))
+        if 0 < simple and simple > int(have):
+            more += " " + i18n.t("That may still be more than you have.")
+        box.setInformativeText(more)
+        lite_btn = box.addButton(i18n.t("Make a simpler version"), QMessageBox.AcceptRole)
+        full_btn = box.addButton(i18n.t("Continue with the full version"),
+                                 QMessageBox.ActionRole)
+        cancel_btn = box.addButton(i18n.t("Cancel"), QMessageBox.RejectRole)
+        box.setEscapeButton(cancel_btn)
+        box.exec()
+        clicked = box.clickedButton()
+        return ("lite" if clicked is lite_btn
+                else "full" if clicked is full_btn else "cancel")
 
     def _prompts_written(self, steps: list, run_agents: dict,
                          skip_stages: list, error: str = ""):
@@ -3060,7 +3110,9 @@ class MainWindow(QMainWindow):
         self.work_stack.setCurrentIndex(RUNNING)
         worker = AutomationWorker(self.routing, cfg_for_run, self.attachments,
                                   self._last_query, custom_stages=run_steps,
-                                  skip_stages=skip_stages)
+                                  skip_stages=skip_stages,
+                                  lite=getattr(self, "_lite_run", False))
+        self._lite_run = False              # one run only
         # Hold the machine awake for the duration. A run is tens of minutes
         # and the whole promise is that you walk away — a laptop that sleeps
         # halfway through takes the browser session with it.
