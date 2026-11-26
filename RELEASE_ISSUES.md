@@ -152,6 +152,18 @@ something you did not run.
 
 ## Issue log (newest first)
 
+### ISS-037 — A helper's test run wrote reel folders into the real Desktop (2026-11-26) — CAUGHT, cleaned, nothing else touched
+- **Found by:** the helper agent reported it, and I checked the folder, `~/.prism/config.json` and the engine clones afterwards.
+- **What went wrong:** two early test runs in a helper's shell had no sandbox `HOME` (the `export` did not carry between
+  shell calls). A reel test wrote six output folders named `2026-11-26 21-15*` into the real
+  `~/Desktop/Prism Artifacts/make an Instagram reel about Tulsi/`. Outputs go to the real home by design (ISS-009), so a
+  sandbox `HOME` is the only thing that keeps tests away from them.
+- **Fix:** deleted exactly those six folders (the 18 Nov ones were left alone). Confirmed afterwards: no `2026-11-26` folder
+  remains, `~/.prism/config.json` is unchanged (20 Nov, 1632 bytes), nothing under `~/.prism` was written.
+- **Check:** every test command sets `HOME=$(mktemp -d)` on the SAME line as the command, never in an earlier `export`.
+  After a test session, `ls "~/Desktop/Prism Artifacts"` for folders dated today.
+- **Lesson:** a safety variable set in one shell call is gone in the next. Put it in the command, or use a wrapper script.
+
 ### ISS-033 — A "pull latest" rebase rewrote commits that were already published (2026-11-13) — CAUGHT before pushing
 - **Found by:** checking `merge-base --is-ancestor <remote branch> HEAD` before pushing the engine for a PR.
 - **What went wrong:** asked to pull, I ran `git rebase --autostash origin/main` on the engine branch. Its first nine commits
