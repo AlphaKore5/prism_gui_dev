@@ -8,7 +8,7 @@
     python packaging/build.py --no-sign        # skip code signing
 
 Produces, in dist/:
-    Linux    Prism-<version>-linux-<arch>.tar.gz   (+ Prism-<version>.AppImage
+    Linux    Prism-<version>-linux-<arch>.tar.gz   (+ Prism-<version>-<arch>.AppImage
                                                      when appimagetool is on PATH)
     Windows  Prism-<version>-windows-<arch>.zip        (+ ...-setup.exe, a per-user
                                                      installer, when Inno Setup's
@@ -129,6 +129,13 @@ FLAVOUR_BUILT = requested_flavour()
 # a Sales archive can never be mistaken for the product.
 STEM = (f"{app_meta.NAME}-{app_meta.VERSION}-{OS_TAG}-{ARCH}" if FLAVOUR_BUILT == "complete"
         else f"{app_meta.NAME}-{FLAVOUR_BUILT}-{app_meta.VERSION}-{OS_TAG}-{ARCH}")
+
+
+def appimage_name(flavour: str, version: str, arch: str) -> str:
+    """Prism-<version>-<arch>.AppImage for Complete, Prism-<flavour>-<version>-<arch>.AppImage
+    for any other flavour (three flavours once all shipped one identical name)."""
+    mid = "" if flavour == "complete" else f"{flavour}-"
+    return f"{app_meta.NAME}-{mid}{version}-{arch}.AppImage"
 
 
 def run(cmd: list[str], **kw):
@@ -450,7 +457,7 @@ def build_appimage(app_dir: str, appimagetool: str) -> str:
                 f'exec "$HERE/usr/bin/{app_meta.NAME}" "$@"\n')
     os.chmod(apprun, 0o755)
 
-    out = os.path.join(DIST, f"{app_meta.NAME}-{app_meta.VERSION}-{ARCH}.AppImage")
+    out = os.path.join(DIST, appimage_name(FLAVOUR_BUILT, app_meta.VERSION, ARCH))
     env = dict(os.environ, ARCH=platform.machine())
     # --appimage-extract-and-run: CI containers have no FUSE.
     run([appimagetool, "--appimage-extract-and-run", appdir, out], env=env)

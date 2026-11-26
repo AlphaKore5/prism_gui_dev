@@ -161,13 +161,14 @@ class DataIsConsistent(unittest.TestCase):
 
     def test_the_owners_decisions_2026_11_21(self):
         pe = {f: set(flavour.package_excludes(f)) for f in flavour.FLAVOURS}
-        # Chromium: kept in Studio and Engineering, dropped from Sales.
-        self.assertIn("playwright", pe["sales"])
+        # Chromium: kept everywhere since 2026-11-26 (Studio sits inside Sales
+        # and Engineering).
+        self.assertNotIn("playwright", pe["sales"])
         self.assertNotIn("playwright", pe["studio"])
         self.assertNotIn("playwright", pe["engineering"])
-        # Video encoding: dropped from Sales and Engineering, kept in Studio.
-        self.assertIn("imageio_ffmpeg", pe["sales"])
-        self.assertIn("imageio_ffmpeg", pe["engineering"])
+        # Video encoding: Reel and Motion are in Studio, Sales and Engineering.
+        self.assertNotIn("imageio_ffmpeg", pe["sales"])
+        self.assertNotIn("imageio_ffmpeg", pe["engineering"])
         self.assertNotIn("imageio_ffmpeg", pe["studio"])
         # Engineering-only libraries: dropped from Sales and Studio only.
         eng_only = {"cadquery", "OCP", "vtkmodules", "llvmlite", "numba"}

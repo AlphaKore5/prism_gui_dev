@@ -38,11 +38,17 @@ COMPLETE_SOURCE = (
 
 SOURCE = {
     "complete": COMPLETE_SOURCE,
-    "sales": COMMON_HEAD + ["bundled dependencies"] + COMMON_TAIL
-             + ["add-ons registered (4)"] + SKILLS,
-    "engineering": COMMON_HEAD + ["BOQ add-on (ezdxf)", "bundled dependencies"]
-             + COMMON_TAIL + ["add-ons registered (4)"] + SKILLS
-             + ["Prism Studio browser"],
+    "sales": COMMON_HEAD + ["Reel add-on (Pillow + renderer)",
+                            "bundled dependencies",
+                            "Studio editor + Motion runtime files"]
+             + COMMON_TAIL + ["add-ons registered (6)"] + SKILLS
+             + ["Prism Studio browser", "Reel encoding"],
+    "engineering": COMMON_HEAD + ["BOQ add-on (ezdxf)",
+                                  "Reel add-on (Pillow + renderer)",
+                                  "bundled dependencies",
+                                  "Studio editor + Motion runtime files"]
+             + COMMON_TAIL + ["add-ons registered (6)"] + SKILLS
+             + ["Prism Studio browser", "Reel encoding"],
     "studio": COMMON_HEAD + ["Reel add-on (Pillow + renderer)",
                              "bundled dependencies",
                              "Studio editor + Motion runtime files"]
@@ -56,8 +62,10 @@ FROZEN_EXTRAS = {
     "complete": ["Prism Studio browser (Chromium)", "Reel encoding (FFmpeg)",
                  "Motion Graphics available", "STEP available",
                  "Gerber available"],
-    "sales": [],
-    "engineering": ["Prism Studio browser (Chromium)", "STEP available",
+    "sales": ["Prism Studio browser (Chromium)", "Reel encoding (FFmpeg)",
+              "Motion Graphics available"],
+    "engineering": ["Prism Studio browser (Chromium)", "Reel encoding (FFmpeg)",
+                    "Motion Graphics available", "STEP available",
                     "Gerber available"],
     "studio": ["Prism Studio browser (Chromium)", "Reel encoding (FFmpeg)",
                "Motion Graphics available"],

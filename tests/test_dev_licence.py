@@ -90,9 +90,9 @@ class FlavourFeatures(unittest.TestCase):
     def test_features_come_from_the_flavour_manifests(self):
         self.assertEqual(mint.flavour_features("studio"), ["core", "reel"])
         self.assertEqual(mint.flavour_features("sales"),
-                         ["core", "email", "inbox", "leads", "marketing"])
+                         ["core", "email", "inbox", "leads", "marketing", "reel"])
         self.assertEqual(mint.flavour_features("engineering"),
-                         ["core", "boq", "gerber", "step"])
+                         ["core", "boq", "gerber", "reel", "step"])
         self.assertEqual(set(mint.flavour_features("complete")),
                          set(__import__("plans").FEATURES))
 
@@ -142,7 +142,7 @@ class CmdFlavourWritesOnlyTheSandbox(unittest.TestCase):
                           device_fp=mint.device.fingerprint(user_dir)[0],
                           public_keys=keys.public_keys())
         self.assertEqual(claims["kid"], "dev2")
-        self.assertEqual(claims["feat"], ["core", "boq", "gerber", "step"])
+        self.assertEqual(claims["feat"], ["core", "boq", "gerber", "reel", "step"])
 
 
 class NoPrivateKeyInGit(unittest.TestCase):

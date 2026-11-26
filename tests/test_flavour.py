@@ -31,8 +31,8 @@ ALL = ("inquiry", "boq", "gerber", "step", "bom", "email", "leads",
 EXPECTED = {
     "complete": set(ALL),
     "studio": {"reel", "motion"},
-    "sales": {"inquiry", "email", "leads", "whatsapp"},
-    "engineering": {"boq", "bom", "step", "gerber"},
+    "sales": {"inquiry", "email", "leads", "whatsapp", "reel", "motion"},
+    "engineering": {"boq", "bom", "step", "gerber", "reel", "motion"},
 }
 
 # The complete build's shelves and registry order, exactly as before flavours
