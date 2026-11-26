@@ -405,13 +405,51 @@ class GenerateArtworkDrawsCutsAndKeepsGoingOnOneFailure(unittest.TestCase):
         self.assertEqual(len(paths), 2)        # 3 asked, 1 failed, 2 made
         self.assertIn("2", note)
 
-    def test_no_prompts_at_all_is_a_clear_failure(self):
+    def test_no_key_at_all_asks_for_the_openrouter_key(self):
+        with mock.patch.object(IG._ai, "active", return_value=False):
+            paths, note = IG.generate_artwork("x", "", {"openrouter_api_key": ""})
+        self.assertEqual(paths, [])
+        self.assertIn("OpenRouter key", note)
+
+    def test_an_empty_brief_answer_with_a_key_is_not_blamed_on_the_key(self):
+        # Was pinned as "OpenRouter key"; with a key present (or the server
+        # stand-in) that sent customers to Settings for a problem that was not
+        # theirs.
         with mock.patch.object(IG._openrouter, "openrouter_chat",
                               return_value=""):
             paths, note = IG.generate_artwork(
                 "x", "", {"openrouter_api_key": "k"})
         self.assertEqual(paths, [])
-        self.assertIn("OpenRouter key", note)
+        self.assertNotIn("OpenRouter key", note)
+        self.assertIn("did not write any image briefs", note)
+
+    def test_the_servers_own_reason_reaches_the_customer_in_server_mode(self):
+        err = IG._ai.AiError("NO_CREDITS", "You don't have enough credits for that.")
+        with mock.patch.object(IG._ai, "active", return_value=True), \
+                mock.patch.object(IG._openrouter, "openrouter_chat",
+                                  side_effect=err):
+            paths, note = IG.generate_artwork(
+                "x", "", {"openrouter_api_key": "prism-ai"})
+        self.assertEqual(paths, [])
+        self.assertEqual(note, "You don't have enough credits for that.")
+
+    def test_a_single_image_says_why_the_brief_failed(self):
+        err = IG._ai.AiError("PAUSED", "AI is paused on your account.")
+        with mock.patch.object(IG._openrouter, "openrouter_chat",
+                               side_effect=err), \
+                mock.patch.object(IG._openrouter, "openrouter_image") as img:
+            path, note = IG.generate("x", "", {"openrouter_api_key": "prism-ai"})
+        self.assertEqual(path, "")
+        self.assertEqual(note, "AI is paused on your account.")
+        img.assert_not_called()
+
+    def test_a_non_ai_brief_failure_still_falls_back_to_the_raw_words(self):
+        with mock.patch.object(IG._openrouter, "openrouter_chat",
+                               side_effect=RuntimeError("down")):
+            self.assertEqual(IG.build_single_prompt(
+                "x", "", {"openrouter_api_key": "k"}), "")
+            self.assertEqual(IG.build_prompts(
+                "x", "", {"openrouter_api_key": "k"}), [])
 
     def test_every_openrouter_call_failing_is_a_clear_failure_not_empty_success(self):
         with mock.patch.object(IG._openrouter, "openrouter_chat",

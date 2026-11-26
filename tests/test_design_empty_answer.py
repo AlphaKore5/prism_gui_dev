@@ -65,3 +65,40 @@ def test_the_studio_names_the_closest_reason_not_no_json_found():
         path, why = automation._run_studio(sources, [], {})
     assert path == ""
     assert "no markup" in why and "No JSON found" not in why
+
+
+def _studio(sources, design):
+    from core import reel_web
+    with mock.patch.object(reel_web, "available", return_value=(True, "")), \
+            mock.patch.object(automation, "_keep_failed_spec", return_value="/k/spec.txt") as keep:
+        out = automation._run_studio(sources, [], {}, design=design)
+    keep.assert_called_once()
+    return out
+
+
+_SCRIPT = ('{"scenes": [{"role": "hook", "seconds": 4.5, "kicker": "k", '
+           '"headline": "h"}]}')
+
+
+def test_a_design_step_that_errored_is_named_with_its_own_error():
+    path, why = _studio([_SCRIPT], {"texts": [], "error": "No credits left."})
+    assert path == ""
+    assert why.startswith("The design step did not return a design: No credits left.")
+    assert "no markup" not in why and "/k/spec.txt" in why
+
+
+def test_a_design_step_with_no_html_is_named_not_the_script():
+    path, why = _studio([_SCRIPT, _SCRIPT], {"texts": [_SCRIPT], "error": ""})
+    assert why.startswith("The design step did not return a design")
+    assert "no markup" in why          # its own reason, under the design heading
+
+
+def test_a_design_step_that_sent_nothing_is_still_named():
+    path, why = _studio([_SCRIPT], {"texts": [], "error": ""})
+    assert why.startswith("The design step did not return a design.")
+
+
+def test_without_design_info_the_closest_reason_rule_is_unchanged():
+    path, why = _studio([_SCRIPT], None)
+    assert "no markup" in why and "design step" not in why
+
