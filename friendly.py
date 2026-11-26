@@ -458,6 +458,9 @@ _AI_REFUSAL = re.compile(
     r"|AI isn't available( to your account)?|AI is (blocked|not available)"
     r"|re-check your licence before using AI", re.I)
 
+# core/ai_client.chat: an empty answer the server still charged for.
+_AI_CHARGED = re.compile(r"This call was charged [0-9,.]+ credits", re.I)
+
 
 def explain(error: object, context: str = "") -> Problem:
     """Any error → something a person can act on.
@@ -469,6 +472,14 @@ def explain(error: object, context: str = "") -> Problem:
     # The licence server words its own AI refusals for the customer ("needs
     # 40 credits and you have 12", "isn't switched on for your account").
     # Show that sentence itself, not a generic "something went wrong".
+    if _AI_CHARGED.search(str(error)):
+        # The server billed a call whose answer came back empty: say so, and
+        # never claim "nothing was charged".
+        return Problem(
+            "Prism AI sent back no answer",
+            str(error).strip(),
+            ("Prism did not ask again, so nothing more was spent.",
+             "Everything already finished is still in History."))
     if _AI_REFUSAL.search(str(error)):
         return Problem(
             "Prism AI couldn't run this",
