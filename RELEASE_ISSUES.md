@@ -152,6 +152,20 @@ something you did not run.
 
 ## Issue log (newest first)
 
+### ISS-033 — A "pull latest" rebase rewrote commits that were already published (2026-11-13) — CAUGHT before pushing
+- **Found by:** checking `merge-base --is-ancestor <remote branch> HEAD` before pushing the engine for a PR.
+- **What went wrong:** asked to pull, I ran `git rebase --autostash origin/main` on the engine branch. Its first nine commits
+  were already on `origin/fix/motion-text-anchor-and-render` (the branch behind an open PR), so the rebase gave them new hashes
+  and the branch no longer fast-forwarded the remote. Pushing would have needed a force-push, and the GUI repo's engine
+  pointers named the old hashes.
+- **Fix:** kept the rebased result on `local/rebased-onto-main-2026-11-13`, went back to the published lineage
+  (`backup/pre-pull-2026-11-13`), committed on top of it, and pushed as a fast-forward.
+- **Check:** before any rebase of a branch that has a PR, `git merge-base --is-ancestor <remote branch> HEAD` must say YES
+  afterwards; if the remote branch is already pushed, do not rebase it, put the new work on top.
+- **Lesson:** "rebase, never merge" is for unpublished work. I applied it to published commits because I did not look at what
+  was published first.
+- **Numbering:** first logged as ISS-023 on `motion/reference-match-part-1`, which clashed with an existing ISS-023; renumbered here.
+
 ### ISS-036 — I opened a licence-server PR without running its browser test; CI went red (2026-11-26) — FIXED
 - **Seen:** licence-server PR #4 failed `tests/test_console_ui.py::test_pulse_new_badge_only_on_errors_first_seen_in_the_last_day`.
   I had run the whole suite with `--ignore=tests/test_console_ui.py` (it needs Chromium) and added `<b>` tags inside the Pulse error
