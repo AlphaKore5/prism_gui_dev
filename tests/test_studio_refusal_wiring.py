@@ -6,6 +6,7 @@ to fail the way the server fails when credits run out.
 """
 from __future__ import annotations
 
+import json
 import os
 import sys
 
@@ -28,7 +29,7 @@ NOTHING_FILMED = ("Nothing was filmed: the design step was stopped by the AI err
 
 
 def _run(ai, monkeypatch, tmp_path, design_error=None, design_text=None,
-         script_text=None, render=None):
+         script_text=None, render=None, run_kwargs=None):
     import ai_server
     from core import automation, config as C, reel_web, ui
     shown: list[str] = []
@@ -68,7 +69,7 @@ def _run(ai, monkeypatch, tmp_path, design_error=None, design_text=None,
             ("content", "Claude", ["Write the reel script."]),
             ("media", "Prism Studio", ["Make the reel."])],
             chatgpt_analysis=False, query=REEL, failover=True,
-            on_event=lambda k, p: events.append((k, p)))
+            on_event=lambda k, p: events.append((k, p)), **(run_kwargs or {}))
     finally:
         ai_server.end_run()
     return out, events, shown, kept
@@ -180,3 +181,66 @@ def test_a_placeholder_script_stop_is_not_rescued(monkeypatch, tmp_path):
                                   "stopped": "placeholders"})
     assert path == "" and "design step was not run" in note
     assert not rendered
+
+
+# ── continuing a failed reel: the saved script and pictures are reused ──────
+
+def _saved_reel(tmp_path):
+    """What a failed reel leaves: the script text and five pictures on disk."""
+    import base64
+    from test_ai_via_server import PNG
+    pics = []
+    for n in range(1, 6):
+        p = tmp_path / f"Artwork {n}.png"
+        p.write_bytes(base64.b64decode(PNG))
+        pics.append({"path": str(p), "kind": "image", "name": p.name})
+    from test_reel_video_via_api import SCRIPT
+    import json
+    script = "```json\n" + json.dumps(SCRIPT) + "\n```"
+    return {"content": [script], "artwork": ["Prism AI drew 5 image(s)."]}, pics
+
+
+def _continue(ai, monkeypatch, tmp_path, design_error=None, design_text=None):
+    from core import config as C
+    monkeypatch.setattr(C, "RUNS_DIR", str(tmp_path / "runs"))
+    seen: list = []
+    prior, pics = _saved_reel(tmp_path)
+    kwargs = dict(prior_responses=prior, pipeline_files_out=pics,
+                  reuse_stages=["content", "artwork"])
+    res = _run(ai, monkeypatch, tmp_path, design_error, design_text=design_text,
+               render=_fake_render(seen), run_kwargs=kwargs)
+    return res, seen
+
+
+def _ai_calls(ai):
+    return [c for c in ai.calls if c["path"] in (
+        "/v1/ai/chat", "/v1/ai/image", "/v1/ai/chat/stream")]
+
+
+def test_continuing_with_the_design_refused_films_the_simple_reel_with_zero_ai_calls(
+        ai, no_ai_browser, monkeypatch, tmp_path):
+    err = ai_client.AiError("INSUFFICIENT_CREDITS", REFUSAL)
+    ((responses, links), events, shown, kept), seen = _continue(
+        ai, monkeypatch, tmp_path, err)
+    assert links.get("media", "").endswith(".mp4"), (links, shown)
+    assert len(seen) == 1 and seen[0].get("_lite") is True
+    assert len(seen[0]["scenes"]) >= 1
+    assert _ai_calls(ai) == [], "no script, picture or design call may be made"
+    reused = {p["stage"]: p for k, p in events if k == "stage_done"
+              and p["stage"] in ("content", "artwork")}
+    assert set(reused) == {"content", "artwork"} and reused["content"]["texts"]
+
+
+def test_continuing_with_credits_pays_only_for_the_design_step(
+        ai, no_ai_browser, monkeypatch, tmp_path):
+    ((responses, links), events, shown, kept), seen = _continue(
+        ai, monkeypatch, tmp_path)
+    assert links.get("media", "").endswith(".mp4"), (links, shown)
+    calls = _ai_calls(ai)
+    assert [c["path"] for c in calls if c["path"] == "/v1/ai/image"] == []
+    texts = [json.dumps(c["body"]["messages"][-1]["content"]) for c in calls
+             if c["path"] != "/v1/ai/image"]
+    assert texts, "the design step is the one paid call"
+    assert not any("SCRIPT for a short vertical" in t for t in texts)
+    assert any("Design the reel" in t for t in texts)
+    assert responses["content"] and "scenes" in responses["content"][0]

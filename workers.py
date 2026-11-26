@@ -214,9 +214,13 @@ class AutomationWorker(_Worker):
                  motion_skeleton: str = "",
                  stage_skills: dict | None = None,
                  prior_responses: dict | None = None,
-                 min_wait: int = 0):
+                 min_wait: int = 0, reuse_stages: list | None = None):
         super().__init__()
         self.routing, self.cfg = routing, cfg
+        # Stages already answered in `prior_responses` that the engine must
+        # not ask again (finishing a failed reel from its saved script and
+        # pictures). See automation.run(reuse_stages=).
+        self.reuse_stages = list(reuse_stages or [])
         self.attachments, self.query = attachments, query
         self.prior_responses = prior_responses
         # Stage keys the caller promises will produce a picture — they get
@@ -340,6 +344,8 @@ class AutomationWorker(_Worker):
                 kwargs["stage_skills"] = self.stage_skills
             if self.prior_responses:
                 kwargs["prior_responses"] = self.prior_responses
+            if self.reuse_stages:
+                kwargs["reuse_stages"] = self.reuse_stages
             responses, links = automation.run(
                 self.routing, self.cfg, attachments=self.attachments,
                 on_event=lambda kind, payload: self.stage_event.emit(kind, payload),

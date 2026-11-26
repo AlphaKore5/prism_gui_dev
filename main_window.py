@@ -4226,6 +4226,10 @@ class MainWindow(QMainWindow):
                 self._turn_begun = False
                 self._save_thread(text)
                 return
+        if (chatlog.is_finish_request(text)
+                and chatlog.reel_did_not_finish(self.output_panel.thread_items())):
+            self._finish_reel(text, responses, links, sess)
+            return
         picture = self._picture_stage_in(responses, links)
         if picture and chatlog.is_change_request(text):
             brief = self._previous_brief(turns, sess)
@@ -4249,6 +4253,58 @@ class MainWindow(QMainWindow):
             return
         self._read_files_then(file_paths, lambda atts: self._start_chat_reply(
             text, turns, atts))
+
+    def _finish_reel(self, text: str, responses: dict, links: dict, sess: dict):
+        """"Continue / finish / try again" on a reel that did not finish: film
+        it from the script and pictures this task already made. Never the text
+        writer, never a new picture or script call; a reel that cannot be
+        continued from what is on disk says so and asks for nothing."""
+        script = chatlog.saved_script(responses)
+        pictures = chatlog.saved_pictures(links, sess.get("artifacts_dir") or "")
+        if not script or not pictures:
+            self.output_panel.add_note(i18n.t(
+                "This reel's script and pictures are not all on this computer, "
+                "so it cannot be continued without drawing new ones. Nothing "
+                "was asked and no credits were used. Start the reel again "
+                "from the steps."), True)
+            self._chat_run = False
+            self._turn_begun = False
+            self._save_thread(text)
+            return
+        self.output_panel.add_note(i18n.t(
+            "Continuing your reel from the script and pictures already made. "
+            "No new pictures will be drawn."))
+        files = []
+        for p in pictures:
+            try:
+                rec = CB.files.attach(p)
+            except Exception:                               # noqa: BLE001
+                rec = {"path": p, "name": os.path.basename(p)}
+            files.append(dict(rec, kind="image", _generated=True))
+        # The failed attempt's own design/film answers are errors, not answers:
+        # carrying them would make the engine treat the design step as done.
+        kept = {k: v for k, v in responses.items()
+                if k not in ("design", "media", "followup")}
+        self._followup_responses = dict(
+            kept, content=[script],
+            artwork=responses.get("artwork") or [
+                i18n.t("{n} pictures already made.").format(n=len(pictures))])
+        maker = (self._stage_agents.get("artwork")
+                 or (self.cfg.get("agents") or {}).get("visual") or "Prism Image")
+        agents = {"content": self._resolve_stage_agent("content"),
+                  "artwork": maker,
+                  "design": (self._stage_agents.get("design")
+                             or self._stage_agents.get("brains") or "ChatGPT"),
+                  "media": "Prism Studio"}
+        self._set_stage("run")
+        self._start_followup_run(
+            ["content", "media"], [], plan_agents=agents,
+            prompts={"content": "Write the reel script.", "media": "Make the reel."},
+            titles={"content": i18n.t("Script (already written)"),
+                    "artwork": i18n.t("Pictures (already made)"),
+                    "design": i18n.t("Design the reel"),
+                    "media": i18n.t("Make the video")},
+            reuse_stages=["content", "artwork"], files_out=files)
 
     _IMAGE_EXT = (".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp")
 
@@ -4437,7 +4493,8 @@ class MainWindow(QMainWindow):
 
     def _start_followup_run(self, stages: list, attachments: list,
                             plan_agents: dict = None, then=None,
-                            prompts: dict = None, titles: dict = None):
+                            prompts: dict = None, titles: dict = None,
+                            reuse_stages: list = None, files_out: list = None):
         """Run the follow-up's steps — one, or a relay of several — reusing
         the run surface, so a follow-up shows and finishes like any other
         run (and can itself offer another follow-up when it completes).
@@ -4494,7 +4551,8 @@ class MainWindow(QMainWindow):
         worker = AutomationWorker(
             self.routing, cfg_for_run, attachments, self._followup_text,
             custom_stages=custom, resume_urls=resume or None, followup=True,
-            chatgpt_analysis=False, prior_responses=responses)
+            chatgpt_analysis=False, prior_responses=responses,
+            reuse_stages=reuse_stages, files_out=files_out)
         awake.acquire()
         self._active_run = worker
         worker.stage_event.connect(self._on_stage_event)
