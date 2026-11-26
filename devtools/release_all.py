@@ -90,6 +90,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import update_manifest as UM  # noqa: E402
 import licensing.keys as K  # noqa: E402
+import flavour as FL  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 BATCH_SIZE = 40
@@ -118,6 +119,33 @@ def run(cmd: list[str], **kw) -> subprocess.CompletedProcess:
 
 def _version_from_tag(tag: str) -> str:
     return tag[1:] if tag.startswith("v") else tag
+
+
+#: The flavours that get their own release (Complete is the unchanged flow).
+FLAVOURS = ("studio", "sales", "engineering")
+
+
+def flavour_tags(tag: str, flavour: str = "complete") -> tuple[str, str]:
+    """(release tag, base tag). The release tag is the human-facing release
+    (`v2.0.0-studio`: installers, the signed manifest). The base tag is
+    `v<version>`: the update-asset releases are named from it
+    (`v2.0.0-assets-windows-x64-studio`), because that is the name
+    updater._assets_release_tag() computes from the VERSION alone. Building
+    them from the release tag would put every update file where no client
+    looks. Complete: both are the tag, as always."""
+    if flavour == "complete":
+        return tag, tag
+    suffix = "-" + FL.identity(flavour)["channel"]
+    if not tag.startswith("v") or not tag.endswith(suffix) or len(tag) <= len(suffix) + 1:
+        raise ValueError(f"a {flavour} release tag looks like v<version>{suffix}, not {tag!r}")
+    return tag, tag[:-len(suffix)]
+
+
+def artifact_names(matrix_os: str, flavour: str = "complete") -> tuple[str, str]:
+    """(installers artifact, update-assets artifact) of a CI run, named as
+    build.yml names them: `prism-<os>` for Complete, `prism-<flavour>-<os>`."""
+    mid = "" if flavour == "complete" else f"{flavour}-"
+    return f"prism-{mid}{matrix_os}", f"update-assets-{mid}{matrix_os}"
 
 
 def _assets_tag(tag: str, platform_tag: str, part: int = 1) -> str:
@@ -234,14 +262,19 @@ def upload_missing(repo: str, assets_tag: str, assets_dir: str,
 
 def do_platform(repo: str, tag: str, run_id: str, work: str,
                 platform_tag: str, matrix_os: str, force: bool,
-                kid: str = "u1") -> None:
-    version = _version_from_tag(tag)
+                kid: str = "u1", flavour: str = "complete") -> None:
+    # A flavour's manifest, signed file and assets are named for its CHANNEL
+    # (windows-x64-studio), and its update-asset releases for the VERSION
+    # (flavour_tags), not for the release tag.
+    _, base = flavour_tags(tag, flavour)
+    version = _version_from_tag(base)
+    platform_tag = FL.update_channel(platform_tag, flavour)
     unsigned = os.path.join(work, f"manifest.{platform_tag}.unsigned.json")
     signed = os.path.join(work, f"manifest.{platform_tag}.signed")
     assets_dir = os.path.join(work, f"update-assets-{platform_tag}")
     if not os.path.isdir(assets_dir) or not os.listdir(assets_dir):
         run(["gh", "run", "download", run_id, "-R", repo,
-            "-n", f"update-assets-{matrix_os}", "-D", assets_dir])
+            "-n", artifact_names(matrix_os, flavour)[1], "-D", assets_dir])
     else:
         print(f"  {assets_dir} already downloaded, reusing local files")
 
@@ -287,7 +320,7 @@ def do_platform(repo: str, tag: str, run_id: str, work: str,
         run([sys.executable, os.path.join(HERE, "sign_manifest.py"),
             unsigned, "-o", signed, "--kid", kid] + extra)
 
-    publish_assets(repo, tag, platform_tag, signed, assets_dir, kid)
+    publish_assets(repo, base, platform_tag, signed, assets_dir, kid)
     if not on_release:
         # The signed manifest goes on the MAIN release — updater.py's
         # _manifest_url() reads it from there via "latest/download". Last.
@@ -387,6 +420,67 @@ def mirror_platform(mirror: str, tag: str, work: str, platform_tag: str,
     run(["gh", "release", "upload", tag, "-R", mirror, "--clobber", signed])
 
 
+FLAVOUR_NOTES = """{display} {version}, a DEV build for testers (repository {repo}).
+
+- The installers are unsigned: Windows SmartScreen warns on first launch (More info, Run anyway).
+- It needs a licence key that includes this build's add-ons.
+- A dev build starts empty and keeps its data in its own folder.
+- Built from commit {target}.
+"""
+
+
+def create_flavour_release(repo: str, tag: str, run_id: str, flavour: str,
+                           target: str, work: str,
+                           platforms: list[tuple[str, str]]) -> None:
+    """The human-facing release of one flavour: its installers and its unsigned
+    manifests, from the manual CI run that built (and tested) them. Created
+    NOT as "latest" (--make-latest decides that, once, at the end), at the
+    commit `target`, so the tag is the commit that was built."""
+    version = _version_from_tag(flavour_tags(tag, flavour)[1])
+    files: list[str] = []
+    for platform_tag, matrix_os in platforms:
+        dest = os.path.join(work, f"installers-{FL.update_channel(platform_tag, flavour)}")
+        if not (os.path.isdir(dest) and os.listdir(dest)):
+            run(["gh", "run", "download", run_id, "-R", repo,
+                 "-n", artifact_names(matrix_os, flavour)[0], "-D", dest])
+        files += sorted(os.path.join(dest, n) for n in os.listdir(dest))
+    if not _release_exists(repo, tag):
+        run(["gh", "release", "create", tag, "-R", repo, "--target", target,
+             "--title", f"{FL.identity(flavour)['display']} {version}",
+             "--notes", FLAVOUR_NOTES.format(
+                 display=FL.identity(flavour)["display"], version=version,
+                 repo=repo, target=target[:7]),
+             "--latest=false"])
+    run(["gh", "release", "upload", tag, "-R", repo, "--clobber"] + files)
+
+
+def carry_signed_manifests(repo: str, tag: str, from_tags: list[str],
+                           work: str, keep: frozenset = frozenset()) -> None:
+    """Put the signed manifests of other releases on `tag` as well.
+
+    updater.py reads releases/latest/download/manifest.<channel>.signed, and
+    a repository has ONE latest release. With one release per flavour, the
+    latest one must therefore carry every channel's signed manifest, or the
+    other flavours (and the complete Prism's 1.8.x clients) find no manifest
+    and never see an update. Byte-for-byte copies: nothing is re-signed.
+
+    `keep` names the signed files THIS run just made (its own channels). An
+    older release of the same flavour carries an older manifest under the very
+    same name; copying it over would put 2.0.0 back as the newest version."""
+    dest = os.path.join(work, "carried")
+    os.makedirs(dest, exist_ok=True)
+    for src in from_tags:
+        if src == tag:
+            continue
+        run(["gh", "release", "download", src, "-R", repo,
+             "-p", "manifest.*.signed", "-D", dest, "--clobber"])
+    carried = sorted(n for n in os.listdir(dest)
+                     if n.endswith(".signed") and n not in keep)
+    if carried:
+        run(["gh", "release", "upload", tag, "-R", repo, "--clobber"]
+            + [os.path.join(dest, n) for n in carried])
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(
         description=__doc__.splitlines()[0],
@@ -417,7 +511,30 @@ def main(argv: list[str] | None = None) -> int:
                    help="Release just this platform (repeatable), in the "
                         "order given — e.g. --only windows-x64 to do Windows "
                         "first. Default: every platform, in table order")
+    p.add_argument("--flavour", choices=FLAVOURS, default="complete",
+                   help="Release one flavour build (dev only): tag v<ver>-<flavour>, "
+                        "installers from the manual CI run, update files under its "
+                        "own channel. Default: the complete Prism, as always.")
+    p.add_argument("--target", default=None, metavar="SHA",
+                   help="--flavour: the full commit id the run built; the release "
+                        "tag is created at it")
+    p.add_argument("--carry-from", action="append", metavar="TAG", default=[],
+                   help="Also put every signed manifest of release TAG on this "
+                        "release (repeatable): `latest` serves them all")
+    p.add_argument("--make-latest", action="store_true",
+                   help="Make this release GitHub's \"latest\" once it is complete")
     args = p.parse_args(argv)
+    if args.flavour != "complete":
+        if not args.dev:
+            p.error("--flavour is dev only for now: flavour releases are not "
+                    "built for production")
+        if not args.target or len(args.target) != 40 or \
+                any(c not in "0123456789abcdef" for c in args.target):
+            p.error("--flavour needs --target <the full 40-character commit id>")
+        try:
+            flavour_tags(args.tag, args.flavour)
+        except ValueError as e:
+            p.error(str(e))
     try:
         args.repo, mirrors, kid = resolve_channel(
             args.repo, args.mirror, args.no_mirror, args.dev)
@@ -439,16 +556,29 @@ def main(argv: list[str] | None = None) -> int:
     done, failed = [], []
     table = dict(PLATFORMS)
     wanted = ([(t, table[t]) for t in args.only] if args.only else PLATFORMS)
+    if args.flavour != "complete":
+        create_flavour_release(args.repo, args.tag, args.run_id, args.flavour,
+                               args.target, work, wanted)
     for platform_tag, matrix_os in wanted:
         print(f"── {platform_tag} " + "─" * max(1, 40 - len(platform_tag)))
         try:
             do_platform(args.repo, args.tag, args.run_id, work,
-                       platform_tag, matrix_os, args.force, kid)
+                       platform_tag, matrix_os, args.force, kid,
+                       **({} if args.flavour == "complete"
+                          else {"flavour": args.flavour}))
             done.append(platform_tag)
             print(f"✓ {platform_tag} done\n")
         except (subprocess.CalledProcessError, RuntimeError) as e:
             print(f"✗ {platform_tag} failed: {e}\n", file=sys.stderr)
             failed.append(platform_tag)
+
+    if done and not failed and args.carry_from:
+        carry_signed_manifests(
+            args.repo, args.tag, args.carry_from, work,
+            frozenset(f"manifest.{FL.update_channel(t, args.flavour)}.signed"
+                      for t, _ in wanted))
+    if done and not failed and args.make_latest:
+        run(["gh", "release", "edit", args.tag, "-R", args.repo, "--latest"])
 
     mirror_failed = []
     for mirror in mirrors:

@@ -382,7 +382,12 @@ class TagRunsAndReleasesAreUntouched(unittest.TestCase):
         self.assertEqual(rel["needs"], ["build", "tests"])
 
     def test_tags_still_trigger_the_workflow_and_assets_tags_do_not(self):
-        self.assertEqual(self.on["push"]["tags"], ["v*", "!v*-assets-*"])
+        # A flavour's own release tag (v2.0.0-studio, devtools/release_all.py
+        # --flavour) must not start a build either: a tag run is always the
+        # complete Prism and would attach its installers to that release.
+        self.assertEqual(self.on["push"]["tags"],
+                         ["v*", "!v*-assets-*", "!v*-studio", "!v*-sales",
+                          "!v*-engineering"])
         self.assertEqual(self.on["push"]["branches"], ["main", "master"])
 
     def test_nothing_the_release_needs_can_be_skipped_on_a_tag(self):
