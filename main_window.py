@@ -3779,9 +3779,24 @@ class MainWindow(QMainWindow):
             self.output_panel.begin_turn(getattr(self, "_followup_text", ""))
         self._turn_begun = False
 
+    def _fresh_responses(self, responses: dict) -> dict:
+        """Only what THIS run produced. A follow-up's engine run is seeded
+        with the earlier answers, so when its step failed the old answer was
+        still in `responses` and was shown again as the new reply. A step
+        whose card failed here, or whose text is just the earlier one
+        unchanged, is not a reply."""
+        ok = {r["stage"] for r in self._stage_results if r.get("ok")}
+        failed = {r["stage"] for r in self._stage_results
+                  if not r.get("ok")} - ok
+        prior = (getattr(self, "_followup_responses", None) or {}
+                 if getattr(self, "_is_followup_run", False) else {})
+        return {s: t for s, t in (responses or {}).items()
+                if s not in failed
+                and (s in ok or s not in prior or prior[s] != t)}
+
     def _add_turn_result(self, responses: dict, links: dict, stopped: bool = False):
         """The run's answer and its files, as messages on the thread."""
-        stage, text = chatlog.latest_answer(responses)
+        stage, text = chatlog.latest_answer(self._fresh_responses(responses))
         if text:
             by = ai_server.display_agent(self._stage_agents.get(stage, ""), stage)
             bubble = self.output_panel.add_answer(text, by, stage)
@@ -3923,9 +3938,10 @@ class MainWindow(QMainWindow):
         return responses, links, artifact_paths
 
     def _submit_followup(self, text: str, file_paths: list, artifact_paths: list,
-                         responses: dict, links: dict):
+                         responses: dict, links: dict, forced: dict | None = None):
         """Carry out one follow-up: the words, the files that came with them,
-        and the files this task already made."""
+        and the files this task already made. `forced` ({"steps", "prompts",
+        "titles"}) skips the classifier and runs exactly those steps."""
         self._followup_text = text
         self._followup_responses = responses
         # Attachments = files the person just added + the active artifacts this task
@@ -3938,6 +3954,9 @@ class MainWindow(QMainWindow):
                 except Exception:                       # noqa: BLE001
                     pass
         self._followup_attachments = atts
+        if forced:
+            self._on_followup_routed(dict(forced, forced=True))
+            return
         # Explicit agent name WINS over auto-detect. "give it to Perplexity"
         # means the Perplexity step — not a guess, and not a silent fall-back
         # to "the last AI" when the Groq classify can't run. Only when no agent
@@ -4056,11 +4075,19 @@ class MainWindow(QMainWindow):
         responses = getattr(self, "_followup_responses", {})
         if not responses:
             return
+        plan = plan if isinstance(plan, dict) else {}
+        if plan.get("forced"):
+            forced = [s for s in (plan.get("steps") or []) if isinstance(s, str)]
+            self._set_stage("run")
+            self._start_followup_run(
+                forced, getattr(self, "_followup_attachments", []),
+                plan_agents={s: self._resolve_stage_agent(s) for s in forced},
+                prompts=plan.get("prompts"), titles=plan.get("titles"))
+            return
         if self._followup_as_local_file(responses):
             return
         links = getattr(self, "_followup_links", {}) or {}
         atts = getattr(self, "_followup_attachments", [])
-        plan = plan if isinstance(plan, dict) else {}
         steps = [s for s in (plan.get("steps") or []) if isinstance(s, str)]
         reel = self._studio_reel_in(links)
         saved_studio = (reel[2].get("_studio") or {}) if reel else {}
@@ -4199,6 +4226,19 @@ class MainWindow(QMainWindow):
                 self._turn_begun = False
                 self._save_thread(text)
                 return
+        picture = self._picture_stage_in(responses, links)
+        if picture and chatlog.is_change_request(text):
+            brief = self._previous_brief(turns, sess)
+            self.output_panel.add_note(i18n.t(
+                "Prism AI draws pictures from a description; it cannot edit "
+                "the picture you have. It will draw a new one from your "
+                "earlier request plus this change."))
+            self._submit_followup(
+                text, [], [], responses, links,
+                forced={"steps": [picture],
+                        "prompts": {picture: f"{brief}\n\nChange: {text}"},
+                        "titles": {picture: i18n.t("Redraw the picture")}})
+            return
         if not ai_server.active() or CB.contract.wants_file(text):
             primed = self._prime_followup_session(responses, links)
             if primed is None:
@@ -4209,6 +4249,35 @@ class MainWindow(QMainWindow):
             return
         self._read_files_then(file_paths, lambda atts: self._start_chat_reply(
             text, turns, atts))
+
+    _IMAGE_EXT = (".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp")
+
+    def _picture_stage_in(self, responses: dict, links: dict) -> str:
+        """The picture step, when the newest answer in the chat is a picture
+        and its image file is still on disk; "" otherwise."""
+        stage, _text = chatlog.latest_answer(responses)
+        if stage not in ("visual", "artwork"):
+            return ""
+        sess = getattr(self, "_followup_session", None) or {}
+        found = [links.get(stage) or ""]
+        folder = sess.get("artifacts_dir") or ""
+        if folder and os.path.isdir(folder):
+            found += [os.path.join(folder, n) for n in os.listdir(folder)]
+        for p in found:
+            if (isinstance(p, str) and p.lower().endswith(self._IMAGE_EXT)
+                    and os.path.isfile(p)):
+                return stage
+        return ""
+
+    def _previous_brief(self, turns: list, sess: dict) -> str:
+        """What the picture was asked for: the task as first asked, then each
+        earlier change the person made to it, so a second change does not
+        lose the first."""
+        users = [t.strip() for who, t in turns if who == "USER" and t.strip()]
+        base = (sess.get("query") or getattr(self, "_last_query", "")
+                or (users[0] if users else "")).strip()
+        later = [t for t in users if t != base and chatlog.is_change_request(t)]
+        return "\n\n".join([base] + [f"Change: {t}" for t in later]).strip()
 
     def _read_files_then(self, file_paths: list, then):
         """Read what was attached (a big PDF or sheet takes seconds) off the

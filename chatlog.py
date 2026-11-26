@@ -140,3 +140,17 @@ def turns_for_model(items: list[dict]) -> list[tuple[str, str]]:
 
 def user_count(items: list[dict]) -> int:
     return sum(1 for i in items if i.get("kind") == "user")
+
+
+_QUESTION_START = ("what", "why", "how", "who", "where", "when", "which",
+                   "is ", "are ", "does", "do you", "can you explain",
+                   "could you explain", "describe", "explain", "tell me")
+
+
+def is_change_request(text: str) -> bool:
+    """A message asking for something different, as opposed to a question
+    about what is already there."""
+    t = (text or "").strip().lower()
+    if not t or t.endswith("?"):
+        return False
+    return not t.startswith(_QUESTION_START)
