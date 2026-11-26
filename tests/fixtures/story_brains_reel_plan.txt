@@ -1,0 +1,34 @@
+**Note:** No assets, brand name or copy arrived with this brief. Everything marked [ ] must come from the supplied files. I will not invent a product, claim or quote.
+
+0:00. The frame was black. One word, [HOOK WORD from brand copy], sat in 200 px bold type, and a bass hit split it with a vertical mask. The product's edge slid in behind the gap. The viewer had three seconds to decide whether to stay.
+
+That word carries the person at the centre: [NAME, customer or founder] wanted [specific outcome by a specific date]. The reel has to make the viewer feel that want before it explains anything.
+
+The timing is built on 120 BPM, so one bar lasts 2 seconds and every scene cut lands on a bar line. The total runs 28 seconds at 1080×1920 and 30 fps.
+
+- **0–4s, hook:** The word splits, the product photo pushes in 6%, and a thin grid draws itself across the frame.
+- **4–8s, introduction:** The hero asset is cut into foreground and background layers. The background drifts slowly while the foreground moves faster, which gives the parallax. A soft shadow grounds it.
+
+The wall takes the longest, from 8 to 16s. [OBSTACLE, to supply] stood between [NAME] and the goal, and the design makes the viewer feel it. Grid lines tighten around the product, and the photo sits behind a mask that refuses to open. Three beats of about 2.5 seconds each present three real features from the supplied copy, with no added claims. Each beat has one headline in 72 px minimum for mobile, a whoosh in and a tactile click out. The motion is fast on the entrances and holds for a full beat on each reading moment.
+
+The turn comes at 16.0s. The music drops to silence for six frames. Then a circle grows out of the product and wipes the whole frame to the brand colour. The bass hit lands on the first frame of the wipe. At 18s the on-screen line appears in 64 px type:
+
+> "[Verbatim customer or founder quote, to supply]"
+
+This is the strongest moment, so it gets the most contrast and the cleanest composition, with plenty of negative space around the quote. The 16–24s scene ends with a slow 8% camera pull-back.
+
+The landing is 24–28s. The grid lines gather into the supplied logo, which is unaltered, uncropped and placed on the safe-zone centre. Beneath it sits [CTA text and handle or URL, to supply]. A final chord resolves on the last bar and fades by 28.0s.
+
+**Sound map:**
+- Bass hits at 0:00, 16:00 and 24:00.
+- Whooshes on each scene transition.
+- Typographic clicks on each headline.
+- No glitch effects, no particle bursts, and glow only on the final logo.
+
+Word count: about 395.
+
+**HANDOFF FOR JASPER**
+- Plan is 28s, 1080×1920, 30 fps, 120 BPM. Scene cuts are at 4, 8, 16 and 24s, with the turn (circle wipe plus bass hit) at 16.0s.
+- Copy still needed from the brand: hook word, person's name and goal, obstacle, three features, a verbatim quote, CTA and handle. Nothing is invented.
+- Type minimums are 72 px headlines and 64 px quote. Logo and product are never distorted, and the hero asset is split into foreground and background layers for parallax.
+- Sound needs bass hits at 0, 16 and 24s, transition whooshes, typographic clicks and a resolving final chord.

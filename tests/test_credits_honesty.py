@@ -99,3 +99,27 @@ def test_the_charged_empty_answer_reaches_the_person_with_its_charge():
     text = friendly.as_text(p)
     assert "255.4 credits" in text
     assert "Nothing was charged" not in text
+
+
+def test_a_charged_length_cutoff_is_one_transport_call_end_to_end():
+    """Through ServerSession.send and the real ai_client.chat: the first call is
+    an empty finish=length answer that cost credits, and the second (retry)
+    model is never asked."""
+    s = SS.ServerSession("studio")
+    s.begin("design", "Prism AI", "code")
+    data = {"text": "", "finish": "length", "charged_mc": 255378, "balance_mc": 1000}
+    with mock.patch.object(ai_client, "_post", return_value=data) as post:
+        with pytest.raises(ai_client.AiError) as ei:
+            s.send("design the reel")
+    assert post.call_count == 1
+    assert "255.4" in str(ei.value) and s.last_error_code == "EMPTY"
+
+
+def test_an_uncharged_empty_answer_is_still_retried_once_on_the_other_model():
+    s = SS.ServerSession("studio")
+    s.begin("design", "Prism AI", "code")
+    empty = {"text": "", "finish": "length", "charged_mc": 0}
+    good = {"text": "a design", "finish": "stop", "charged_mc": 5, "balance_mc": 1}
+    with mock.patch.object(ai_client, "_post", side_effect=[empty, good]) as post:
+        assert s.send("design the reel") == "a design"
+    assert post.call_count == 2
