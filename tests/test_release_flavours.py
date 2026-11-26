@@ -171,6 +171,32 @@ class Carry(Recorder):
         self.assertNotIn("notes.txt", calls[2])
 
 
+class CarryNeverOverwritesThisReleasesOwn(Recorder):
+    def test_an_older_release_of_the_same_flavour_does_not_replace_the_new_manifest(self):
+        """v2.0.1-studio carrying from v2.0.0-studio: the old windows-x64-studio
+        manifest has the very same name as the one just signed."""
+        os.makedirs(os.path.join(self.work, "carried"))
+        for n in ("manifest.windows-x64-studio.signed", "manifest.windows-x64-sales.signed"):
+            open(os.path.join(self.work, "carried", n), "w").write("old")
+        with mock.patch.object(R, "run", side_effect=self.fake_run):
+            R.carry_signed_manifests("org/dev", "v2.0.1-studio",
+                                     ["v2.0.0-studio", "v2.0.0-sales"], self.work,
+                                     frozenset({"manifest.windows-x64-studio.signed"}))
+        upload = self.gh()[-1]
+        self.assertIn("manifest.windows-x64-sales.signed", upload)
+        self.assertNotIn("manifest.windows-x64-studio.signed", upload)
+
+    def test_main_passes_the_channels_it_just_signed(self):
+        with mock.patch.object(R, "run"), mock.patch.object(R, "create_flavour_release"), \
+             mock.patch.object(R, "do_platform"), \
+             mock.patch.object(R, "carry_signed_manifests") as carry:
+            R.main(["--work-dir", self.work, "v2.0.1-studio", "123", "--dev", "--flavour",
+                    "studio", "--target", SHA, "--only", "windows-x64",
+                    "--carry-from", "v2.0.0-studio"])
+        self.assertEqual(carry.call_args.args[4],
+                         frozenset({"manifest.windows-x64-studio.signed"}))
+
+
 class Command(Recorder):
     """The command line: dev only, an exact commit, the right order."""
     def main(self, *args):

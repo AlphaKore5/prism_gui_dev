@@ -455,14 +455,18 @@ def create_flavour_release(repo: str, tag: str, run_id: str, flavour: str,
 
 
 def carry_signed_manifests(repo: str, tag: str, from_tags: list[str],
-                           work: str) -> None:
+                           work: str, keep: frozenset = frozenset()) -> None:
     """Put the signed manifests of other releases on `tag` as well.
 
     updater.py reads releases/latest/download/manifest.<channel>.signed, and
     a repository has ONE latest release. With one release per flavour, the
     latest one must therefore carry every channel's signed manifest, or the
     other flavours (and the complete Prism's 1.8.x clients) find no manifest
-    and never see an update. Byte-for-byte copies: nothing is re-signed."""
+    and never see an update. Byte-for-byte copies: nothing is re-signed.
+
+    `keep` names the signed files THIS run just made (its own channels). An
+    older release of the same flavour carries an older manifest under the very
+    same name; copying it over would put 2.0.0 back as the newest version."""
     dest = os.path.join(work, "carried")
     os.makedirs(dest, exist_ok=True)
     for src in from_tags:
@@ -470,7 +474,8 @@ def carry_signed_manifests(repo: str, tag: str, from_tags: list[str],
             continue
         run(["gh", "release", "download", src, "-R", repo,
              "-p", "manifest.*.signed", "-D", dest, "--clobber"])
-    carried = sorted(n for n in os.listdir(dest) if n.endswith(".signed"))
+    carried = sorted(n for n in os.listdir(dest)
+                     if n.endswith(".signed") and n not in keep)
     if carried:
         run(["gh", "release", "upload", tag, "-R", repo, "--clobber"]
             + [os.path.join(dest, n) for n in carried])
@@ -568,7 +573,10 @@ def main(argv: list[str] | None = None) -> int:
             failed.append(platform_tag)
 
     if done and not failed and args.carry_from:
-        carry_signed_manifests(args.repo, args.tag, args.carry_from, work)
+        carry_signed_manifests(
+            args.repo, args.tag, args.carry_from, work,
+            frozenset(f"manifest.{FL.update_channel(t, args.flavour)}.signed"
+                      for t, _ in wanted))
     if done and not failed and args.make_latest:
         run(["gh", "release", "edit", args.tag, "-R", args.repo, "--latest"])
 
