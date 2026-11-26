@@ -451,6 +451,14 @@ _GENERIC = Problem(
     action="support", action_label="Ask Lumi")
 
 
+# The server's own customer-facing AI refusal copy (licence server errors.py).
+_AI_REFUSAL = re.compile(
+    r"enough (AI )?credits|needs? [0-9,.]+ credits|top up your credits"
+    r"|AI isn't switched on for your account|AI is paused on your account"
+    r"|AI isn't available( to your account)?|AI is (blocked|not available)"
+    r"|re-check your licence before using AI", re.I)
+
+
 def explain(error: object, context: str = "") -> Problem:
     """Any error → something a person can act on.
 
@@ -458,6 +466,15 @@ def explain(error: object, context: str = "") -> Problem:
     when the text itself is not distinctive enough to match.
     """
     text = f"{context} {error}".strip()
+    # The licence server words its own AI refusals for the customer ("needs
+    # 40 credits and you have 12", "isn't switched on for your account").
+    # Show that sentence itself, not a generic "something went wrong".
+    if _AI_REFUSAL.search(str(error)):
+        return Problem(
+            "Prism AI couldn't run this",
+            str(error).strip(),
+            ("Nothing was charged for the step that stopped.",
+             "Everything already finished is still in History."))
     for pattern, problem in _RULES:
         if pattern.search(text):
             return problem
