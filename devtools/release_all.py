@@ -263,7 +263,8 @@ def upload_missing(repo: str, assets_tag: str, assets_dir: str,
 
 def do_platform(repo: str, tag: str, run_id: str, work: str,
                 platform_tag: str, matrix_os: str, force: bool,
-                kid: str = "u1", flavour: str = "complete") -> None:
+                kid: str = "u1", flavour: str = "complete",
+                sign_only: bool = False) -> None:
     # A flavour's manifest, signed file and assets are named for its CHANNEL
     # (windows-x64-studio), and its update-asset releases for the VERSION
     # (flavour_tags), not for the release tag.
@@ -273,7 +274,9 @@ def do_platform(repo: str, tag: str, run_id: str, work: str,
     unsigned = os.path.join(work, f"manifest.{platform_tag}.unsigned.json")
     signed = os.path.join(work, f"manifest.{platform_tag}.signed")
     assets_dir = os.path.join(work, f"update-assets-{platform_tag}")
-    if not os.path.isdir(assets_dir) or not os.listdir(assets_dir):
+    if sign_only:
+        pass        # signing needs the small manifest only, never the update files
+    elif not os.path.isdir(assets_dir) or not os.listdir(assets_dir):
         run(["gh", "run", "download", run_id, "-R", repo,
             "-n", artifact_names(matrix_os, flavour)[1], "-D", assets_dir])
     else:
@@ -321,6 +324,14 @@ def do_platform(repo: str, tag: str, run_id: str, work: str,
         run([sys.executable, os.path.join(HERE, "sign_manifest.py"),
             unsigned, "-o", signed, "--kid", kid] + extra)
 
+    if sign_only:
+        # The signed manifest goes up now, ahead of its files: safe because a
+        # flavour release is not "latest" (updater.py reads latest/download),
+        # so no client can find it until `finish` has uploaded the files and
+        # made it latest.
+        if not on_release:
+            run(["gh", "release", "upload", tag, "-R", repo, "--clobber", signed])
+        return
     publish_assets(repo, base, platform_tag, signed, assets_dir, kid)
     if not on_release:
         # The signed manifest goes on the MAIN release — updater.py's
@@ -551,6 +562,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--carry-from", action="append", metavar="TAG", default=[],
                    help="Also put every signed manifest of release TAG on this "
                         "release (repeatable): `latest` serves them all")
+    p.add_argument("--stage", choices=("all", "open", "sign", "finish"), default="all",
+                   help="--flavour only. all: everything on this machine (default). "
+                        "open (CI): create the release, upload installers and "
+                        "unsigned manifests. sign (your PC, needs the key): sign and "
+                        "upload the manifests, nothing big. finish (CI, no key): "
+                        "upload the update files, carry manifests, set latest.")
     p.add_argument("--make-latest", action="store_true",
                    help="Make this release GitHub's \"latest\" once it is complete")
     args = p.parse_args(argv)
@@ -565,6 +582,8 @@ def main(argv: list[str] | None = None) -> int:
             flavour_tags(args.tag, args.flavour)
         except ValueError as e:
             p.error(str(e))
+    if args.stage != "all" and args.flavour == "complete":
+        p.error("--stage is for --flavour releases")
     try:
         args.repo, mirrors, kid = resolve_channel(
             args.repo, args.mirror, args.no_mirror, args.dev)
@@ -586,22 +605,28 @@ def main(argv: list[str] | None = None) -> int:
     done, failed = [], []
     table = dict(PLATFORMS)
     wanted = ([(t, table[t]) for t in args.only] if args.only else PLATFORMS)
-    if args.flavour != "complete":
+    if args.flavour != "complete" and args.stage in ("all", "open"):
         create_flavour_release(args.repo, args.tag, args.run_id, args.flavour,
                                args.target, work, wanted)
+    if args.stage == "open":
+        return 0
     for platform_tag, matrix_os in wanted:
         print(f"── {platform_tag} " + "─" * max(1, 40 - len(platform_tag)))
         try:
             do_platform(args.repo, args.tag, args.run_id, work,
                        platform_tag, matrix_os, args.force, kid,
                        **({} if args.flavour == "complete"
-                          else {"flavour": args.flavour}))
+                          else {"flavour": args.flavour,
+                                **({"sign_only": True} if args.stage == "sign" else {})}))
             done.append(platform_tag)
             print(f"✓ {platform_tag} done\n")
         except (subprocess.CalledProcessError, RuntimeError) as e:
             print(f"✗ {platform_tag} failed: {e}\n", file=sys.stderr)
             failed.append(platform_tag)
 
+    if args.stage == "sign":
+        print(f"signed and uploaded: {done or '(none)'}  failed: {failed or '(none)'}")
+        return 1 if failed else 0
     if done and not failed and args.carry_from:
         carry_signed_manifests(
             args.repo, args.tag, args.carry_from, work,
