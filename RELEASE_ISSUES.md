@@ -152,6 +152,19 @@ something you did not run.
 
 ## Issue log (newest first)
 
+### ISS-032 — Publishing a 2.0.0 flavour from a laptop failed with HTTP 408, and I called it "still uploading" (2026-11-26) — FIXED
+- **Seen:** `v2.0.0-studio` existed with only its two small manifests. I told the owner the installers were "still uploading";
+  the script had already died: `HTTP 408: Upload body timed out due to inactivity` (`gh release upload` with 4 files of 400-670 MB
+  at once). Measured upload line: ~1.1 MB/s (Wi-Fi), so ~5 GB per flavour per platform pair is 1.5 h, three flavours ~5 h.
+- **Cause (PROVEN: the log):** `create_flavour_release` sent every installer in ONE `gh release upload`; parallel streams starve
+  each other on a slow uplink and GitHub drops the idle one. Second mistake in the same hour: a restart command matched its OWN
+  command line with `ps | grep` and killed my shell (the trap in CLAUDE.md).
+- **Fix:** `upload_one_by_one` (one file at a time, retry a timed-out file, skip a file already there at the same size);
+  `--stage open|sign|finish` and `.github/workflows/publish-flavour.yml` move every big transfer onto GitHub's network; only the
+  signing (a few hundred KB) runs on the owner's PC, and the key is never in CI (`finish` refuses to sign).
+- **Rule:** never report an upload as running without reading the process or the log first. Big release files are published
+  from CI, not from a laptop. Stop a background job by its PID, never by a pattern that appears in your own command.
+
 ### ISS-031 — PR #34 went red on a guard test I had not run, and my branch delete closed the PR (2026-11-26) — FIXED
 - **Seen:** `Tests · Linux 3/4` red on PR #34: `test_workflow_speed.py::TagRunsAndReleasesAreUntouched::test_tags_still_trigger_the_workflow_and_assets_tags_do_not`
   pins the exact `tags:` list of `build.yml`, and I had added the flavour exclusions. Earlier in the same step, `gh pr merge`

@@ -1,0 +1,102 @@
+name: Publish a flavour release (dev)
+
+# Moves the BIG files of a Studio / Sales / Engineering release on GitHub's own
+# network instead of through one person's upload line (a 2.0.0 flavour is ~5 GB
+# per platform; from a laptop on Wi-Fi that took hours and died with HTTP 408).
+#
+# Nothing here can sign. The update-signing key never leaves the owner's PC.
+# The release is made in three steps (devtools/release_all.py --stage):
+#
+#   1. Run THIS workflow with stage=open     installers + unsigned manifests
+#   2. On the owner's PC:                    release_all.py ... --stage sign
+#   3. Run THIS workflow with stage=finish   update files, carried manifests, latest
+#
+# DEV repository only: a production release is not made this way.
+
+on:
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: "open = create the release and upload installers; finish = upload update files (after the owner signed)"
+        type: choice
+        options: [open, finish]
+        required: true
+      tag:
+        description: "Release tag, v<version>-<flavour>, e.g. v2.0.0-studio"
+        type: string
+        required: true
+      flavour:
+        type: choice
+        options: [studio, sales, engineering]
+        required: true
+      run_id:
+        description: "Id of the manual build run (the one that made the installers)"
+        type: string
+        required: true
+      target:
+        description: "The full 40-character commit that run built"
+        type: string
+        required: true
+      platforms:
+        description: "Comma-separated: windows-x64,linux-x64"
+        type: string
+        default: "windows-x64,linux-x64"
+      carry_from:
+        description: "finish only: comma-separated tags whose signed manifests are copied onto this release (so `latest` serves every channel)"
+        type: string
+        default: ""
+      make_latest:
+        description: "finish only: make this release GitHub's latest (do this once, last)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write   # create the release and upload to it
+  actions: read     # download the build run's artifacts
+
+# One publish per tag at a time; a second never cancels the first mid-upload.
+concurrency:
+  group: publish-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    # The dev repository only. A fork or the production repo does nothing.
+    if: github.repository == 'AlphaKore5/prism_gui_dev'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 340
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # release_all.py needs only this to read a signed manifest (it verifies
+      # with the PUBLIC keys). No signing key is, or can be, available here.
+      - run: pip install cryptography
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STAGE: ${{ inputs.stage }}
+          TAG: ${{ inputs.tag }}
+          FLAVOUR: ${{ inputs.flavour }}
+          RUN_ID: ${{ inputs.run_id }}
+          TARGET: ${{ inputs.target }}
+          PLATFORMS: ${{ inputs.platforms }}
+          CARRY_FROM: ${{ inputs.carry_from }}
+          MAKE_LATEST: ${{ inputs.make_latest }}
+        run: |
+          set -euo pipefail
+          # Inputs are passed through the environment, never pasted into this
+          # script, so a hostile value cannot become a command.
+          args=("$TAG" "$RUN_ID" --dev --flavour "$FLAVOUR" --target "$TARGET" --stage "$STAGE")
+          IFS=',' read -ra plats <<< "$PLATFORMS"
+          for p in "${plats[@]}"; do args+=(--only "$p"); done
+          if [ -n "$CARRY_FROM" ]; then
+            IFS=',' read -ra tags <<< "$CARRY_FROM"
+            for t in "${tags[@]}"; do args+=(--carry-from "$t"); done
+          fi
+          if [ "$MAKE_LATEST" = "true" ]; then args+=(--make-latest); fi
+          python devtools/release_all.py "${args[@]}"
