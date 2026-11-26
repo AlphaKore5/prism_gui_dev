@@ -152,6 +152,30 @@ something you did not run.
 
 ## Issue log (newest first)
 
+### ISS-036 — I opened a licence-server PR without running its browser test; CI went red (2026-11-26) — FIXED
+- **Seen:** licence-server PR #4 failed `tests/test_console_ui.py::test_pulse_new_badge_only_on_errors_first_seen_in_the_last_day`.
+  I had run the whole suite with `--ignore=tests/test_console_ui.py` (it needs Chromium) and added `<b>` tags inside the Pulse error
+  rows, so the test's `td b` selector matched several elements.
+- **Fix:** the drill-down names the customer with a styled `span`. Ran all 18 browser tests locally, then CI was green.
+- **Rule:** when a change edits `app/console.html`, run `tests/test_console_ui.py` before pushing; an ignored test file is a test not run.
+
+### ISS-035 — GitHub blocked asset downloads and workflow dispatches while the quota showed 4,800 of 5,000 left (2026-11-26) — OPEN (wait it out)
+- **Seen:** `HTTP 403: API rate limit exceeded` on `gh release download` and `gh workflow run`, for about an hour, while
+  `gh api rate_limit` showed ~4,870 core requests left. This is a burst limit on the account, not the hourly quota. Three
+  parallel publish runs plus a retry every 90 s kept it alive.
+- **Also:** my first waiting loop used `gh api -o`, which does not exist, so its check could never succeed.
+- **Rule:** one flavour at a time; after a 403, stop and wait 15+ minutes (retry every 5, not 1.5); test a waiting loop's check
+  command once by hand before starting it.
+
+### ISS-034 — Signing the 2.0.0 flavours failed: "this signing key is not the one published as 'udev2'" (2026-11-26) — FIXED
+- **Seen:** `sign_manifest.py` refused the key. `prism_gui/devtools/dev-signing-key.hex` (git-ignored) holds a DIFFERENT key
+  (public half 4fd56e...) than the one `licensing/keys.py` publishes as `udev2` (0b0591...).
+- **Cause (PROVEN):** the real private key is `~/prism-keys/prism-update-dev-udev2.hex`; the stray file was picked up by the old
+  default. Nothing was wrong with the builds or with `keys.py`.
+- **Fix:** sign with `UPDATE_SIGNING_KEY_HEX="$(tr -d '[:space:]' < ~/prism-keys/prism-update-dev-udev2.hex)"`; the stray file is
+  to be deleted once the 2.0.0 publish has succeeded.
+- **Rule:** the signing key lives only in `~/prism-keys/`; derive its public half and compare with `keys.py` before a release.
+
 ### ISS-032 — Publishing a 2.0.0 flavour from a laptop failed with HTTP 408, and I called it "still uploading" (2026-11-26) — FIXED
 - **Seen:** `v2.0.0-studio` existed with only its two small manifests. I told the owner the installers were "still uploading";
   the script had already died: `HTTP 408: Upload body timed out due to inactivity` (`gh release upload` with 4 files of 400-670 MB
