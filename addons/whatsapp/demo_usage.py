@@ -190,7 +190,22 @@ def _campaigns(p: dict) -> list:
 
 
 def _plan(p: dict) -> str:
-    return p.get("plan") or "premium"
+    """The demo workspace's plan. PRISM_WHATSAPP_DEMO_PLAN picks another (free, basic, pro...), to see a plan's locks
+    without a server; demo mode itself never runs in a frozen build (demo.enabled)."""
+    import os
+    want = (os.environ.get("PRISM_WHATSAPP_DEMO_PLAN") or "").strip().lower()
+    return p.get("plan") or (want if want in LIMITS else "") or "premium"
+
+
+def _demo_addons(p: dict) -> list:
+    """The demo workspace's add-ons: PRISM_WHATSAPP_DEMO_ADDONS="chatbot,ai_agent" (or "none"), else both."""
+    import os
+    if p.get("addons") is not None:
+        return list(p["addons"])
+    raw = os.environ.get("PRISM_WHATSAPP_DEMO_ADDONS")
+    if raw is None:
+        return ["chatbot", "ai_agent"]
+    return [a for a in (x.strip() for x in raw.split(",")) if a in ("chatbot", "ai_agent")]
 
 
 def _csv(header: list, rows: list) -> str:
@@ -204,7 +219,7 @@ def _csv(header: list, rows: list) -> str:
 def _features(p: dict) -> list:
     """The plan's features as prism-wa's plans.features_of gives them: the tier's, plus its add-ons'."""
     out = list(_TIER_FEATURES.get(_plan(p), ()))
-    addons = p.get("addons") or ["chatbot", "ai_agent"]
+    addons = _demo_addons(p)
     out += [f for a, f in (("chatbot", "flows"), ("ai_agent", "ai_agent")) if a in addons]
     return sorted(set(out))
 
@@ -221,7 +236,7 @@ def _plan_view(p: dict) -> dict:
     return {"plan": plan, "label": LABELS[plan], "limits": [{"key": k, "limit": limits.get(k), "used": used.get(k, 0)} for k in
                                                           ("agents", "tags", "attributes", "segments", "flows", "webhooks", "ai_messages", "storage_mb", "mps")],
             "features": _features(p), "next_plan": nxt,
-            "addons": list(p.get("addons") or ["chatbot", "ai_agent"]), "extra_seats": int(p.get("extra_seats") or 0), "catalogue": catalogue(),
+            "addons": _demo_addons(p), "extra_seats": int(p.get("extra_seats") or 0), "catalogue": catalogue(),
             "month": {"label": now.strftime("%B %Y"), "totals": month["totals"], "by_category": month["by_category"]}, "storage": q,
             "ai": {"replies": 212, "limit": limits["ai_messages"], "configured": True, "month": now.strftime("%Y-%m")}, "rates": month["rates"], "gst": GST,
             "is_estimate": True}
