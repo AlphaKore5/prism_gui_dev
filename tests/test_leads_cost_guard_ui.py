@@ -176,7 +176,7 @@ class MobilesOnlyWhenAsked(_Pooled):
                 text = f.read_text(encoding="utf-8")
                 for m in re.finditer(r"(?<!class )\b(mobiles\.find\(|mobiles\.find_direct\(|gateway\.find_mobile\(|"
                                      r"LeadsMobileWorker\()", text):
-                    hits.append((str(f.relative_to(ROOT)), m.group(1)))
+                    hits.append((f.relative_to(ROOT).as_posix(), m.group(1)))
         allowed = {("addons/leads/workers.py", "mobiles.find("),
                    ("addons/leads/workbench.py", "LeadsMobileWorker("),
                    ("prospector/mobiles.py", "gateway.find_mobile(")}

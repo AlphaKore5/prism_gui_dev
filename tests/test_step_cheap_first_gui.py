@@ -79,7 +79,7 @@ class _Base(unittest.TestCase):
         self.replies: list = []
         self.sent: list = []
         patches = [
-            mock.patch.dict(os.environ, {"HOME": self.home}),
+            mock.patch.dict(os.environ, {"HOME": self.home, "USERPROFILE": self.home}),   # Windows reads USERPROFILE
             mock.patch.object(CB.ai_client, "active", return_value=True),
             mock.patch.object(CB.ai_client, "_auth",
                               return_value={"license_id": "lic-test"}),
