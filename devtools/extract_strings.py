@@ -194,6 +194,8 @@ COPY_TABLES = {
     "MANIFEST",
     "TITLE", "BLURB", "HEADLINE", "DETAIL", "ACTION",
     "ROW_ACTIONS", "REGISTER_RANGES", "OPEN_LABEL",
+    # addons/step/workers.py: how a STEP answer was reached.
+    "PATH_WORDS",
     # Leads & Outreach (Apollo's Find People): the filter rail's facet names
     # (prospector.filters), the Sort box, the Total / Net New / Saved tabs,
     # the page's empty states and Default view's starter searches — each
@@ -232,6 +234,12 @@ EXTRA = [
     # translating. "Bill of Quantities" was in the catalogue by historical
     # accident and fell out the first time it was regenerated.
     "Bill of Quantities", "Bill of Materials",
+    # core.step_cheap: STEP's limit and could-not-verify sentences, written
+    # in the engine and shown through i18n.t().
+    "You have reached today's limit of AI-assisted STEP files. Measurements, sizes, hole counts and simple edits still work and are free. AI suggestions are available again tomorrow.",
+    "You have reached this month's limit of AI-assisted STEP files. Measurements, sizes, hole counts and simple edits still work and are free. AI suggestions are available again next month.",
+    "Prism could not verify an AI answer against the measurements of this file, so it is not shown and no change is proposed. Sizes, hole counts and part names can still be asked directly.",
+    "Could not be verified: this answer did not pass Prism's checks against the measurements of this file. Check every figure before using it. No change is proposed.",
 ]
 
 
