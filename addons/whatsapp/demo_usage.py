@@ -201,6 +201,14 @@ def _csv(header: list, rows: list) -> str:
     return buf.getvalue()
 
 
+def _features(p: dict) -> list:
+    """The plan's features as prism-wa's plans.features_of gives them: the tier's, plus its add-ons'."""
+    out = list(_TIER_FEATURES.get(_plan(p), ()))
+    addons = p.get("addons") or ["chatbot", "ai_agent"]
+    out += [f for a, f in (("chatbot", "flows"), ("ai_agent", "ai_agent")) if a in addons]
+    return sorted(set(out))
+
+
 def _plan_view(p: dict) -> dict:
     from addons.whatsapp import demo_media
     plan, now = _plan(p), _now()
@@ -212,7 +220,7 @@ def _plan_view(p: dict) -> dict:
     nxt = next((x for x in ORDER[ORDER.index(plan) + 1:]), None)
     return {"plan": plan, "label": LABELS[plan], "limits": [{"key": k, "limit": limits.get(k), "used": used.get(k, 0)} for k in
                                                           ("agents", "tags", "attributes", "segments", "flows", "webhooks", "ai_messages", "storage_mb", "mps")],
-            "features": ["broadcast", "scheduler", "reports_download"] if plan in ("premium", "unlimited") else ["broadcast"], "next_plan": nxt,
+            "features": _features(p), "next_plan": nxt,
             "addons": list(p.get("addons") or ["chatbot", "ai_agent"]), "extra_seats": int(p.get("extra_seats") or 0), "catalogue": catalogue(),
             "month": {"label": now.strftime("%B %Y"), "totals": month["totals"], "by_category": month["by_category"]}, "storage": q,
             "ai": {"replies": 212, "limit": limits["ai_messages"], "configured": True, "month": now.strftime("%Y-%m")}, "rates": month["rates"], "gst": GST,
