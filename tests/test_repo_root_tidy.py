@@ -33,7 +33,7 @@ ROOT_FILES = {
     "diagnostics.py", "docexport.py", "email_config.py", "entitlement_copy.py",
     "favorites.py", "festivals.py", "flavour.py", "friendly.py", "gui_gc.py",
     "i18n.py", "identity.py", "inquiry_config.py", "main_window.py",
-    "output_folders.py", "plans.py", "pulse.py", "roles.py", "send_ledger.py",
+    "output_folders.py", "plans.py", "pulse.py", "quality.py", "roles.py", "send_ledger.py",
     "support_kb.py", "theme.py", "uninstall.py", "viewer.py", "viewer_data.py",
     "wakeword.py", "workers.py", "workspace.py",
     # docs
