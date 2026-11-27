@@ -152,10 +152,24 @@ def test_the_simple_reel_is_announced_once_and_noted_in_the_result(
     said: list[str] = []
     monkeypatch.setattr(ui, "warn", lambda m, *a, **k: said.append(str(m)))
     (out, events, shown, kept), seen, runs = _refused_run(ai, monkeypatch, tmp_path)
-    assert sum("Not enough AI credits for the full design step" in s for s in said) == 1
+    assert sum(f"The full design step did not run: {REFUSAL}" in s for s in said) == 1
     assert sum("It cost nothing extra." in s for s in said) == 1
     notes = [str(p) for k, p in events]
     assert any("Simple version, no art direction" in n for n in notes), notes[-3:]
+
+
+def test_a_provider_error_on_the_design_step_is_not_called_a_credit_problem(
+        ai, no_ai_browser, monkeypatch, tmp_path):
+    from core import ui
+    said: list[str] = []
+    monkeypatch.setattr(ui, "warn", lambda m, *a, **k: said.append(str(m)))
+    why = "The AI service refused that request. Nothing was charged."
+    (out, events, shown, kept), seen, runs = _refused_run(
+        ai, monkeypatch, tmp_path,
+        design_error=ai_client.AiError("PROVIDER_ERROR", why, {"kind": "rejected"}))
+    told = [s for s in said if "The full design step did not run" in s]
+    assert len(told) == 1 and why in told[0], said
+    assert not any("credits" in s.lower() for s in said + shown), (said, shown)
 
 
 def test_a_script_that_cannot_be_read_still_says_nothing_was_filmed(

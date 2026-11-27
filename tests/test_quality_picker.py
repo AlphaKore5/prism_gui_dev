@@ -96,6 +96,15 @@ class CardTests(_Base):
         self.assertFalse(self.card.notice.isVisibleTo(self.card))
         self.assertIn("Quality now: Best", self.text())
 
+    def test_a_plan_default_below_the_top_is_not_called_a_step_down(self):
+        self.fake.body = week(10, "balanced", stepped_down=False)
+        self.load()
+        self.assertFalse(self.card.notice.isVisibleTo(self.card))
+        self.fake.body = contract(bar_pct=None, week_resets_at=None, quality_now="balanced")
+        self.load()
+        self.assertFalse(self.card.notice.isVisibleTo(self.card))
+        self.assertIn("Your week: not shown yet", self.text())
+
     def test_a_customer_who_pinned_fast_is_not_told_it_was_stepped_down(self):
         self.card.cfg["quality"] = "fast"
         self.fake.body = week(30, "fast")

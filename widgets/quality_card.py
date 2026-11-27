@@ -159,9 +159,16 @@ class QualityCard(C.Card):
         self.now.setText(i18n.t("Quality now: {level}").format(
             level=quality.word(now)) if now in quality.LEVELS else "")
         self.now.setVisible(now in quality.LEVELS)
-        stepped = (pin == quality.AUTO and now in quality.LEVELS
-                   and (bool(live.get("stepped_down"))
-                        or quality.LEVELS.index(now) < quality.LEVELS.index(top)))
+        # The server says whether the week lowered it; the account's default
+        # being under the plan's top is not a step-down. A server that does not
+        # say is judged as before, and only when there is a week to fill.
+        if "stepped_down" in self.usage:
+            lowered = bool(self.usage["stepped_down"])
+        else:
+            lowered = bool(live.get("stepped_down")) or (
+                pct is not None and now in quality.LEVELS
+                and quality.LEVELS.index(now) < quality.LEVELS.index(top))
+        stepped = pin == quality.AUTO and now in quality.LEVELS and lowered
         self.notice.setText(quality.stepdown_notice(now, resets) if stepped else "")
         self.notice.setVisible(bool(self.notice.text()))
 
