@@ -1004,6 +1004,7 @@ class LeadsCockpit(QWidget):
     verifyRequested = Signal(list)
     emailsRequested = Signal(list)          # Find e-mails — an Apollo preview row is revealed, anyone else found
     phonesRequested = Signal(list)          # Find phones: each company's published number
+    mobilesRequested = Signal(list)         # Get mobile numbers: each person's own, only when asked
     exportRequested = Signal(list)
     saveListRequested = Signal(list)
     sequenceRequested = Signal(list)
@@ -1864,6 +1865,11 @@ class LeadsCockpit(QWidget):
             "its own website or a business directory. It is the company's number, "
             "not a direct dial, and Prism has not called it."
             + (" A credit is used only for a number found." if gateway.pooled() else ""))
+        # A person's OWN mobile is dear (about Rs 11 a number) and the plan includes a fixed number a
+        # month, so it is never fetched by a search: only this button and the person's panel ask.
+        self._b_mobiles = QPushButton("Get mobile numbers")
+        self._mobile_left = None            # numbers left this month (None: no limit known)
+        self._mobile_why_not = ""           # plain words when the month's promise is used up
         self._b_save = QPushButton("Add to list")
         self._b_export = QPushButton("Export")
         # Apollo's Edit > Set stage: where the selected contacts stand with
@@ -1893,6 +1899,7 @@ class LeadsCockpit(QWidget):
         self._b_verify.clicked.connect(lambda: self.verifyRequested.emit(self.selected()))
         self._b_emails.clicked.connect(lambda: self.emailsRequested.emit(self.selected()))
         self._b_phones.clicked.connect(lambda: self.phonesRequested.emit(self.selected()))
+        self._b_mobiles.clicked.connect(lambda: self.mobilesRequested.emit(self.selected()))
         self._b_save.clicked.connect(lambda: self.saveListRequested.emit(self.selected()))
         self._b_export.clicked.connect(lambda: self.exportRequested.emit(self.selected()))
         self._b_qualify.clicked.connect(lambda: self.qualifyRequested.emit(self.selected()))
@@ -1908,7 +1915,7 @@ class LeadsCockpit(QWidget):
         self._sel_all_wanted = False        # only some of the visible rows are ticked
         self._bulk_folded: list = []
         for b in (self._b_contact, self._b_remove, self._b_verify, self._b_emails,
-                  self._b_phones, self._b_save, self._b_export, self._b_stage,
+                  self._b_phones, self._b_mobiles, self._b_save, self._b_export, self._b_stage,
                   self._b_qualify, self._b_more, self._b_seq):
             b.setCursor(Qt.PointingHandCursor)
             lay.addWidget(b)
@@ -1995,10 +2002,11 @@ class LeadsCockpit(QWidget):
 
     def _bulk_actions(self) -> tuple:
         """In _HELP_BULK's order: Save, Remove, Verify, Find e-mails, Find phones,
-        Add to list, Export, Set stage, Qualify & draft, Add to sequence."""
+        Add to list, Export, Set stage, Qualify & draft, Add to sequence — then Get mobile numbers,
+        which the tour does not name."""
         return (self._b_contact, self._b_remove, self._b_verify, self._b_emails,
                 self._b_phones, self._b_save, self._b_export, self._b_stage,
-                self._b_qualify, self._b_seq)
+                self._b_qualify, self._b_seq, self._b_mobiles)
 
     def _wanted(self, button: QPushButton) -> bool:
         """An action the run can still use. Qualify, Find e-mails and Find phones
@@ -2026,10 +2034,10 @@ class LeadsCockpit(QWidget):
         stubs ("emov", "i seq"). Folded, Remove is still in More, by name. From
         6 "Clear selection" goes too (_fit_bulk): the header tick clears as well."""
         (_contact, remove, verify, emails, phones, add_list, export, stage, qualify,
-         _seq) = actions
-        every_extra = (verify, phones, add_list, stage, export, qualify, emails)
-        return {2: (verify, phones, add_list, stage),
-                3: (verify, phones, add_list, stage, export, qualify),
+         _seq, mobiles) = actions
+        every_extra = (verify, phones, mobiles, add_list, stage, export, qualify, emails)
+        return {2: (verify, phones, mobiles, add_list, stage),
+                3: (verify, phones, mobiles, add_list, stage, export, qualify),
                 4: every_extra,
                 5: every_extra + (remove,),
                 6: every_extra + (remove,)}.get(level, ())
@@ -2794,6 +2802,7 @@ class LeadsCockpit(QWidget):
         # Find phones found) has nothing left to look up.
         self._phones_wanted = any(needs_phone(d) for d in self._dossiers + picked)
         self._b_phones.setEnabled(any(needs_phone(d) for d in picked))
+        self._refresh_mobiles_button(picked)
 
         # The header's box speaks for THIS page, as Apollo's does.
         ticked = len([i for i in self._checked if i not in self._hidden])
@@ -2805,6 +2814,53 @@ class LeadsCockpit(QWidget):
         # hidden, the fold came out as "everything", and a bar returning at
         # the same width gets no Resize to correct it.
         self._fit_bulk()
+
+    def set_mobile_gate(self, left, why_not: str = "") -> None:
+        """What this month's promise leaves for mobile numbers: `left` (None when no limit is known)
+        and, when it is used up, the plain words why. Re-arms the button."""
+        self._mobile_left, self._mobile_why_not = left, why_not or ""
+        self._refresh_mobiles_button(self.selected())
+        for row in self._grid.rows():
+            self._arm_row_mobile(row)
+
+    def _arm_row_mobile(self, row) -> None:
+        """A row's own Get mobile number: off, with the reason on it, once the month's promise is
+        used up."""
+        b = getattr(row, "mobile_button", None)
+        if b is None:
+            return
+        b.setEnabled(not self._mobile_why_not)
+        tip = (i18n.t(self._mobile_why_not) if self._mobile_why_not else
+               i18n.t("Get this person's own mobile number. Only a number found uses a credit and "
+                      "counts toward this month's included mobile numbers."))
+        if not self._mobile_why_not and self._mobile_left is not None:
+            tip += " " + i18n.t("{n} left this month.").format(n=self._mobile_left)
+        b.setToolTip(tip)
+
+    def _refresh_mobiles_button(self, picked: list) -> None:
+        """Get mobile numbers: armed when someone ticked can be looked up and the month has numbers
+        left. Disabled, the tooltip says WHY — never a silent grey button."""
+        from prospector import mobiles
+        can = [d for d in picked if mobiles.needs_mobile(getattr(d, "lead", None))]
+        if not picked:
+            why = i18n.t("Tick the people you want a mobile number for.")
+        elif not can:
+            why = i18n.t("Everyone ticked already has a mobile number, or has no company website "
+                         "to look one up with.")
+        elif self._mobile_why_not:
+            why = i18n.t(self._mobile_why_not)
+        else:
+            why = ""
+        self._b_mobiles.setEnabled(not why)
+        if why:
+            tip = why
+        else:
+            tip = i18n.t("Get each ticked person's own mobile number from a paid data source. "
+                         "Only numbers found use a credit and count toward this month's "
+                         "included mobile numbers.")
+            if self._mobile_left is not None:
+                tip += " " + i18n.t("{n} left this month.").format(n=self._mobile_left)
+        self._b_mobiles.setToolTip(tip)
 
     def selected(self) -> list:
         """The rows the bulk actions act on: on a pooled page everyone
@@ -2999,10 +3055,17 @@ class LeadsCockpit(QWidget):
         actions = [("Open", True, lambda _=False, i=idx: self._card_clicked(i))]
         if person is not None and not person.saved:
             actions.append(("Save", False, lambda _=False, d=dos: self.saveContactsRequested.emit([d])))
+        from prospector import mobiles
+        wants_mobile = mobiles.needs_mobile(lead)
+        if wants_mobile:
+            actions.append(("Get mobile number", False,
+                            lambda _=False, d=dos: self.mobilesRequested.emit([d])))
         row = RR.ResultRow(RR.RowSpec(
             key=idx, name=lead.name or "(no name)", company=lead.company or "", subline=subline, pills=pills,
             actions=actions, checked=idx in self._checked,
             tooltip=" — ".join(p for p in (lead.name, lead.company) if p)))
+        row.mobile_button = row.buttons[-1] if wants_mobile else None
+        self._arm_row_mobile(row)
         row.clicked.connect(self._card_clicked)
         row.toggled.connect(lambda i, on: self._set_checked(i, on))
         self._card_cbs[idx] = row.check
@@ -3868,6 +3931,7 @@ class LeadsWorkspace(QWidget):
     verifyRequested = Signal(list)
     emailsRequested = Signal(list)
     phonesRequested = Signal(list)
+    mobilesRequested = Signal(list)
     exportRequested = Signal(list)
     saveListRequested = Signal(list)
     sequenceRequested = Signal(list)
@@ -3900,7 +3964,7 @@ class LeadsWorkspace(QWidget):
         import paths
         self._folder = leads_folder or paths.user_folder("Documents", "Prism Leads")
         self.leads = LeadsCockpit()
-        for name in ("verifyRequested", "emailsRequested", "phonesRequested",
+        for name in ("verifyRequested", "emailsRequested", "phonesRequested", "mobilesRequested",
                      "exportRequested", "saveListRequested", "sequenceRequested",
                      "qualifyRequested",
                      "saveContactsRequested", "stageRequested", "removeRequested",

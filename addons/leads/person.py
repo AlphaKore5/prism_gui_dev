@@ -342,6 +342,13 @@ class _ClickLabel(QLabel):
         super().mouseReleaseEvent(event)
 
 
+def _mobile_why_not() -> str:
+    """Why no mobile number can be fetched under this month's limit, in words; '' when one can."""
+    from prospector import gateway
+    why = gateway.mobiles_why_not() if gateway.pooled() else ""
+    return i18n.t(why) if why else ""
+
+
 def _check_row(text: str) -> tuple:
     """(row, box, words): a checkbox beside words that WRAP. A QCheckBox's own
     text never wraps, and one long line forces the whole column wider than
@@ -767,7 +774,7 @@ class PersonPanel(QWidget):
                                     lambda: self.open_url(found.get("source_url") or "")))
         elif phones.needs_phone(lead):
             # The number their COMPANY publishes (its website, a directory) — not theirs; their own is
-            # "Find their mobile…" below. Named so the two are not read as the same thing (25-Nov-2026).
+            # "Get mobile number…" below. Named so the two are not read as the same thing (25-Nov-2026).
             self.find_phone = _link(i18n.t("Find their company's phone…"),
                                     lambda: self.enrichRequested.emit(self.view.row, ["phone"]))
             col.addWidget(self.find_phone)
@@ -792,9 +799,16 @@ class PersonPanel(QWidget):
                     "pMuted")
                 col.addWidget(self.mobile_source)
         elif mobiles.needs_mobile(lead):
-            self.find_mobile = _link(i18n.t("Find their mobile…"),
+            self.find_mobile = _link(i18n.t("Get mobile number…"),
                                      lambda: self.enrichRequested.emit(self.view.row, ["mobile"]))
             col.addWidget(self.find_mobile)
+            why_not = _mobile_why_not()
+            if why_not:                     # off, and the reason in words beside it
+                self.find_mobile.setEnabled(False)
+                self.find_mobile.setToolTip(why_not)
+                note = _label(why_not, "pMuted")
+                note.setWordWrap(True)
+                col.addWidget(note)
         # LinkedIn only when it is LinkedIn; the page a search found them on
         # (an Exa people page) is its own link (identity.move_profile_link).
         for key, icon_name, text in (("linkedin", "linkedin", "LinkedIn profile"),
@@ -1196,8 +1210,10 @@ class PersonPanel(QWidget):
             ("phone", i18n.t("Phone — the number their company publishes (one Exa "
                              "lookup; a credit only for a number found)"),
              phones.needs_phone(lead)),
-            ("mobile", i18n.t("Mobile — their own mobile number (Apollo; takes a few minutes; "
-                              "a credit only for a number found)"), mobiles.needs_mobile(lead)),
+            ("mobile", _mobile_why_not() or i18n.t(
+                "Mobile — their own mobile number (Apollo; takes a few minutes; "
+                "a credit only for a number found)"),
+             mobiles.needs_mobile(lead) and not _mobile_why_not()),
             ("company", i18n.t("Company — website, size, revenue and HQ (one Exa search)"),
              bool(_text(lead.company) or _extra(lead, "website"))),
             ("qualify", i18n.t("Qualify — research, score and draft an opener (Groq and "

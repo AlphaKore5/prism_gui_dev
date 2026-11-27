@@ -49,6 +49,7 @@ class FakeAi:
         self.responder = None           # optional: body -> reply text, per request
         self.image = PNG                # base64 returned by /v1/ai/image
         self.error = None               # (http status, code, message, detail)
+        self.meta = None                # optional fn(n_calls_so_far) -> quality meta merged into chat/image answers
         self.run_costs: dict = {}       # run_id -> {"mc": n, ...} for /v1/ai/run-cost
         self.status_body = {"api": 1, "ready": True, "reason": "", "mc_per_credit": 1000,
                             "balance_mc": 40_000, "allowance_mc": 100_000,
@@ -76,14 +77,15 @@ class FakeAi:
                 if self.path == "/v1/ai/run-cost":
                     return self._json(200, {"runs": {r: outer.run_costs[r] for r in body.get("run_ids", [])
                                                      if r in outer.run_costs}, "mc_per_credit": 1000})
+                extra = outer.meta(len(outer.calls)) if outer.meta else {}
                 if self.path == "/v1/ai/image":
                     return self._json(200, {"images": [outer.image], "images_count": 1, "charged_mc": 40,
-                                            "balance_mc": 39_960})
+                                            "balance_mc": 39_960, **extra})
                 if self.path == "/v1/ai/chat":
                     return self._json(200, {"text": (outer.responder(body) if outer.responder else outer.text), "finish": "stop",
-                                            "model": {"key": "m", "label": "M"},
+                                            "model": {"key": "m", "label": "M"}, "model_id": "m",
                                             "usage": {"in": 11, "out": 7, "cached": 0},
-                                            "charged_mc": 25, "balance_mc": 39_975})
+                                            "charged_mc": 25, "balance_mc": 39_975, **extra})
                 if self.path == "/v1/ai/chat/stream":
                     self.send_response(200)
                     self.send_header("Content-Type", "text/event-stream")
@@ -361,13 +363,29 @@ class Sites:
                                    plan_prompt=lambda r, q, s: "PLAN " + q)
         monkeypatch.setattr(CB, "get_stepfile", lambda: SF)
         cfg = _cfg()
-        sw.StepAskWorker(cfg, {}, "q").run()
-        self._only(ai, "reasoner", "step", "ask")
+        report = {"file": "a.step", "mode": "metal", "overall_mm": (10, 10, 2),
+                  "parts": [{"name": "P", "size_mm": (10, 10, 2), "volume_cm3": 0.2,
+                             "thickness_mm": 2.0, "area_cm2": 2.4, "holes": []}],
+                  "warnings": []}
+        # Cheap-first: the cheap role once when its answer checks out.
+        ai.text = json.dumps({"answer": "Nothing to change.", "claims": [],
+                              "changes": [], "advice": []})
+        sw.StepAskWorker(cfg, report, "how could this be easier to make").run()
+        self._only(ai, "step.fast", "step", "step.ask")
+        assert ai.chats()[-1]["body"]["model"] == "anthropic/claude-haiku-5.5"
+        # An answer that cannot be checked goes up once to the strong role.
+        ai.calls.clear()
+        ai.text = "prose"
+        sw.StepPlanWorker(cfg, report, "how could this be easier to make", "s").run()
+        assert [c["body"]["role"] for c in ai.chats()] == ["step.fast", "reasoner"]
+        assert ai.chats()[-1]["body"]["model"] == "anthropic/claude-sonnet-5.5"
+        # The picture goes to the chosen model; the strong call is a vision one.
         pic = [{"kind": "image", "mime": "image/png", "b64": PNG, "name": "v.png"}]
-        sw.StepAskWorker(cfg, {}, "q", attachments=pic).run()
-        self._only(ai, "vision", "step", "ask")
-        sw.StepPlanWorker(cfg, {}, "q", "s").run()
-        self._only(ai, "reasoner", "step", "plan")
+        sw.StepAskWorker(cfg, report, "how does it look", attachments=pic,
+                         model="anthropic/claude-sonnet-5.5").run()
+        self._only(ai, "vision", "step", "step.ask")
+        parts = ai.chats()[-1]["body"]["messages"][0]["content"]
+        assert [p["type"] for p in parts] == ["text", "image_url"]
         sw.StepCatalogExplainWorker(cfg, "why").run()
         self._only(ai, "writer", "step", "catalog_explain")
 

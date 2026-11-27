@@ -250,6 +250,16 @@ def get_stepfile():
     return stepfile
 
 
+def get_step_cheap():
+    """The cheap-first STEP pipeline, or None on an engine that predates it
+    (STEP then keeps asking the way it always did)."""
+    try:
+        from core import step_cheap
+    except ImportError:
+        return None
+    return step_cheap
+
+
 # ── Inquiry automation ───────────────────────────────────────────────────────
 # Imported on demand like the rest: the engine's mail modules pull in imaplib
 # and the CSV machinery, and a customer who never buys this add-on should not

@@ -296,9 +296,62 @@ def fetch_usage(limit: int = 50, before: str = "") -> dict:
     return _ai().usage(limit, before)
 
 
+_quality: dict = {"level_used": "", "model": "", "stepped_down": False,
+                  "bar_pct": None}
+LOCKED_ROLES = ("boq.", "step.")
+_announced: set = set()          # levels whose "quality moved" notice was shown
+
+
+def quality_state() -> dict:
+    """What the latest answer said about quality (empty strings / None until
+    the server has said)."""
+    with _lock:
+        return dict(_quality)
+
+
+_week = {"resets_at": None}
+
+
+def note_week(resets_at) -> None:
+    """Remember when the weekly bar resets (from /v1/ai/usage), so a notice
+    outside Settings can name the day."""
+    if resets_at:
+        with _lock:
+            _week["resets_at"] = resets_at
+
+
+def week_resets_at():
+    """When the weekly bar resets: the last usage answer's, else the status
+    answer's, else None."""
+    with _lock:
+        got = _week["resets_at"]
+        st = _cache.get("status") or {}
+    return got or st.get("week_resets_at") or (st.get("cycle") or {}).get(
+        "week_resets_at")
+
+
+def take_stepdown_notice() -> str:
+    """The level to announce ("balanced"), once per level per session, when
+    the server has stepped the quality down; "" otherwise."""
+    with _lock:
+        lvl = _quality["level_used"]
+        if _quality["stepped_down"] and lvl and lvl not in _announced:
+            _announced.add(lvl)
+            return lvl
+    return ""
+
+
 def _heard(note: dict) -> None:
     """A call just settled: keep the cached balance in step with the server."""
     with _lock:
+        # Locked roles (boq.*, step.*) never step down, so their level says
+        # nothing about the weekly bar and must not hide a step-down.
+        if note.get("level_used") and not str(note.get("role") or "").startswith(
+                LOCKED_ROLES):
+            _quality.update({"level_used": note["level_used"],
+                             "model": str(note.get("model") or ""),
+                             "stepped_down": bool(note.get("stepped_down")),
+                             "bar_pct": note.get("bar_pct")})
         _session.append({
             "ts": int(note.get("ts") or time.time()),
             "addon": str(note.get("addon") or ""),

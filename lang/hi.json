@@ -1908,7 +1908,7 @@
   "Fast, automated workflow from drawing to finished document.": "Drawing से लेकर तैयार document तक तेज़, स्वचालित workflow.",
   "Find ten manufacturing companies near Ahmedabad, get the name and email of whoever runs purchasing, and draft an introduction email to each.": "अहमदाबाद के पास दस मैन्युफैक्चरिंग कंपनियाँ खोजें, खरीद विभाग देखने वाले व्यक्ति का नाम और ईमेल लें, और हर एक को परिचय वाला ईमेल ड्राफ़्ट करें।",
   "Find their e-mail…": "उनका ई-मेल खोजें…",
-  "Find their mobile…": "उनका मोबाइल खोजें…",
+  "Get mobile number…": "मोबाइल नंबर पाएँ…",
   "Find them in the address": "पते में उन्हें खोजें",
   "Find, qualify and reach the right people — Prism drafts, you send.": "सही लोगों को खोजें, जाँचें और उनसे संपर्क करें — ड्राफ़्ट Prism बनाता है, भेजते आप हैं।",
   "Finding and qualifying people is charged to your Prism credits — you hold no API keys; every message leaves from your own mailbox.": "लोगों को खोजने और जाँचने का शुल्क आपके Prism credits से लिया जाता है — आपके पास कोई API key नहीं है; हर संदेश आपके अपने मेलबॉक्स से जाता है।",
@@ -6463,7 +6463,15 @@
   "Prism could not save that copy ({why}).": "Prism वह कॉपी सेव नहीं कर सका ({why})।",
   "Prism could not start the removal: {why}": "Prism हटाने की प्रक्रिया शुरू नहीं कर सका: {why}",
   "Prism could not write that file. Try another folder or another format.": "Prism वह फ़ाइल नहीं लिख सका। कोई दूसरा फ़ोल्डर या दूसरा फ़ॉर्मैट आज़माएँ।",
-  "Prism couldn't open the login tabs.\n\n{error}\n\nThe details are in Prism's log.": "Prism लॉगिन टैब नहीं खोल सका।\n\n{error}\n\nविवरण Prism के log में हैं।"
+  "Prism couldn't open the login tabs.\n\n{error}\n\nThe details are in Prism's log.": "Prism लॉगिन टैब नहीं खोल सका।\n\n{error}\n\nविवरण Prism के log में हैं।",
+  "Measured from the file": "फ़ाइल से मापा गया",
+  "Quick check": "त्वरित जाँच",
+  "Full check": "पूरी जाँच",
+  "Could not be verified": "पुष्टि नहीं हो सकी",
+  "You have reached today's limit of AI-assisted STEP files. Measurements, sizes, hole counts and simple edits still work and are free. AI suggestions are available again tomorrow.": "आप AI की मदद वाली STEP फ़ाइलों की आज की सीमा तक पहुँच गए हैं। माप, आकार, छेदों की गिनती और साधारण बदलाव अब भी चलते हैं और मुफ़्त हैं। AI सुझाव कल फिर मिलेंगे।",
+  "You have reached this month's limit of AI-assisted STEP files. Measurements, sizes, hole counts and simple edits still work and are free. AI suggestions are available again next month.": "आप AI की मदद वाली STEP फ़ाइलों की इस महीने की सीमा तक पहुँच गए हैं। माप, आकार, छेदों की गिनती और साधारण बदलाव अब भी चलते हैं और मुफ़्त हैं। AI सुझाव अगले महीने फिर मिलेंगे।",
+  "Prism could not verify an AI answer against the measurements of this file, so it is not shown and no change is proposed. Sizes, hole counts and part names can still be asked directly.": "Prism इस फ़ाइल के माप से AI के जवाब की पुष्टि नहीं कर सका, इसलिए वह दिखाया नहीं गया है और कोई बदलाव नहीं सुझाया गया है। आकार, छेदों की गिनती और पार्ट के नाम अब भी सीधे पूछे जा सकते हैं।",
+  "Could not be verified: this answer did not pass Prism's checks against the measurements of this file. Check every figure before using it. No change is proposed.": "पुष्टि नहीं हो सकी: यह जवाब इस फ़ाइल के माप से Prism की जाँच में पास नहीं हुआ। इस्तेमाल करने से पहले हर आँकड़ा जाँच लें। कोई बदलाव नहीं सुझाया गया है।"
  },
- "count": 6471
+ "count": 6470
 }
