@@ -14,6 +14,7 @@ The engine is reached through core_bridge only (tests/test_engine_facade.py).
 from __future__ import annotations
 
 import datetime as _dt
+import json
 import os
 
 from PySide6.QtCore import Signal
@@ -96,23 +97,85 @@ def image_attachment(path: str) -> dict:
             "name": os.path.basename(path)}
 
 
+# Which way a cheap-first answer was reached, in words a customer can use.
+# No model name: the owner's rule is that models are named only where the
+# quality display setting exists, and it does not on this branch.
+PATH_WORDS = {
+    "local": "Measured from the file",
+    "cheap": "Quick check",
+    "escalated": "Full check",
+    "unverified": "Could not be verified",
+}
+
+
+def path_label(result: dict | None) -> str:
+    """"" when the answer did not come from the cheap-first pipeline."""
+    return PATH_WORDS.get((result or {}).get("path", ""), "")
+
+
+def cheap_first_on() -> bool:
+    """True when STEP asks go through the engine's step_cheap: it needs
+    Prism's server (the cheap `step.fast` role lives there) and an engine
+    that has the module."""
+    return CB.ai_client.active() and CB.get_step_cheap() is not None
+
+
+def _cheap_first(attachments: list):
+    """The step_cheap module for this call, else None. step_cheap reads no
+    pictures, so a call that carries one keeps the direct route (the dialog
+    attaches none while cheap-first is on)."""
+    if attachments or not cheap_first_on():
+        return None
+    return CB.get_step_cheap()
+
+
+def _licence_id() -> str:
+    try:
+        return str(CB.ai_client._auth().get("license_id", ""))
+    except Exception:                                   # noqa: BLE001
+        return ""
+
+
 class StepAskWorker(_Worker):
     """One OpenRouter call: the measured numbers (individually tagged
     holes) and the question -- and, only with the person's own consent
     each session, Prism's own rendered picture of the parts -- in,
-    suggestions out. Never the STEP file itself."""
+    suggestions out. Never the STEP file itself.
+
+    On Prism's server (and with no picture) the question goes through the
+    engine's step_cheap.ask() instead: a fact the measuring code knows is
+    answered locally for free, anything else goes to the cheap model with
+    its claims re-checked, and the strong model is only asked when that
+    check fails. `answered` carries the whole result (which path answered,
+    the plan) just before `done`; a reached daily/monthly cap comes back as
+    `failed` with the plain sentence. `plain_question` is the person's own
+    words when `question` has the earlier conversation folded in: the local
+    check must only see what they just typed."""
     done = Signal(str)
+    answered = Signal(dict)
     failed = Signal(str)
 
     def __init__(self, cfg: dict, report: dict, question: str,
                  model: str = "anthropic/claude-haiku-5.5",
-                 attachments: list | None = None):
+                 attachments: list | None = None, plain_question: str = ""):
         super().__init__()
         self.cfg, self.report, self.question = cfg, report, question
         self.model, self.attachments = model, list(attachments or [])
+        self.plain_question = plain_question
 
     def run(self):
         try:
+            cheap = _cheap_first(self.attachments)
+            if cheap is not None:
+                res = cheap.ask(self.report,
+                                self.plain_question or self.question,
+                                licence_id=_licence_id())
+                if res.get("capped"):
+                    self.failed.emit(res["text"])
+                    return
+                self.answered.emit(res)
+                self.done.emit(res["text"].strip())
+                return
             SF = CB.get_stepfile()
             text = CB.openrouter.openrouter_chat(
                 self.cfg.get("openrouter_api_key", ""), self.model,
@@ -129,20 +192,47 @@ class StepAskWorker(_Worker):
 class StepPlanWorker(_Worker):
     """One OpenRouter call that turns an answer into an exact change plan
     (JSON) -- the same model the question was asked with reviews its own
-    suggestions, in-house, no browser."""
+    suggestions, in-house, no browser.
+
+    With the cheap-first pipeline the plan is already in the answer to the
+    question (`prior`, the result `StepAskWorker.answered` gave), so no
+    second call is made. Without one (a conversation reopened from History)
+    the question is asked again."""
     done = Signal(str)
+    answered = Signal(dict)
     failed = Signal(str)
 
     def __init__(self, cfg: dict, report: dict, question: str,
                  suggestions: str, model: str = "anthropic/claude-haiku-5.5",
-                 attachments: list | None = None):
+                 attachments: list | None = None, prior: dict | None = None,
+                 plain_question: str = ""):
         super().__init__()
         self.cfg, self.report = cfg, report
         self.question, self.suggestions = question, suggestions
         self.model, self.attachments = model, list(attachments or [])
+        self.prior, self.plain_question = prior, plain_question
 
     def run(self):
         try:
+            cheap = _cheap_first(self.attachments)
+            if cheap is not None:
+                res = self.prior
+                if res is None:
+                    res = cheap.ask(self.report,
+                                    self.plain_question or self.question
+                                    or self.suggestions,
+                                    licence_id=_licence_id())
+                    if res.get("capped"):
+                        self.failed.emit(res["text"])
+                        return
+                plan = dict(res.get("plan") or {})
+                plan.setdefault("changes", [])
+                plan.setdefault("advice", [])
+                if res.get("path") == "unverified" and not plan["advice"]:
+                    plan["advice"] = [res.get("text", "")]
+                self.answered.emit(res)
+                self.done.emit(json.dumps(plan))
+                return
             SF = CB.get_stepfile()
             text = CB.openrouter.openrouter_chat(
                 self.cfg.get("openrouter_api_key", ""), self.model,

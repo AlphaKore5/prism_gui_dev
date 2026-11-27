@@ -361,13 +361,23 @@ class Sites:
                                    plan_prompt=lambda r, q, s: "PLAN " + q)
         monkeypatch.setattr(CB, "get_stepfile", lambda: SF)
         cfg = _cfg()
-        sw.StepAskWorker(cfg, {}, "q").run()
-        self._only(ai, "reasoner", "step", "ask")
+        report = {"file": "a.step", "mode": "metal", "overall_mm": (10, 10, 2),
+                  "parts": [{"name": "P", "size_mm": (10, 10, 2), "volume_cm3": 0.2,
+                             "thickness_mm": 2.0, "holes": []}], "warnings": []}
+        # Cheap-first: the cheap role once when its answer checks out.
+        ai.text = json.dumps({"answer": "Nothing to change.", "claims": [],
+                              "changes": [], "advice": []})
+        sw.StepAskWorker(cfg, report, "how could this be easier to make").run()
+        self._only(ai, "step.fast", "step", "step.ask")
+        # An answer that cannot be checked goes up once to the strong role.
+        ai.calls.clear()
+        ai.text = "prose"
+        sw.StepPlanWorker(cfg, report, "how could this be easier to make", "s").run()
+        assert [c["body"]["role"] for c in ai.chats()] == ["step.fast", "reasoner"]
+        # A call carrying a picture is still a vision call.
         pic = [{"kind": "image", "mime": "image/png", "b64": PNG, "name": "v.png"}]
-        sw.StepAskWorker(cfg, {}, "q", attachments=pic).run()
+        sw.StepAskWorker(cfg, report, "q", attachments=pic).run()
         self._only(ai, "vision", "step", "ask")
-        sw.StepPlanWorker(cfg, {}, "q", "s").run()
-        self._only(ai, "reasoner", "step", "plan")
         sw.StepCatalogExplainWorker(cfg, "why").run()
         self._only(ai, "writer", "step", "catalog_explain")
 

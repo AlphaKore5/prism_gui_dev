@@ -23,6 +23,7 @@ import i18n
 import paths
 import theme
 import viewer
+from addons.step.workers import PATH_WORDS
 from widgets import controls as C
 from widgets import icons
 
@@ -99,6 +100,12 @@ def shown_name(name: str) -> str:
     if name == "ChatGPT":
         return "Prism AI"
     return name.replace("Claude ", "", 1) if name.startswith("Claude ") else name
+
+def _plan_lead(agent: str) -> str:
+    """"Planned by " in front of a model's name; nothing in front of a
+    cheap-first path ("Quick check"), which is not a who."""
+    return "" if agent in PATH_WORDS.values() else i18n.t("Planned by") + " "
+
 
 class Link(QLabel):
     """A text link that is really a styled label: Qt's rich-text anchors take
@@ -800,7 +807,7 @@ class PlanPanel(QWidget):
         if agent:
             # Which AI wrote this plan.
             who = QLabel(f"<span style='color:{theme.badge_color(agent)}'>●</span>"
-                         f"&nbsp;{i18n.t('Planned by')} <b>{shown_name(agent)}</b>")
+                         f"&nbsp;{_plan_lead(agent)}<b>{shown_name(agent)}</b>")
             who.setTextFormat(Qt.RichText)
             who.setStyleSheet(f"color: {theme.NEUTRAL[600]}; font-size: 12px;"
                               " padding: 8px 14px 0 14px;")
