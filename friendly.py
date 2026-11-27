@@ -453,7 +453,7 @@ _GENERIC = Problem(
 
 # The server's own customer-facing AI refusal copy (licence server errors.py).
 _AI_REFUSAL = re.compile(
-    r"enough (AI )?credits|needs? [0-9,.]+ credits|top up your credits"
+    r"enough (AI )?credits|used this week's AI allowance|needs? [0-9,.]+ credits|top up your credits"
     r"|AI isn't switched on for your account|AI is paused on your account"
     r"|AI isn't available( to your account)?|AI is (blocked|not available)"
     r"|re-check your licence before using AI", re.I)

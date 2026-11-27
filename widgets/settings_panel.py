@@ -1298,7 +1298,7 @@ class SettingsPanel(QDialog):
     # ── usage ─────────────────────────────────────────────────────────────
     def _usage(self, col):
         from widgets.usage_panel import UsagePanel
-        self.usage_panel = UsagePanel()
+        self.usage_panel = UsagePanel(cfg=self.cfg)
         col.addWidget(self.usage_panel)
         self.usage_panel.refresh()
 

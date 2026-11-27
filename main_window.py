@@ -38,6 +38,8 @@ import deps
 import licensing
 import ai_server
 import pulse
+import quality
+from widgets.quality_card import reel_style
 import paths
 import theme
 import updater
@@ -366,6 +368,7 @@ class MainWindow(QMainWindow):
             output_folders.apply(self.cfg)
         except Exception:                                   # noqa: BLE001 - never stop the window opening
             pass
+        quality.apply(self.cfg)          # the customer's Best / Balanced / Fast pin
         self.attachments: list[dict] = []
         self.pending_mentions: list[dict] = []   # [{"description","path","kind"}]
         self.routing: dict | None = None
@@ -2953,10 +2956,18 @@ class MainWindow(QMainWindow):
         # written or spent. Never a silent downgrade.
         self._lite_run = False
         if "Prism Studio" in run_agents.values():
-            choice = self._offer_simpler_reel()
-            if choice == "cancel":
-                return
-            self._lite_run = choice == "lite"
+            style = reel_style(self.cfg)
+            if style == "simple":
+                # Chosen on purpose in Settings: no art direction, no question.
+                self._lite_run = True
+            else:
+                choice = self._offer_simpler_reel()
+                if choice == "cancel":
+                    return
+                self._lite_run = choice == "lite"
+            if style == "own" and self._has_own_pictures():
+                # The customer's own pictures only: no pictures are made.
+                skip_stages = sorted(set(skip_stages) | {"visual"})
 
         # Pressing Start the work commits the whole queue, not just the plan on
         # screen. From here every later task plans and runs without stopping.
@@ -2993,6 +3004,11 @@ class MainWindow(QMainWindow):
             worker.start()
             return
         self._authorize_and_start(run_agents, run_steps, skip_stages)
+
+    def _has_own_pictures(self) -> bool:
+        return any(str(a.get("path", "")).lower().endswith(
+            (".png", ".jpg", ".jpeg", ".webp", ".bmp"))
+            for a in (self.attachments or []))
 
     def _offer_simpler_reel(self) -> str:
         """"lite", "full" or "cancel". Asked only when the plan's estimate is
@@ -3078,6 +3094,8 @@ class MainWindow(QMainWindow):
             return
 
         self._run_id = getattr(auth, "run_id", "")
+        self._run_quality = {}
+        quality.apply(self.cfg, ai_server.status_now())
         if not getattr(self, "_is_followup_run", False):
             self._current_run_file = None
             self._followup_session = None
@@ -3418,6 +3436,17 @@ class MainWindow(QMainWindow):
             # The engine sends the underlying error and this used to drop it,
             # leaving the card that was in flight saying "Working…" for ever.
             self.output_panel.browser_lost(stage, payload.get("error", ""), done)
+            return
+        if kind == "quality":
+            # The server stepped the quality down (or it changed): say so once.
+            level = ai_server.take_stepdown_notice()
+            if level:
+                text = quality.stepdown_notice(level, ai_server.week_resets_at())
+                self.statusBar().showMessage(text, 12000)
+                self.output_panel.add_note(text)
+            return
+        if kind == "quality_summary":
+            self._run_quality = dict(payload or {})
             return
         if kind == "cancelled":
             done = payload.get("done", 0)
@@ -3863,6 +3892,9 @@ class MainWindow(QMainWindow):
                     seen.add(p)
                     made.append(p)
         self.output_panel.add_files(made)
+        line = quality.run_line(getattr(self, "_run_quality", None) or {})
+        if line and not stopped:
+            self.output_panel.add_note(line)
         if stopped:
             self.output_panel.add_note(i18n.t(
                 "Stopped. Everything finished so far is kept; write again to carry on."))
@@ -4188,7 +4220,7 @@ class MainWindow(QMainWindow):
                     shown["artwork"] = maker
                 shown.update({"design": agent, "media": "Prism Studio"})
                 self._start_followup_run(
-                    ordinary, atts, plan_agents=shown,
+                    ordinary, atts, plan_agents=shown, film="reel",
                     then=lambda r, l: self._continue_studio_followup(
                         r, l, reel, design_url, agent, atts, images))
             else:
@@ -4546,7 +4578,8 @@ class MainWindow(QMainWindow):
     def _start_followup_run(self, stages: list, attachments: list,
                             plan_agents: dict = None, then=None,
                             prompts: dict = None, titles: dict = None,
-                            reuse_stages: list = None, files_out: list = None):
+                            reuse_stages: list = None, files_out: list = None,
+                            film: str = ""):
         """Run the follow-up's steps — one, or a relay of several — reusing
         the run surface, so a follow-up shows and finishes like any other
         run (and can itself offer another follow-up when it completes).
@@ -4604,7 +4637,7 @@ class MainWindow(QMainWindow):
             self.routing, cfg_for_run, attachments, self._followup_text,
             custom_stages=custom, resume_urls=resume or None, followup=True,
             chatgpt_analysis=False, prior_responses=responses,
-            reuse_stages=reuse_stages, files_out=files_out)
+            reuse_stages=reuse_stages, files_out=files_out, film=film)
         awake.acquire()
         self._active_run = worker
         worker.stage_event.connect(self._on_stage_event)

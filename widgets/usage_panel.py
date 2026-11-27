@@ -21,6 +21,7 @@ import ai_server
 import i18n
 import theme
 from widgets import controls as C
+from widgets.quality_card import QualityCard
 from workers import UsageWorker
 
 
@@ -71,7 +72,7 @@ class UsagePanel(QWidget):
     """Embedded in Settings. `refresh()` asks again; it is also what the
     Refresh button does."""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, cfg: dict | None = None):
         super().__init__(parent)
         self._worker = None
         self.data: dict | None = None
@@ -86,6 +87,11 @@ class UsagePanel(QWidget):
                                     on_click=self.refresh)
         bar.addWidget(self.refresh_btn)
         col.addLayout(bar)
+        if cfg is None:
+            import core_bridge as CB
+            cfg = CB.config.load()
+        self.quality = QualityCard(cfg)
+        col.addWidget(self.quality)
         self.body = QVBoxLayout()
         self.body.setSpacing(theme.SPACE_4)
         col.addLayout(self.body)
@@ -146,6 +152,7 @@ class UsagePanel(QWidget):
     def show_data(self, data):
         self._clear()
         self.data = data
+        self.quality.set_usage(data)
         if not data:
             return
         events = data.get("events") or []

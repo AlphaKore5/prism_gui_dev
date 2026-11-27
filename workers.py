@@ -215,7 +215,7 @@ class AutomationWorker(_Worker):
                  stage_skills: dict | None = None,
                  prior_responses: dict | None = None,
                  min_wait: int = 0, reuse_stages: list | None = None,
-                 lite: bool = False):
+                 lite: bool = False, film: str = ""):
         super().__init__()
         self.routing, self.cfg = routing, cfg
         # Stages already answered in `prior_responses` that the engine must
@@ -225,6 +225,9 @@ class AutomationWorker(_Worker):
         # A Studio reel without the paid art-direction step: the person chose
         # it in the up-front offer. See automation.run(lite=).
         self.lite = bool(lite)
+        # "reel" / "motion" when this run is part of a film but its own stages
+        # do not show it. See automation.run(film=).
+        self.film = film
         self.attachments, self.query = attachments, query
         self.prior_responses = prior_responses
         # Stage keys the caller promises will produce a picture — they get
@@ -352,6 +355,8 @@ class AutomationWorker(_Worker):
                 kwargs["reuse_stages"] = self.reuse_stages
             if self.lite:
                 kwargs["lite"] = True
+            if self.film:
+                kwargs["film"] = self.film
             responses, links = automation.run(
                 self.routing, self.cfg, attachments=self.attachments,
                 on_event=lambda kind, payload: self.stage_event.emit(kind, payload),

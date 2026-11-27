@@ -406,7 +406,7 @@ class MotionDialog(PrismDialog):
         self._followup_worker = AutomationWorker(
             {}, self.cfg, self.images, f"motion refinement — {change}",
             custom_stages=[("refine", writer, [prompt])],
-            chatgpt_analysis=False)
+            chatgpt_analysis=False, film="motion")
         self._followup_worker.done.connect(self._on_refined)
         self._followup_worker.failed.connect(self._on_failed)
         self._followup_worker.start()
