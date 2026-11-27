@@ -363,21 +363,27 @@ class Sites:
         cfg = _cfg()
         report = {"file": "a.step", "mode": "metal", "overall_mm": (10, 10, 2),
                   "parts": [{"name": "P", "size_mm": (10, 10, 2), "volume_cm3": 0.2,
-                             "thickness_mm": 2.0, "holes": []}], "warnings": []}
+                             "thickness_mm": 2.0, "area_cm2": 2.4, "holes": []}],
+                  "warnings": []}
         # Cheap-first: the cheap role once when its answer checks out.
         ai.text = json.dumps({"answer": "Nothing to change.", "claims": [],
                               "changes": [], "advice": []})
         sw.StepAskWorker(cfg, report, "how could this be easier to make").run()
         self._only(ai, "step.fast", "step", "step.ask")
+        assert ai.chats()[-1]["body"]["model"] == "anthropic/claude-haiku-5.5"
         # An answer that cannot be checked goes up once to the strong role.
         ai.calls.clear()
         ai.text = "prose"
         sw.StepPlanWorker(cfg, report, "how could this be easier to make", "s").run()
         assert [c["body"]["role"] for c in ai.chats()] == ["step.fast", "reasoner"]
-        # A call carrying a picture is still a vision call.
+        assert ai.chats()[-1]["body"]["model"] == "anthropic/claude-sonnet-5.5"
+        # The picture goes to the chosen model; the strong call is a vision one.
         pic = [{"kind": "image", "mime": "image/png", "b64": PNG, "name": "v.png"}]
-        sw.StepAskWorker(cfg, report, "q", attachments=pic).run()
-        self._only(ai, "vision", "step", "ask")
+        sw.StepAskWorker(cfg, report, "how does it look", attachments=pic,
+                         model="anthropic/claude-sonnet-5.5").run()
+        self._only(ai, "vision", "step", "step.ask")
+        parts = ai.chats()[-1]["body"]["messages"][0]["content"]
+        assert [p["type"] for p in parts] == ["text", "image_url"]
         sw.StepCatalogExplainWorker(cfg, "why").run()
         self._only(ai, "writer", "step", "catalog_explain")
 

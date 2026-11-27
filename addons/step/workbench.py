@@ -97,6 +97,8 @@ def shown_name(name: str) -> str:
     run records, MODEL_IDS keys) stay as they are, so old settings and
     past runs still match; only the words on screen change."""
     name = str(name or "")
+    if name in PATH_WORDS.values():
+        return i18n.t(name)
     if name == "ChatGPT":
         return "Prism AI"
     return name.replace("Claude ", "", 1) if name.startswith("Claude ") else name

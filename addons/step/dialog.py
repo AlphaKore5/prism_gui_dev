@@ -53,7 +53,7 @@ from widgets import send_to_ai
 from addons.step.workers import (StepApplyWorker, StepAskWorker,
                                  StepCatalogExplainWorker, StepMeasureWorker,
                                  StepPlanWorker, image_attachment,
-                                 cheap_first_on, path_label)
+                                 answers_locally, path_label)
 from addons.step import sessions as SES
 from addons.step import workbench as WB
 from widgets.loader import Loader
@@ -545,15 +545,6 @@ class StepDialog(PrismDialog):
         # Everything past the question goes in one fold, shut by default:
         # who answers, the styled-copy tick and the catalog lookup. Same
         # widgets, same handlers; only where they sit has changed.
-        if cheap_first_on():
-            # Prism picks how hard to check each question, so a model
-            # picker here would change nothing.
-            self.model_label.hide()
-            self.model_combo.hide()
-            model_hint.setText(i18n.t(
-                "Sizes, hole counts and simple edits are measured from the "
-                "file and are free. Other questions get a quick check, and a "
-                "full check only when the quick one cannot be confirmed."))
         self.more = MoreOptions("More options")
         self.more.add(model_host)
         self.more.add(model_hint)
@@ -796,8 +787,6 @@ class StepDialog(PrismDialog):
         # Carry on in the window: a follow-up, or "Build this".
         self.composer = WB.Composer(MODEL_CHOICES)
         self.composer.set_agent(self.cfg.get("step_ask_model", DEFAULT_MODEL))
-        if cheap_first_on():
-            self.composer.agent.hide()
         self.composer.send.connect(self._composer_send)
         self.composer.build.connect(self._composer_build)
         self.composer.hide()
@@ -1264,8 +1253,7 @@ class StepDialog(PrismDialog):
             # the model does a second one — "Make a change" — appear.
             edit_mode = self._action() == "edit"
             self.composer.set_mode(edit_mode and bool(m.get("path")))
-            self.composer.set_agent(self._stage_agents_map.get(key)
-                                    or self.cfg.get("step_ask_model", DEFAULT_MODEL))
+            self.composer.set_agent(self._picked_for(key))
 
     def _refresh_chat(self, keep_live: bool = False):
         """Show the chat this screen is in. It starts empty when a file is
@@ -2157,10 +2145,7 @@ class StepDialog(PrismDialog):
         one content block an OpenRouter vision call can look at — only
         once the person has said yes this session, and only when a
         render actually exists (Ask/Edit asked before Draft has ever run
-        has nothing to attach yet). Nothing is attached, or asked about,
-        while cheap-first is on: it works from the measured numbers alone."""
-        if cheap_first_on():
-            return []
+        has nothing to attach yet)."""
         png = (m.get("drawn") or {}).get("png")
         if not png or not os.path.exists(png):
             return []
@@ -2168,6 +2153,32 @@ class StepDialog(PrismDialog):
         if not self._drawing_consent():
             return []
         return [image_attachment(png)]
+
+    def _pictures_for(self, m: dict, question: str, history=None) -> list:
+        """_attachments_for, except for a question the measured numbers
+        answer here: nothing is sent then, so nothing is asked."""
+        if answers_locally(m["report"], question, history):
+            return []
+        return self._attachments_for(m)
+
+    def _history_for(self, m: dict, key: str) -> list:
+        """The earlier chat about this part as [{"q", "a"}], oldest first:
+        the saved conversation, else what this run holds."""
+        thread = self._load_conversation(m) or self._thread
+        turns = [{"q": q[1], "a": a[1]}
+                 for q, a in zip(thread[::2], thread[1::2])]
+        if turns:
+            return turns
+        first = (self._responses.get(key) or [""])[0]
+        return [{"q": self.ask.text().strip(), "a": first}] + [
+            {"q": f.get("q", ""), "a": f.get("a", "")} for f in self._followups]
+
+    def _picked_for(self, key: str) -> str:
+        """The model behind the answer at `key`: what was picked for it, else
+        the name an older run stored, else what is picked now."""
+        name = ((self._ask_results.get(key) or {}).get("picked")
+                or self._stage_agents_map.get(key))
+        return name if name in MODEL_IDS else self._chosen_model()
 
     def _no_key_message(self, model: str) -> str:
         return i18n.t("{model} needs an OpenRouter key — add one in "
@@ -2179,22 +2190,20 @@ class StepDialog(PrismDialog):
         if not self.cfg.get("openrouter_api_key"):
             self._notify_error(self._no_key_message(model))
             return
-        asking = (i18n.t(
-            "Checking {file} — only the measured numbers and your question "
-            "are used; the model itself never leaves this machine…")
-            if cheap_first_on() else i18n.t(
+        self._set_busy(True, i18n.t(
             "Asking {model} about {file} — the measured numbers (and, if "
             "you allow it, Prism's own picture of the part) and your "
-            "question only; the model itself never leaves this machine…"))
-        self._set_busy(True, asking.replace("{model}", WB.shown_name(model))
-                       .replace("{file}", report["file"]), 1)
-        self._ask_results.pop(f"ask · {report['stem']}", None)
-        self._ask_worker = StepAskWorker(
-            self.cfg, report, self.ask.text().strip(),
-            model=MODEL_IDS[model], attachments=self._attachments_for(m))
+            "question only; the model itself never leaves this machine…")
+            .replace("{model}", WB.shown_name(model)).replace("{file}", report["file"]), 1)
         key = f"ask · {report['stem']}"
+        self._ask_results.pop(key, None)
+        question = self.ask.text().strip()
+        self._ask_worker = StepAskWorker(
+            self.cfg, report, question, model=MODEL_IDS[model],
+            attachments=self._pictures_for(m, question))
         self._ask_worker.answered.connect(
-            lambda res, key=key: self._ask_results.__setitem__(key, res))
+            lambda res, key=key, model=model: self._ask_results.__setitem__(
+                key, dict(res, picked=model)))
         self._ask_worker.done.connect(
             lambda text, model=model, key=key: self._on_suggested(
                 text, agent=path_label(self._ask_results.get(key)) or model))
@@ -2318,8 +2327,10 @@ class StepDialog(PrismDialog):
         m = self._current or (self.models[0] if self.models else None)
         self._followups.append({"q": question, "a": answer, "agent": agent})
         if m is not None:
-            self._thread += [(i18n.t("You followed up"), question),
-                             (agent, answer)]
+            # From the saved file, so a conversation reopened from History
+            # is added to rather than replaced.
+            self._thread = (self._load_conversation(m) or self._thread) + [
+                (i18n.t("You followed up"), question), (agent, answer)]
             self._save_conversation(m, self._thread)
         self.composer.clear()
         if self._live is not None:
@@ -2358,9 +2369,7 @@ class StepDialog(PrismDialog):
         report = m["report"]
         suggestions = (self._conversation_text(key) if self._followups
                        else self._responses[key][0])
-        model = self._stage_agents_map.get(key)
-        if model not in MODEL_IDS:
-            model = self._chosen_model()
+        model = self._picked_for(key)
         if not self.cfg.get("openrouter_api_key"):
             msg = self._no_key_message(model)
             if popup is not None:
@@ -2372,22 +2381,23 @@ class StepDialog(PrismDialog):
         if popup is not None:
             popup.set_busy(True)
         else:
-            planning = (i18n.t(
-                "Making an exact change plan for {file}…")
-                if cheap_first_on() else i18n.t(
+            self._set_busy(True, i18n.t(
                 "{model} is turning the answer into an exact change plan "
-                "for {file}…"))
-            self._set_busy(True, planning.replace(
-                "{model}", WB.shown_name(model)).replace("{file}", report["file"]), 1)
+                "for {file}…")
+                .replace("{model}", WB.shown_name(model)).replace("{file}", report["file"]), 1)
         # The latest answer that proposed a change already holds the plan; a
         # reopened conversation has none, so its last question is asked again.
         last_q = self._followups[-1].get("q", "") if self._followups else ""
         prior = self._ask_results.get(key)
+        history = self._history_for(m, key)
+        question = last_q or self.ask.text().strip()
         seen = {}
         self._plan_worker = StepPlanWorker(
             self.cfg, report, self.ask.text().strip(), suggestions,
-            model=MODEL_IDS[model], attachments=self._attachments_for(m),
-            prior=prior, plain_question=last_q)
+            model=MODEL_IDS[model],
+            attachments=([] if prior is not None
+                         else self._pictures_for(m, question, history)),
+            prior=prior, plain_question=last_q, history=history)
         self._plan_worker.answered.connect(seen.update)
         self._plan_worker.done.connect(
             lambda text, m=m, popup=popup, model=model, seen=seen:
@@ -2421,14 +2431,17 @@ class StepDialog(PrismDialog):
         composed = (
             "(This is a follow-up to a conversation already under way.)\n\n"
             f"{self._conversation_text(key)}\n\nNew follow-up: {text}")
+        history = self._history_for(m, key)
         self._followup_ask_worker = StepAskWorker(
             self.cfg, report, composed, model=MODEL_IDS[model],
-            attachments=self._attachments_for(m), plain_question=text)
+            attachments=self._pictures_for(m, text, history),
+            plain_question=text, history=history)
         seen = {}
-        def _keep(res, key=key):
+
+        def _keep(res, key=key, model=model):
             seen.update(res)
             if res["plan"]["changes"] or key not in self._ask_results:
-                self._ask_results[key] = res
+                self._ask_results[key] = dict(res, picked=model)
         self._followup_ask_worker.answered.connect(_keep)
         self._followup_ask_worker.done.connect(
             lambda answer, dlg=dlg, key=key, model=model, seen=seen:
@@ -2693,7 +2706,7 @@ class StepDialog(PrismDialog):
         cap = CB.get_step_cheap()
         # A reached limit is never cut short: its last words say when it resets.
         whole = len(text) < 140 or (cap is not None and text in (
-            cap.CAP_MESSAGE_DAY, cap.CAP_MESSAGE_MONTH))
+            i18n.t(cap.CAP_MESSAGE_DAY), i18n.t(cap.CAP_MESSAGE_MONTH)))
         self.canvas.toast("⚠  " + (text if whole else text[:137] + "…"),
                           [], seconds=10)
 

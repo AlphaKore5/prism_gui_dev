@@ -20,6 +20,7 @@ import os
 from PySide6.QtCore import Signal
 
 import core_bridge as CB
+import i18n
 from workers import _Worker
 
 
@@ -98,12 +99,12 @@ def image_attachment(path: str) -> dict:
 
 
 # Which way a cheap-first answer was reached, in words a customer can use.
-# No model name: the owner's rule is that models are named only where the
-# quality display setting exists, and it does not on this branch.
+# Kept in English in run records; workbench.shown_name translates on screen.
 PATH_WORDS = {
     "local": "Measured from the file",
     "cheap": "Quick check",
     "escalated": "Full check",
+    "strong": "Full check",
     "unverified": "Could not be verified",
 }
 
@@ -120,13 +121,16 @@ def cheap_first_on() -> bool:
     return CB.ai_client.active() and CB.get_step_cheap() is not None
 
 
-def _cheap_first(attachments: list):
-    """The step_cheap module for this call, else None. step_cheap reads no
-    pictures, so a call that carries one keeps the direct route (the dialog
-    attaches none while cheap-first is on)."""
-    if attachments or not cheap_first_on():
-        return None
-    return CB.get_step_cheap()
+def _cheap_first():
+    """The step_cheap module when STEP should use it, else None."""
+    return CB.get_step_cheap() if cheap_first_on() else None
+
+
+def answers_locally(report: dict, question: str, history=None) -> bool:
+    """True when asking would send nothing anywhere (so no picture is asked
+    for either)."""
+    cheap = _cheap_first()
+    return cheap is not None and cheap.answers_locally(report, question, history)
 
 
 def _licence_id() -> str:
@@ -136,40 +140,51 @@ def _licence_id() -> str:
         return ""
 
 
+def _cheap_ask(cheap, report: dict, question: str, model: str,
+               attachments: list, history: list) -> dict:
+    """step_cheap.ask(), with its fixed sentences in the app's language."""
+    res = cheap.ask(report, question, licence_id=_licence_id(), model=model,
+                    attachments=attachments, history=history)
+    if res.get("path") in ("capped", "unverified"):
+        res = dict(res, text=i18n.t(res["text"]))
+    return res
+
+
 class StepAskWorker(_Worker):
     """One OpenRouter call: the measured numbers (individually tagged
     holes) and the question -- and, only with the person's own consent
     each session, Prism's own rendered picture of the parts -- in,
     suggestions out. Never the STEP file itself.
 
-    On Prism's server (and with no picture) the question goes through the
-    engine's step_cheap.ask() instead: a fact the measuring code knows is
-    answered locally for free, anything else goes to the cheap model with
-    its claims re-checked, and the strong model is only asked when that
-    check fails. `answered` carries the whole result (which path answered,
-    the plan) just before `done`; a reached daily/monthly cap comes back as
-    `failed` with the plain sentence. `plain_question` is the person's own
-    words when `question` has the earlier conversation folded in: the local
-    check must only see what they just typed."""
+    On Prism's server the question goes through the engine's
+    step_cheap.ask() instead: a fact the measuring code knows is answered
+    locally for free; otherwise the Haiku pick gets a checked quick pass with
+    one escalation to Sonnet, and the Sonnet pick goes straight to Sonnet.
+    `answered` carries the whole result (which path answered, the plan) just
+    before `done`; a reached daily/monthly cap comes back as `failed` with
+    the plain sentence. For a follow-up, `plain_question` is the person's own
+    words (`question` has the conversation folded in, for the direct route)
+    and `history` the earlier exchanges, which the engine trims."""
     done = Signal(str)
     answered = Signal(dict)
     failed = Signal(str)
 
     def __init__(self, cfg: dict, report: dict, question: str,
                  model: str = "anthropic/claude-haiku-5.5",
-                 attachments: list | None = None, plain_question: str = ""):
+                 attachments: list | None = None, plain_question: str = "",
+                 history: list | None = None):
         super().__init__()
         self.cfg, self.report, self.question = cfg, report, question
         self.model, self.attachments = model, list(attachments or [])
-        self.plain_question = plain_question
+        self.plain_question, self.history = plain_question, list(history or [])
 
     def run(self):
         try:
-            cheap = _cheap_first(self.attachments)
+            cheap = _cheap_first()
             if cheap is not None:
-                res = cheap.ask(self.report,
-                                self.plain_question or self.question,
-                                licence_id=_licence_id())
+                res = _cheap_ask(cheap, self.report,
+                                 self.plain_question or self.question,
+                                 self.model, self.attachments, self.history)
                 if res.get("capped"):
                     self.failed.emit(res["text"])
                     return
@@ -205,23 +220,25 @@ class StepPlanWorker(_Worker):
     def __init__(self, cfg: dict, report: dict, question: str,
                  suggestions: str, model: str = "anthropic/claude-haiku-5.5",
                  attachments: list | None = None, prior: dict | None = None,
-                 plain_question: str = ""):
+                 plain_question: str = "", history: list | None = None):
         super().__init__()
         self.cfg, self.report = cfg, report
         self.question, self.suggestions = question, suggestions
         self.model, self.attachments = model, list(attachments or [])
         self.prior, self.plain_question = prior, plain_question
+        self.history = list(history or [])
 
     def run(self):
         try:
-            cheap = _cheap_first(self.attachments)
+            cheap = _cheap_first()
             if cheap is not None:
                 res = self.prior
                 if res is None:
-                    res = cheap.ask(self.report,
-                                    self.plain_question or self.question
-                                    or self.suggestions,
-                                    licence_id=_licence_id())
+                    res = _cheap_ask(
+                        cheap, self.report,
+                        self.plain_question or self.question
+                        or self.suggestions,
+                        self.model, self.attachments, self.history)
                     if res.get("capped"):
                         self.failed.emit(res["text"])
                         return

@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import core_bridge as CB  # noqa: E402
+import i18n  # noqa: E402
 
 try:
     import cadquery as cq  # noqa: E402
@@ -74,6 +75,7 @@ class _Base(unittest.TestCase):
         self.home = tempfile.mkdtemp(prefix="prism-test-home-")
         self.roles: list = []
         self.replies: list = []
+        self.sent: list = []
         patches = [
             mock.patch.dict(os.environ, {"HOME": self.home}),
             mock.patch.object(CB.ai_client, "active", return_value=True),
@@ -92,8 +94,13 @@ class _Base(unittest.TestCase):
 
     def _chat(self, role, prompt, **kw):
         self.roles.append(role)
+        self.sent.append({"role": role, "prompt": prompt,
+                          "model": kw.get("model", ""),
+                          "attachments": kw.get("attachments") or []})
         kw["usage_sink"]["credits_mc"] = 2000 if role == SC.ROLE_FAST else 40000
         r = self.replies.pop(0)
+        if isinstance(r, Exception):
+            raise r
         return r if isinstance(r, str) else json.dumps(r)
 
     def run_ask(self, question, **kw):
@@ -253,17 +260,7 @@ class AFollowUpIsJudgedOnWhatThePersonJustTyped(_Base):
         self.assertEqual(path_label(out["answered"][0]), "Quick check")
 
 
-class ThePictureAndDirectRoutesAreLeftAlone(_Base):
-
-    def test_a_picture_goes_the_old_way(self):
-        pic = {"kind": "image", "mime": "image/png", "b64": "x", "name": "s.png"}
-        with mock.patch.object(CB.openrouter, "openrouter_chat",
-                               return_value=" seen ") as chat:
-            out = self.run_ask(NEEDS_AI, attachments=[pic])
-        chat.assert_called_once()
-        self.assertEqual(out["done"], ["seen"])
-        self.assertEqual(out["answered"], [])
-        self.assertEqual(self.roles, [])
+class TheOldRouteStaysForOtherSetUps(_Base):
 
     def test_off_the_server_the_old_way_is_used(self):
         with mock.patch.object(CB.ai_client, "active", return_value=False), \
@@ -282,9 +279,8 @@ class ThePictureAndDirectRoutesAreLeftAlone(_Base):
         self.assertEqual(out["done"], ["old"])
 
 
-class InTheRealDialog(_Base):
-    """The StepDialog itself, offscreen: the label under each answer, and
-    the cap sentence where the customer reads it."""
+class _Dialog(_Base):
+    """The StepDialog itself, offscreen, with the workers run in line."""
 
     def setUp(self):
         super().setUp()
@@ -320,6 +316,21 @@ class InTheRealDialog(_Base):
 
     def _who(self):
         return self.dlg._thread[-1][0]
+
+    def _screen(self):
+        """Every word on a widget of the dialog that is not hidden."""
+        from PySide6.QtWidgets import QComboBox, QLabel
+        _app.processEvents()
+        words = [w.text() for w in self.dlg.findChildren(QLabel)
+                 if w.isVisibleTo(self.dlg)]
+        words += [w.currentText() for w in self.dlg.findChildren(QComboBox)
+                  if w.isVisibleTo(self.dlg)]
+        return "\n".join(words)
+
+
+class InTheRealDialog(_Dialog):
+    """The label under each answer, and the cap sentence where the customer
+    reads it."""
 
     def test_ask_shows_each_path_in_words_and_never_a_model(self):
         cases = [("how many holes are there", [], "Measured from the file"),
@@ -369,41 +380,21 @@ class InTheRealDialog(_Base):
         self.assertEqual(self.roles, [])
         self.assertEqual(self.dlg._current["plan"]["changes"][0]["hole"], "H2")
 
-    def _screen(self):
-        """Every word on a widget of the dialog that is not hidden."""
-        from PySide6.QtWidgets import QComboBox, QLabel
-        _app.processEvents()
-        words = [w.text() for w in self.dlg.findChildren(QLabel)
-                 if w.isVisibleTo(self.dlg)]
-        words += [w.currentText() for w in self.dlg.findChildren(QComboBox)
-                  if w.isVisibleTo(self.dlg)]
-        return "\n".join(words)
-
-    def test_the_screen_shows_the_path_and_no_model_picker_or_name(self):
+    def test_the_screen_shows_the_path_and_keeps_both_pickers(self):
         self.replies = [GOOD]
         self._ask(NEEDS_AI, action="edit")
         self.dlg._show_tab(1)
-        chat = self._screen()
-        self.assertIn("QUICK CHECK", chat)
+        self.assertIn("QUICK CHECK", self._screen())
+        self.assertNotIn("HAIKU", "\n".join(
+            w for w in self._screen().split("\n") if w.startswith("<span")))
         self.dlg._show_tab(2)
         plan = self._screen()
         self.assertIn("<b>Quick check</b>", plan)
         self.assertNotIn("Planned by", plan)
-        for text in (chat, plan):
-            for word in MODEL_WORDS:
-                self.assertNotIn(word, text.lower())
-        self.assertFalse(self.dlg.model_combo.isVisibleTo(self.dlg))
-        self.assertFalse(self.dlg.composer.agent.isVisibleTo(self.dlg))
-
-    def test_no_picture_is_asked_for_or_sent_even_when_one_exists(self):
-        png = os.path.join(self.m["out_dir"], "sheet.png")
-        with open(png, "wb") as f:
-            f.write(b"png")
-        self.m["drawn"] = {"png": png, "html": ""}
-        self.dlg._vision_consent = True             # even with a yes on file
-        self._ask("how many holes are there")
-        self.assertEqual(self.roles, [])
-        self.assertEqual(self._who(), "Measured from the file")
+        for combo in (self.dlg.model_combo, self.dlg.composer.agent):
+            self.assertFalse(combo.isHidden())
+            self.assertEqual([combo.itemData(i) for i in range(combo.count())],
+                             ["Claude Haiku 5.5", "Claude Sonnet 5.5"])
 
     def test_a_change_agreed_in_a_follow_up_is_planned_without_another_call(self):
         self._ask("how many holes are there")
@@ -425,6 +416,183 @@ class InTheRealDialog(_Base):
         self.assertEqual(self.roles, [SC.ROLE_FAST])
         self.assertEqual(popup.set_answer.call_args[0],
                          (GOOD["answer"], "Quick check"))
+
+HAIKU, SONNET = "Claude Haiku 5.5", "Claude Sonnet 5.5"
+PIC = {"kind": "image", "mime": "image/png", "b64": "x", "name": "s.png"}
+
+
+class _WithDrawing(_Dialog):
+    """The dialog with a drawing of the part, and nobody asked about it yet."""
+
+    def setUp(self):
+        super().setUp()
+        png = os.path.join(self.m["out_dir"], "sheet.png")
+        with open(png, "wb") as f:
+            f.write(b"png")
+        self.m["drawn"] = {"png": png, "html": ""}
+        self.dlg._vision_consent = None
+        p = mock.patch.object(SD.send_to_ai, "ask_consent", return_value=True)
+        self.consent = p.start()
+        self.addCleanup(p.stop)
+        self.key = f"ask · {self.report['stem']}"
+
+    def _pick(self, name):
+        self.dlg.model_combo.setCurrentIndex(self.dlg.model_combo.findData(name))
+
+    def _follow(self, text, agent=HAIKU):
+        self.dlg._inline.question = text
+        self.dlg._on_answer_followup(self.dlg._inline, self.m, self.key,
+                                     agent, text)
+
+
+class TheModelPickAndThePicture(_WithDrawing):
+
+    def test_haiku_is_the_quick_pass_and_gets_the_picture(self):
+        self.replies = [GOOD]
+        self._ask(NEEDS_AI)
+        self.consent.assert_called_once()
+        call, = self.sent
+        self.assertEqual((call["role"], call["model"]),
+                         (SC.ROLE_FAST, SC.MODEL_FAST))
+        self.assertEqual([a["kind"] for a in call["attachments"]], ["image"])
+        self.assertEqual(self._who(), "Quick check")
+
+    def test_haiku_escalates_once_to_sonnet_with_the_picture(self):
+        self.replies = [LIE, GOOD]
+        self._ask(NEEDS_AI)
+        self.assertEqual([(c["role"], c["model"], len(c["attachments"]))
+                          for c in self.sent],
+                         [(SC.ROLE_FAST, SC.MODEL_FAST, 1),
+                          (SC.ROLE_PICTURE, SC.MODEL_STRONG, 1)])
+        self.assertEqual(self._who(), "Full check")
+
+    def test_sonnet_goes_straight_to_sonnet(self):
+        self._pick(SONNET)
+        self.replies = [GOOD]
+        self._ask(NEEDS_AI)
+        self.assertEqual([(c["role"], c["model"]) for c in self.sent],
+                         [(SC.ROLE_PICTURE, SC.MODEL_STRONG)])
+        self.assertEqual(self._who(), "Full check")
+
+    def test_saying_no_sends_the_numbers_only(self):
+        self.consent.return_value = False
+        self._pick(SONNET)
+        self.replies = [GOOD]
+        self._ask(NEEDS_AI)
+        self.assertEqual([(c["role"], c["attachments"]) for c in self.sent],
+                         [(SC.ROLE_ESCALATE, [])])
+
+    def test_a_local_answer_is_free_and_asks_about_no_picture(self):
+        for name in (HAIKU, SONNET):
+            self._pick(name)
+            self._ask("how many holes are there")
+        self.assertEqual(self.roles, [])
+        self.consent.assert_not_called()
+
+    def test_the_cap_counts_the_sonnet_pick_too(self):
+        self._pick(SONNET)
+        with mock.patch.object(SC, "STEP_AI_FILES_PER_DAY", 0):
+            self._ask(NEEDS_AI)
+        self.assertEqual(self.roles, [])
+        self.assertIn("today's limit", self.dlg.status.text())
+
+    def test_a_failed_call_leaves_the_allowance_alone(self):
+        with mock.patch.object(SC, "STEP_AI_FILES_PER_DAY", 1):
+            self.replies = [RuntimeError("Prism AI did not answer")]
+            self._ask(NEEDS_AI)
+            self.assertIn("did not answer", self.dlg.status.text())
+            self.assertEqual(SC._load_usage(""), {})
+            self.replies = [GOOD]
+            self._ask(NEEDS_AI)
+        self.assertEqual(self._who(), "Quick check")
+        self.assertNotEqual(SC._load_usage(""), {})
+
+
+class FollowUpsCarryTheEarlierChat(_WithDrawing):
+
+    ANSWER = {"answer": "H3 is the next one along.",
+              "claims": [], "changes": [], "advice": []}
+
+    def test_and_the_other_hole(self):
+        self.replies = [GOOD, self.ANSWER]
+        self._ask(NEEDS_AI)
+        self._follow("and the other hole?")
+        call = self.sent[-1]
+        self.assertIn(GOOD["answer"], call["prompt"])
+        self.assertIn("Customer: " + NEEDS_AI, call["prompt"])
+        self.assertIn("The customer asks: and the other hole?", call["prompt"])
+        self.assertEqual(len(call["attachments"]), 1)     # the picture again
+        self.consent.assert_called_once()                 # asked once only
+
+    def test_the_picture_reaches_a_follow_up_after_a_free_first_answer(self):
+        self._ask("how many holes are there")
+        self.consent.assert_not_called()
+        self.replies = [self.ANSWER]
+        self._follow("and the other hole?", SONNET)
+        call, = self.sent
+        self.assertEqual((call["role"], call["model"], len(call["attachments"])),
+                         (SC.ROLE_PICTURE, SC.MODEL_STRONG, 1))
+        self.assertIn("4 hole(s)", call["prompt"])
+
+    def _long_chat(self):
+        marker = {"answer": "The SLOTMARKER bracket stays as it is.",
+                  "claims": [], "changes": [], "advice": []}
+        filler = {"answer": "Nothing particular to report here. " * 25,
+                  "claims": [], "changes": [], "advice": []}
+        self.replies = [marker]
+        self._ask("how could the bracket be easier to fit")
+        for n in range(8):
+            self.replies = [filler]
+            self._follow(f"could anything else improve, round {'x' * (n + 1)}")
+
+    def test_something_several_turns_back(self):
+        self._long_chat()
+        self.replies = [self.ANSWER]
+        self._follow("could the wording be improved")
+        self.assertNotIn("SLOTMARKER", self.sent[-1]["prompt"])   # trimmed
+        self.replies = [self.ANSWER]
+        self._follow("go back to what you said about the bracket")
+        prompt = self.sent[-1]["prompt"]
+        self.assertIn("SLOTMARKER", prompt)
+        self.assertLess(len(prompt), len(self.sent[0]["prompt"])
+                        + SC.HISTORY_CHARS + SC.HISTORY_OLDER_CHARS + 500)
+
+    def test_a_conversation_reopened_from_history_keeps_its_past(self):
+        self.replies = [GOOD]
+        self._ask(NEEDS_AI)
+        self.dlg._thread, self.dlg._followups = [], []   # as load_run leaves it
+        for q in ("and the other hole?", "is that one the same"):
+            self.replies = [self.ANSWER]
+            self._follow(q)
+            self.assertIn(GOOD["answer"], self.sent[-1]["prompt"])
+        self.assertEqual(len(self.dlg._load_conversation(self.m)), 6)
+
+
+class InTheAppsLanguage(_Dialog):
+
+    def setUp(self):
+        super().setUp()
+        self.addCleanup(i18n.load, "en")
+
+    def test_labels_and_limits_are_translated(self):
+        for code in ("hi", "gu"):
+            i18n.load(code)
+            for english in ("Measured from the file", "Quick check",
+                            "Full check", "Could not be verified",
+                            SC.CAP_MESSAGE_DAY, SC.CAP_MESSAGE_MONTH,
+                            SC.UNVERIFIED_MESSAGE):
+                self.assertNotEqual(i18n.t(english), english, (code, english))
+
+    def test_the_screen_shows_the_label_and_the_limit_in_hindi(self):
+        i18n.load("hi")
+        self._ask("enlarge H2 to 6 mm", action="edit")
+        self.dlg._show_tab(1)
+        self.assertIn(i18n.t("Measured from the file").upper(), self._screen())
+        self.assertEqual(self._who(), "Measured from the file")   # stored as is
+        with mock.patch.object(SC, "STEP_AI_FILES_PER_DAY", 0):
+            self._ask(NEEDS_AI)
+        self.assertIn(i18n.t(SC.CAP_MESSAGE_DAY), self.dlg.status.text())
+
 
 
 if __name__ == "__main__":

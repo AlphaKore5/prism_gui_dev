@@ -6463,7 +6463,14 @@
   "Prism could not save that copy ({why}).": "Prism वह कॉपी सेव नहीं कर सका ({why})।",
   "Prism could not start the removal: {why}": "Prism हटाने की प्रक्रिया शुरू नहीं कर सका: {why}",
   "Prism could not write that file. Try another folder or another format.": "Prism वह फ़ाइल नहीं लिख सका। कोई दूसरा फ़ोल्डर या दूसरा फ़ॉर्मैट आज़माएँ।",
-  "Prism couldn't open the login tabs.\n\n{error}\n\nThe details are in Prism's log.": "Prism लॉगिन टैब नहीं खोल सका।\n\n{error}\n\nविवरण Prism के log में हैं।"
+  "Prism couldn't open the login tabs.\n\n{error}\n\nThe details are in Prism's log.": "Prism लॉगिन टैब नहीं खोल सका।\n\n{error}\n\nविवरण Prism के log में हैं।",
+  "Measured from the file": "फ़ाइल से मापा गया",
+  "Quick check": "त्वरित जाँच",
+  "Full check": "पूरी जाँच",
+  "Could not be verified": "पुष्टि नहीं हो सकी",
+  "You have reached today's limit of AI-assisted STEP files. Measurements, sizes, hole counts and simple edits still work and are free. AI suggestions are available again tomorrow.": "आप AI की मदद वाली STEP फ़ाइलों की आज की सीमा तक पहुँच गए हैं। माप, आकार, छेदों की गिनती और साधारण बदलाव अब भी चलते हैं और मुफ़्त हैं। AI सुझाव कल फिर मिलेंगे।",
+  "You have reached this month's limit of AI-assisted STEP files. Measurements, sizes, hole counts and simple edits still work and are free. AI suggestions are available again next month.": "आप AI की मदद वाली STEP फ़ाइलों की इस महीने की सीमा तक पहुँच गए हैं। माप, आकार, छेदों की गिनती और साधारण बदलाव अब भी चलते हैं और मुफ़्त हैं। AI सुझाव अगले महीने फिर मिलेंगे।",
+  "Prism could not verify an AI answer against the measurements of this file, so it is not shown and no change is proposed. Sizes, hole counts and part names can still be asked directly.": "Prism इस फ़ाइल के माप से AI के जवाब की पुष्टि नहीं कर सका, इसलिए वह दिखाया नहीं गया है और कोई बदलाव नहीं सुझाया गया है। आकार, छेदों की गिनती और पार्ट के नाम अब भी सीधे पूछे जा सकते हैं।"
  },
- "count": 6471
+ "count": 6469
 }

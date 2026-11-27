@@ -296,15 +296,18 @@ def test_no_estimate_when_ai_is_not_on_the_server(ai, monkeypatch):
     ("Claude Haiku 5.5", "anthropic/claude-haiku-5.5"),
     ("Claude Sonnet 5.5", "anthropic/claude-sonnet-5.5")])
 def test_step_haiku_sonnet_pick_reaches_the_server(ai, monkeypatch, pick, expected):
-    """Only on the direct route (an engine without step_cheap): cheap-first
-    leaves the choice of model to the server."""
     from addons.step import workers, dialog
-    monkeypatch.setattr(workers.CB, "get_step_cheap", lambda: None)
     monkeypatch.setattr(workers.CB, "get_stepfile", lambda: types.SimpleNamespace(
         ask_prompt=lambda r, q: "q", plan_prompt=lambda r, q, s: "p"))
+    report = {"file": "a.step", "mode": "metal", "overall_mm": (10, 10, 2),
+              "parts": [{"name": "P", "size_mm": (10, 10, 2), "volume_cm3": 0.2,
+                         "thickness_mm": 2.0, "area_cm2": 2.4, "holes": []}],
+              "warnings": []}
+    ai.text = json.dumps({"answer": "Nothing to change.", "claims": [],
+                          "changes": [], "advice": []})
     got = []
-    for cls, args in ((workers.StepAskWorker, ({}, {}, "why")),
-                      (workers.StepPlanWorker, ({}, {}, "why", "ideas"))):
+    for cls, args in ((workers.StepAskWorker, ({}, report, "why")),
+                      (workers.StepPlanWorker, ({}, report, "why", "ideas"))):
         w = cls(*args, model=dialog.MODEL_IDS[pick])
         w.done.connect(got.append)
         w.failed.connect(lambda m: got.append("FAILED " + m))
@@ -312,21 +315,9 @@ def test_step_haiku_sonnet_pick_reaches_the_server(ai, monkeypatch, pick, expect
     assert not [g for g in got if str(g).startswith("FAILED")], got
     bodies = [c["body"] for c in ai.chats()]
     assert [b["model"] for b in bodies] == [expected, expected]
-    assert {b["role"] for b in bodies} == {"reasoner"}
-
-
-def test_step_cheap_first_sends_a_role_and_no_model(ai):
-    from addons.step import workers, dialog
-    report = {"file": "a.step", "mode": "metal", "overall_mm": (10, 10, 2),
-              "parts": [{"name": "P", "size_mm": (10, 10, 2), "volume_cm3": 0.2,
-                         "thickness_mm": 2.0, "holes": []}], "warnings": []}
-    ai.text = json.dumps({"answer": "Nothing to change.", "claims": [],
-                          "changes": [], "advice": []})
-    w = workers.StepAskWorker({}, report, "how could this be easier to make",
-                              model=dialog.MODEL_IDS["Claude Sonnet 5.5"])
-    w.run()
-    bodies = [c["body"] for c in ai.chats()]
-    assert [(b["role"], b.get("model")) for b in bodies] == [("step.fast", None)]
+    # the Haiku pick is the checked quick pass, the Sonnet pick goes straight
+    assert {b["role"] for b in bodies} == {
+        "step.fast" if "haiku" in expected else "reasoner"}
 
 
 def test_a_model_hint_is_still_not_sent_when_nobody_picked_it(ai):
