@@ -142,7 +142,12 @@ class WizardPanel(QWidget):
         col.addWidget(title)
         if CB.ai_client.active():
             # AI runs through Prism's server: there is no key to ask for.
+            import ai_server
             col.addWidget(label(
+                i18n.t("There is no key to paste. Your tasks' research and "
+                       "writing use your own AI accounts, which you pick and "
+                       "sign in to next. Planning, pictures and video run on "
+                       "your Prism plan.") if ai_server.browser_work() else
                 i18n.t("Prism's AI runs through your Prism plan. There is no "
                        "key to paste and nothing to sign up for."),
                 level="SUPPORT", wrap=True))
@@ -238,7 +243,9 @@ class WizardPanel(QWidget):
         if self._agents_picker is not None:
             self._agents_card_body.removeWidget(self._agents_picker)
             self._agents_picker.deleteLater()
-        self._agents_picker = AgentsPicker(self.cfg.get("agents"))
+        self._agents_picker = AgentsPicker(
+            self.cfg.get("agents"),
+            file_reader=self.cfg.get("analysis_agent", ""))
         self._agents_picker.picked_changed.connect(self._refresh_next_enabled)
         self._agents_card_body.addWidget(self._agents_picker)
         self._refresh_next_enabled()
@@ -255,7 +262,7 @@ class WizardPanel(QWidget):
 
         col.addWidget(kicker(i18n.t("Step 3 of 3")))
         import ai_server
-        served = ai_server.active()
+        served = ai_server.active() and not ai_server.browser_work()
         title = QLabel(i18n.t("You're all set") if served
                        else i18n.t("Sign in to your tools"))
         title.setObjectName("h2")
@@ -265,6 +272,11 @@ class WizardPanel(QWidget):
                    "nothing to sign in to.") if served else
             i18n.t("Prism drives your REAL, logged-in Chrome — it stores no "
                    "passwords."), level="SUPPORT", wrap=True))
+        if ai_server.browser_work():
+            col.addWidget(label(
+                i18n.t("No account yet? Click Open login tabs and sign up on "
+                       "each site yourself, then sign in. Do it once."),
+                level="META", wrap=True))
 
         self._sites_col = QVBoxLayout()
         self._sites_col.setSpacing(theme.SPACE_3)
@@ -287,8 +299,13 @@ class WizardPanel(QWidget):
             if item.widget():
                 item.widget().deleteLater()
         import ai_server
-        sites = ([] if ai_server.active()
-                 else CB.resolved_agents(self._agents_picker.current_agents()))
+        if ai_server.browser_work():
+            sites = CB.resolved_agents(CB.default_work.sign_in_picks(
+                self._agents_picker.current_agents(), self.cfg))
+        elif ai_server.active():
+            sites = []
+        else:
+            sites = CB.resolved_agents(self._agents_picker.current_agents())
         for name, url in sites:
             self._sites_col.addWidget(self._site_card(name, url))
 
@@ -309,6 +326,10 @@ class WizardPanel(QWidget):
     def _open_login_tabs(self):
         from PySide6.QtWidgets import QMessageBox
         from widgets.login_tabs import open_login_tabs
+        # Saved first: the tabs to open follow the picks on page 2, the
+        # file reader included.
+        if self._agents_picker.current_file_reader():
+            CB.config.save(self.cfg)
         open_login_tabs(self, self._agents_picker.current_agents(),
                         on_opened=lambda n: QMessageBox.information(
                             self, i18n.t("Login tabs"),
@@ -365,11 +386,17 @@ class WizardPanel(QWidget):
             if not agents:
                 return    # Next is disabled in this state; nothing to do
             self.cfg["agents"] = agents
+            if self._agents_picker.current_file_reader():
+                self.cfg["analysis_agent"] = (
+                    self._agents_picker.current_file_reader())
             self._go_to(LOGIN)
         else:
             self._finish()
 
     def _finish(self):
         self.cfg["onboarded"] = True
+        import ai_server
+        if ai_server.browser_work():
+            self.cfg["default_work_setup"] = True
         CB.config.save(self.cfg)
         self.finished.emit(self.cfg)

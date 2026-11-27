@@ -281,6 +281,7 @@ class StageCard(QWidget):
         super().__init__(parent)
         self.stage = stage
         self.agent = agent or ""
+        self.where = ""                  # "browser": a real site did this step
         self._tried: list[str] = []      # tools that gave up on this stage
         self._handover = ""              # the engine's reason for the swap
         self._url = ""
@@ -513,9 +514,16 @@ class StageCard(QWidget):
         return self.turn_tag.text()
 
     def _shown(self, agent: str) -> str:
-        """The tool as a person reads it: the site's name, or in server mode
-        'Prism AI · writer' (the step's role is the only thing that differs)."""
-        return ai_server.display_agent(agent, self.stage)
+        """The tool as a person reads it: the site's name for a browser step,
+        else 'Prism AI · writer' (the step's role is the only thing that
+        differs on Prism's server)."""
+        return ai_server.display_agent(agent, self.stage, self.where)
+
+    def set_where(self, where: str):
+        """Say where this step runs, and name its tool accordingly."""
+        if where != self.where:
+            self.where = where
+            self._repaint_tool()
 
     def set_agent(self, agent: str, note_swap: bool = True):
         """Point this step at a different tool.
@@ -536,10 +544,14 @@ class StageCard(QWidget):
                     "{agent}.").format(failed=self._shown(self.agent),
                             agent=self._shown(agent)))
         self.agent = agent
+        self._repaint_tool()
+
+    def _repaint_tool(self):
+        agent = self.agent
         # Swapped rather than restyled: ToolBadge owns its own metrics, and
         # re-deriving them here is how a second, slightly-different badge gets
         # into the app.
-        fresh = C.ToolBadge(self._shown(agent), 20, theme.R_CHIP)
+        fresh = C.ToolBadge(self._shown(agent) or "?", 20, theme.R_CHIP)
         old = self._head.replaceWidget(self.tool_badge, fresh)
         if old is not None:
             self.tool_badge.hide()   # before setParent(None): avoids ghost-window flash
@@ -815,7 +827,7 @@ class StageCard(QWidget):
                                       self.file_cards)
 
     def set_waiting(self, seconds: int):
-        if ai_server.active():
+        if ai_server.active() and self.where != "browser":
             # The wait budget is a browser-era detail; the clock beside the
             # badge already says how long it has been.
             self.set_state("waiting", "",
@@ -1220,8 +1232,10 @@ class OutputPanel(QWidget):
         self._running = bool(running)
         self.stop_btn.setVisible(running)
         self.skip_btn.setVisible(running)
-        # No websites to fall back to when AI runs through Prism's server.
-        self.fallback_btn.setVisible(running and not ai_server.active())
+        # No websites to fall back to when every step is on Prism's server.
+        self.fallback_btn.setVisible(
+            running and (not ai_server.active()
+                         or getattr(self, "_browser_run", False)))
         self._sync_composer()
         if running:
             self._finished = False
@@ -1316,6 +1330,7 @@ class OutputPanel(QWidget):
         self._turn_keys = []
         self._cards = {}
         self._order = []
+        self._browser_run = False
         self._live = ""
         self._run_started = None
         self._run_final = None
@@ -1334,7 +1349,7 @@ class OutputPanel(QWidget):
     def set_plan(self, steps, followup: bool = False,
                  prior_responses: dict = None, prior_links: dict = None,
                  prior_agents: dict = None, titles: dict = None,
-                 keep_thread: bool = False):
+                 keep_thread: bool = False, places: dict = None):
         """Seed the timeline with every step the run is about to take.
 
         `steps` is what AgentsPanel.selected_agents() returns — {stage: tool} —
@@ -1380,7 +1395,10 @@ class OutputPanel(QWidget):
 
         before = set(self._order)
         for stage, agent in items:
-            self._ensure_card(stage, agent)
+            card = self._ensure_card(stage, agent)
+            if places is not None:
+                card.set_where(places.get(stage, ""))
+        self._browser_run = "browser" in (places or {}).values()
 
         if followup:
             # Say which run each card belongs to: the cards already there are
@@ -1437,6 +1455,7 @@ class OutputPanel(QWidget):
     def _snapshot(self, key: str) -> dict:
         card = self._cards[key]
         return {"stage": card.stage, "agent": card.agent, "title": card._title,
+                **({"where": card.where} if card.where else {}),
                 "state": card.state(), "seconds": card.duration,
                 "note": card.note.text(), "text": card._raw[:chatlog.MAX_TEXT]}
 
@@ -1548,6 +1567,7 @@ class OutputPanel(QWidget):
         self._order.append(key)
         self._turn_keys.append(key)
         self._insert(card)
+        card.set_where(step.get("where", ""))
         if step.get("title"):
             card.set_title(step["title"])
         if label:
@@ -1624,8 +1644,10 @@ class OutputPanel(QWidget):
         return card
 
     # ── engine events ───────────────────────────────────────────────────────
-    def stage_started(self, stage: str, agent: str):
+    def stage_started(self, stage: str, agent: str, where: str = ""):
         card = self._ensure_card(stage, agent)
+        if where:
+            card.set_where("browser" if where == "browser" else "")
         # Reuse, never replace. A failover calls this a second time for the
         # same stage; building another card left the first one orphaned in the
         # timeline with a clock that had restarted from zero.

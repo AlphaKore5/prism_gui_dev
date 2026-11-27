@@ -23,7 +23,11 @@ def open_login_tabs(parent, agents: dict, on_opened=None) -> bool:
     has been told why, or a press before this one is still opening them.
     `on_opened(n)` runs once Chrome has been asked for the n tabs."""
     title = i18n.t("Login tabs")
-    if CB.ai_client.active():
+    if CB.default_work.enabled():
+        # Only the tools a task works in the browser need a sign-in; pictures
+        # and video run on the Prism plan.
+        agents = CB.default_work.sign_in_picks(agents, CB.config.load())
+    elif CB.ai_client.active():
         QMessageBox.information(parent, title, i18n.t(
             "There is nothing to sign in to. Prism's AI runs through your "
             "Prism plan, so no browser is opened."))

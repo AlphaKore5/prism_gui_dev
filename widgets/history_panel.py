@@ -193,8 +193,10 @@ class HistoryPanel(Page):
 
     def _hits(self, run: dict, query: str) -> bool:
         parts = [(run.get("title") or "").lower()]
-        parts += [ai_server.display_agent(t).lower()
-                  for t in (run.get("tools") or [])]
+        in_browser = run.get("browser_tools") or []
+        parts += [ai_server.display_agent(
+            t, where="browser" if t in in_browser else "").lower()
+            for t in (run.get("tools") or [])]
         kind = _kind_of(run.get("title", ""))
         if kind:
             parts.append(ADDONS[kind].lower())

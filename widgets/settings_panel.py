@@ -1279,7 +1279,7 @@ class SettingsPanel(QDialog):
         return i18n.t("Your work stays in your own folder on this computer. "
                       "Nobody else on the team can see it.")
 
-    def _ai_plan_card(self) -> Card:
+    def _ai_plan_card(self, browser_work: bool = False) -> Card:
         """What replaced the Groq and OpenRouter key fields."""
         import ai_server
         ai_server.refresh_async()
@@ -1287,9 +1287,13 @@ class SettingsPanel(QDialog):
         body = card.body((theme.CARD_PAD, theme.CARD_PAD,
                           theme.CARD_PAD, theme.CARD_PAD), theme.SPACE_2)
         body.addWidget(C.kicker(i18n.t("AI")))
-        body.addWidget(C.label(i18n.t(
-            "AI runs through your Prism plan. There is no key to paste "
-            "and nothing to sign up for."), level="SUPPORT", wrap=True))
+        body.addWidget(C.label(
+            i18n.t("Your tasks' research, writing, tools, slides and voice "
+                   "run in your own Chrome, on your own AI accounts. "
+                   "Planning, pictures, video and the add-ons run on your "
+                   "Prism plan.") if browser_work else
+            i18n.t("AI runs through your Prism plan. There is no key to paste "
+                   "and nothing to sign up for."), level="SUPPORT", wrap=True))
         line = ai_server.status_line()
         if line:
             body.addWidget(C.label(line, level="META", wrap=True))
@@ -1311,7 +1315,13 @@ class SettingsPanel(QDialog):
         # The Groq key and the agent picks are one job — "change my AI
         # setup" — even though they used to live on two different nav
         # destinations (this section and Connections).
-        if CB.ai_client.active():
+        import ai_server
+        browser = ai_server.browser_work()
+        if browser:
+            # No keys, but the tools a task is worked with are picked and
+            # signed in to here.
+            col.addWidget(self._ai_plan_card(browser_work=True))
+        elif CB.ai_client.active():
             # AI runs through Prism's server: no provider key is asked for or
             # kept here, and a key saved by an older Prism is left untouched.
             col.addWidget(self._ai_plan_card())
@@ -1360,9 +1370,11 @@ class SettingsPanel(QDialog):
         if _verifier_card_wanted():
             col.addWidget(self._verifier_card())
 
-        picked = [(stage, chosen.get(stage))
+        shown = CB.agents.server_effective(chosen) if browser else chosen
+        picked = [(stage, shown.get(stage))
                   for stage in CB.agents.PIPELINE_ORDER
-                  if stage != "summary" and stage in categories]
+                  if stage != "summary" and stage in categories
+                  and (not browser or stage in CB.default_work.CHOICES)]
         if not any(tool for _stage, tool in picked):
             return   # nothing saved yet — the editor above is the whole page
 
@@ -1372,8 +1384,8 @@ class SettingsPanel(QDialog):
         # "Which tools you'll sign into" is a direct consequence of which
         # tools you picked, so it belongs beside the pick rather than on the
         # separate Connections page.
-        import ai_server
-        sites = [] if ai_server.active() else self._login_sites()
+        signs_in = browser or not ai_server.active()
+        sites = self._login_sites() if signs_in else []
         if sites:
             col.addWidget(self._head(
                 i18n.t("Where 'Open login tabs' will take you"),
@@ -1381,7 +1393,7 @@ class SettingsPanel(QDialog):
                        "own Chrome profile so the sign-in sticks.")))
             col.addWidget(self._sites_card(sites))
 
-        if not ai_server.active():
+        if signs_in:
             col.addWidget(self._buttons([
                 C.button(i18n.t("Open login tabs"), "secondary",
                          on_click=self.login_tabs.emit)]))
@@ -1392,7 +1404,8 @@ class SettingsPanel(QDialog):
         the two rebuild together and save together — splitting them into two
         cards would let one save land without the other and leave a premium
         tick pointing at a tool nobody picked."""
-        picker = AgentsPicker(chosen)
+        picker = AgentsPicker(
+            chosen, file_reader=self.cfg.get("analysis_agent", ""))
         premium_layout = QVBoxLayout()
         premium_layout.setContentsMargins(0, 0, 0, 0)
         premium_layout.setSpacing(6)
@@ -1404,7 +1417,7 @@ class SettingsPanel(QDialog):
                 if item.widget():
                     item.widget().deleteLater()
             premium_boxes.clear()
-            names = sorted(set(picker.current_agents().values()))
+            names = sorted(set(picker.visible_agents().values()))
             if not names:
                 premium_layout.addWidget(C.label(
                     i18n.t("Pick at least one specialist above."),
@@ -1550,6 +1563,8 @@ class SettingsPanel(QDialog):
                                 i18n.t("Pick at least one specialist."))
             return
         self.cfg["agents"] = agents
+        if picker.current_file_reader():
+            self.cfg["analysis_agent"] = picker.current_file_reader()
         self.cfg["premium"] = [name for name, box in boxes.items()
                                if box.isChecked()]
         self._after_save(i18n.t("Saved."))
@@ -1734,7 +1749,7 @@ class SettingsPanel(QDialog):
         were never really "connections" so much as "your AI setup," which is
         one nav destination, not two)."""
         offline = workspace.unreachable(self.cfg)
-        if CB.ai_client.active():
+        if CB.ai_client.active() and not CB.default_work.enabled():
             # AI through Prism's server: no website logins, so no Chrome pin,
             # no copied logins, no "browser automation" (owner, 19 Nov 2026).
             # The background browser only draws reels, motion and PDFs.
@@ -1934,7 +1949,11 @@ class SettingsPanel(QDialog):
         signs in at — reads core_bridge.resolved_agents(), the one shared
         implementation of this lookup (also used by MainWindow's Login tabs
         and the wizard)."""
-        return CB.resolved_agents(dict(self.cfg.get("agents") or {}))
+        chosen = dict(self.cfg.get("agents") or {})
+        if CB.default_work.enabled():
+            chosen = CB.default_work.sign_in_picks(
+                CB.agents.server_effective(chosen), self.cfg)
+        return CB.resolved_agents(chosen)
 
     def _sites_card(self, sites: list[tuple[str, str]]) -> Card:
         card = Card("soft")

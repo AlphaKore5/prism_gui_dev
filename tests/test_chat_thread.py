@@ -38,10 +38,16 @@ from main_window import MainWindow, RUNNING                         # noqa: E402
 from widgets import chat_thread as T                                # noqa: E402
 from widgets import output_panel as OP                              # noqa: E402
 from widgets.file_card import FileCard                              # noqa: E402
-from test_ai_via_server import FakeAi, ai, PNG                      # noqa: E402,F401
+from test_ai_via_server import FakeAi, ai, all_server, PNG          # noqa: E402,F401
 from test_chrome_removed import no_chrome                           # noqa: E402,F401
 
 _WIN: list = []
+
+
+@pytest.fixture(autouse=True)
+def _chat_on_the_server(all_server):
+    """This file is about the conversation on Prism's server. A task worked in
+    the browser continues in its browser chats: tests/test_default_work.py."""
 
 
 def _kinds(panel) -> list[str]:

@@ -661,7 +661,9 @@ class HistoryDialog(PrismDialog):
             if url:
                 rendered_urls.add(url)
             texts = responses.get(stage) or []
-            ran_by = ai_server.display_agent(agents.get(stage), stage) or stage
+            ran_by = ai_server.display_agent(
+                agents.get(stage), stage,
+                (record.get("ran_in") or {}).get(stage, "")) or stage
 
             parts.append(
                 f"<p style='margin:20px 0 2px 0'>"
@@ -716,7 +718,9 @@ class HistoryDialog(PrismDialog):
                     pass
 
             fu_agents = fu.get("agents") or {}
-            fu_tools = [ai_server.display_agent(v) for v in fu_agents.values() if v]
+            fu_ran_in = fu.get("ran_in") or {}
+            fu_tools = [ai_server.display_agent(v, where=fu_ran_in.get(k, ""))
+                        for k, v in fu_agents.items() if v]
             fu_tools_str = ", ".join(dict.fromkeys(fu_tools)) if fu_tools else ""
 
             parts.append(
@@ -764,7 +768,9 @@ class HistoryDialog(PrismDialog):
                 s_url = fu_links.get(s_name) or ""
                 if s_url:
                     fu_rendered_urls.add(s_url)
-                s_agent = ai_server.display_agent(fu_agents.get(s_name), s_name) or s_name
+                s_agent = ai_server.display_agent(
+                    fu_agents.get(s_name), s_name,
+                    fu_ran_in.get(s_name, "")) or s_name
 
                 parts.append(
                     f"<p style='margin:14px 0 2px 0'>"

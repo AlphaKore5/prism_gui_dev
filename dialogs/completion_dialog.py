@@ -28,9 +28,10 @@ class StageResultDialog(PrismDialog):
     """One step's full output, popped out into its own window."""
 
     def __init__(self, stage: str, agent: str, text: str, url: str, parent=None,
-                 unfinished: bool = False, files: list | None = None):
+                 unfinished: bool = False, files: list | None = None,
+                 where: str = ""):
         icon_name, title, _ = STAGE_COPY.get(stage, ("grid", stage.title(), ""))
-        agent = ai_server.display_agent(agent)
+        agent = ai_server.display_agent(agent, where=where)
         super().__init__(title, agent, icon=icon_name, parent=parent,
                          closable=False)
         self.setWindowTitle(f"{title} · {agent}")
@@ -194,7 +195,8 @@ class _StageRow(QFrame):
         name = QLabel(title)
         name.setObjectName("h5")
         head.addWidget(name)
-        tool = QLabel(ai_server.display_agent(info["agent"]))
+        tool = QLabel(ai_server.display_agent(info["agent"],
+                                              where=info.get("where", "")))
         tool.setObjectName("tagNeutral")
         head.addWidget(tool)
         if info.get("timed_out"):
@@ -225,7 +227,8 @@ class _StageRow(QFrame):
             (lambda: paths.open_result(url)) if plays else
             (lambda: StageResultDialog(
                 stage, info["agent"], info.get("text", ""), url,
-                self.window(), unfinished, files=info.get("files")).exec()))
+                self.window(), unfinished, files=info.get("files"),
+                where=info.get("where", "")).exec()))
         row.addWidget(open_btn)
 
 
@@ -248,7 +251,8 @@ class _TaskHeader(QFrame):
         stages = group.get("stages", [])
         tools = []
         for s in stages:                       # ordered, de-duplicated
-            a = ai_server.display_agent(s.get("agent", ""))
+            a = ai_server.display_agent(s.get("agent", ""),
+                                        where=s.get("where", ""))
             if a and a not in tools:
                 tools.append(a)
         if group.get("error"):

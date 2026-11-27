@@ -17,7 +17,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest                                                       # noqa: E402
 
-from test_ai_via_server import ai  # noqa: E402,F401  (the fake-server fixture)
+from test_ai_via_server import ai, all_server  # noqa: E402,F401  (the fake-server fixtures)
 
 DROPPED = ("Canva", "Midjourney", "Runway", "HeyGen", "ElevenLabs", "Suno",
            "NotebookLM", "Gamma.app", "Tome", "Claude Design", "Google Flow",
@@ -35,7 +35,7 @@ def _join(name):
         t.join(5)
 
 
-def test_dropped_tools_are_not_offered_in_any_category(ai):
+def test_dropped_tools_are_not_offered_in_any_category(all_server, ai):
     from core import agents as A
     for stage, meta in A.CATEGORIES.items():
         assert not [n for n in meta["agents"] if n in DROPPED], stage
@@ -51,7 +51,7 @@ def test_old_saved_plan_still_resolves_and_is_skipped_at_run_time(ai):
     assert "not part of your Prism plan" in SS.unsupported_reason("visual", "Canva", cfg)
 
 
-def test_settings_and_wizard_do_not_show_dropped_tools_or_chrome_signin(ai, qapp):
+def test_settings_and_wizard_do_not_show_dropped_tools_or_chrome_signin(all_server, ai, qapp):
     from PySide6.QtWidgets import QLabel, QPushButton, QComboBox
     from core import config as C
     from widgets import settings_panel as SP

@@ -201,6 +201,15 @@ def recent_runs(cfg: dict, limit: int = 6) -> list[dict]:
         if total_fu_count > 0:
             when = f"{when} · {total_fu_count} follow-up{'s' if total_fu_count != 1 else ''}"
 
+        # Which of those tools actually worked in the person's browser, so a
+        # screen can name them (a step on Prism's server reads "Prism AI").
+        in_browser = []
+        for _, rec, _ in items_chrono:
+            for part in [rec] + list(rec.get("followups") or []):
+                ran_in, named = part.get("ran_in") or {}, part.get("agents") or {}
+                in_browser += [named[s] for s, w in ran_in.items()
+                               if w == "browser" and named.get(s)]
+
         latest_rec = items_chrono[-1][1]
         err = (latest_rec.get("error") or root_rec.get("error") or "").strip()
 
@@ -213,6 +222,7 @@ def recent_runs(cfg: dict, limit: int = 6) -> list[dict]:
             "title": title,
             "query": query,
             "tools": tools,
+            **({"browser_tools": sorted(set(in_browser))} if in_browser else {}),
             "when": when,
             "ok": not bool(err),
             "error": err,

@@ -214,8 +214,11 @@ class AutomationWorker(_Worker):
                  motion_skeleton: str = "",
                  stage_skills: dict | None = None,
                  prior_responses: dict | None = None,
-                 min_wait: int = 0):
+                 min_wait: int = 0, default_work: bool = False):
         super().__init__()
+        # The person's own task or its follow-up ("Prism default work"): its
+        # text steps run in the browser. An add-on never sets this.
+        self.default_work = bool(default_work)
         self.routing, self.cfg = routing, cfg
         self.attachments, self.query = attachments, query
         self.prior_responses = prior_responses
@@ -340,6 +343,8 @@ class AutomationWorker(_Worker):
                 kwargs["stage_skills"] = self.stage_skills
             if self.prior_responses:
                 kwargs["prior_responses"] = self.prior_responses
+            if self.default_work:
+                kwargs["default_work"] = True
             responses, links = automation.run(
                 self.routing, self.cfg, attachments=self.attachments,
                 on_event=lambda kind, payload: self.stage_event.emit(kind, payload),
@@ -1071,7 +1076,7 @@ class LoginTabsWorker(_Worker):
         self._urls = list(urls)
 
     def run(self):
-        if CB.ai_client.active():
+        if CB.ai_client.active() and not CB.default_work.enabled():
             self.failed.emit("Prism's AI runs through your plan; no sign-in "
                              "tabs are opened.")
             return

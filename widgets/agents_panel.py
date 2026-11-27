@@ -184,15 +184,23 @@ class PlanToolChip(ToolChip):
         self._named = named or ""
         self._reason = reason or ""
         self._stage = stage or ""
+        self.where = ""             # "browser": a real site does this step
         super().__init__(tools, current, suggested, parent)
 
     def shown(self) -> str:
-        """Server mode: there is no website to choose, so the chip says
+        """The site's name for a step worked in the browser; for a step on
+        Prism's server there is no website to choose, so the chip says
         'Prism AI · writer' (the role the step runs as)."""
-        return ai_server.display_agent(self._current, self._stage)
+        return ai_server.display_agent(self._current, self._stage, self.where)
+
+    def set_where(self, where: str):
+        if where != self.where:
+            self.where = where
+            self._resize_to_text()
+            self.update()
 
     def _open_menu(self):
-        if ai_server.active():
+        if ai_server.active() and self.where != "browser":
             return          # nothing to choose between: Prism picks the helper
         self._open_site_menu()
 
@@ -323,9 +331,11 @@ class PlanRow(QFrame):
         self._suggested = suggested or ""
         self._forced = forced or ""
         self._included = included
-        # Server mode: no website behind a step, so no tool choice, no price
-        # tier and no waiting budget (those describe the old browser tools).
-        self._srv = ai_server.active()
+        # A step on Prism's server has no website behind it, so no tool
+        # choice, no price tier and no waiting budget (those describe browser
+        # tools). `where` is "browser" for a step the person's Chrome works.
+        self.where = ai_server.place(stage, forced or current)
+        self._srv = ai_server.active() and self.where != "browser"
         # What the PLAN said, kept separate from what the row shows now. The
         # difference is the whole point: a row the planner never turned on
         # and the person never touched is not the same thing as a row the
@@ -401,11 +411,8 @@ class PlanRow(QFrame):
         self.chip = PlanToolChip(tools, forced or current, suggested or "",
                                  named=forced or "", reason=self._reason,
                                  stage=stage)
-        self.chip.setToolTip(
-            i18n.t("Prism AI does this step. Prism picks the helper for each "
-                   "kind of step, so there is nothing to choose.")
-            if ai_server.active() else
-            i18n.t("Click to run this step with a different tool"))
+        self.chip.set_where(self.where)
+        self._refresh_chip_tip()
         # controls.ToolChip has always emitted `changed` and nothing has ever
         # connected it — so until Start was pressed, swapping a tool updated
         # no count, no estimate and no licence check. It does now.
@@ -511,6 +518,26 @@ class PlanRow(QFrame):
         self._refresh_origin()
         self._refresh_engine()
         self.set_included(included)
+
+    def _refresh_chip_tip(self):
+        self.chip.setToolTip(
+            i18n.t("Prism AI does this step. Prism picks the helper for each "
+                   "kind of step, so there is nothing to choose.")
+            if self._srv else
+            i18n.t("Click to run this step with a different tool"))
+
+    def set_place(self, where: str):
+        """Where this step will run, which the rest of the plan can change: a
+        writing step that feeds a video belongs to the video, on the server."""
+        if where == self.where:
+            return
+        self.where = where
+        self._srv = ai_server.active() and where != "browser"
+        self.chip.set_where(where)
+        self.chip.setVisible(not self._srv)
+        self._refresh_chip_tip()
+        self._refresh_origin()
+        self._refresh_engine()
 
     # ── small builders ────────────────────────────────────────────────────
     @staticmethod
@@ -624,10 +651,11 @@ class PlanRow(QFrame):
         self.origin_tag.setToolTip(tips.get(self._origin, ""))
 
         show_why = (self._origin == ORIGIN_SUGGESTED and bool(self._reason)
-                    and not ai_server.active())
+                    and not self._srv)
         if show_why:
             self.why.setText(i18n.t("Prism suggests {tool} — {why}").format(
-                tool=ai_server.display_agent(self._suggested), why=self._reason))
+                tool=ai_server.display_agent(self._suggested, where=self.where),
+                why=self._reason))
         self.why.setVisible(show_why)
 
     # ── include / exclude ─────────────────────────────────────────────────
@@ -713,7 +741,7 @@ class PlanRow(QFrame):
         makes = _makes_copy(kind)
         if makes:
             bits.append(makes)
-        if not ai_server.active():
+        if not self._srv:
             # Price bands and waiting times describe the websites; on Prism's
             # server they would describe something that is not running.
             bits += [b for b in (entry.get("cost"), entry.get("avg")) if b]
@@ -736,7 +764,8 @@ class PlanRow(QFrame):
     def left_out(self) -> bool:
         """Server mode: a step Prism planned to skip and nobody has touched.
         It is not shown as a grey row; it sits under "Steps Prism left out"."""
-        return self._srv and not self._included and not self._touched
+        return (ai_server.active() and not self._included
+                and not self._touched)
 
     def was_planned(self) -> bool:
         """Was this step on when the plan arrived? See left_out_stages()."""
@@ -812,7 +841,7 @@ class AgentsPanel(QWidget):
             i18n.t("Your plan"),
             (i18n.t("Prism drafted this. Reorder it, rewrite any prompt, or "
                     "drop a step — nothing runs until you say so.")
-             if ai_server.active() else
+             if ai_server.active() and not ai_server.browser_work() else
              i18n.t("Prism drafted this. Reorder it, rewrite any prompt, change a "
                     "tool, or drop a step — nothing runs until you say so."))
         )
@@ -1073,13 +1102,15 @@ class AgentsPanel(QWidget):
         line = QHBoxLayout()
         line.setSpacing(theme.SPACE_2)
         line.setContentsMargins(0, 0, 0, 0)
-        line.addWidget(C.ToolBadge(ai_server.display_agent(tool) or tool, 20,
-                                   theme.R_MICRO))
-        who = QLabel(ai_server.display_agent(tool, stage))
+        where = ai_server.place(stage, tool)
+        line.addWidget(C.ToolBadge(
+            ai_server.display_agent(tool, where=where) or tool, 20,
+            theme.R_MICRO))
+        who = QLabel(ai_server.display_agent(tool, stage, where))
         who.setObjectName("meta")
         line.addWidget(who, stretch=1)
         col.addLayout(line)
-        card.setToolTip(blurb or ai_server.display_agent(tool))
+        card.setToolTip(blurb or ai_server.display_agent(tool, where=where))
         return card
 
     def set_query(self, query: str):
@@ -1121,6 +1152,7 @@ class AgentsPanel(QWidget):
             self._add_row(plan_row)
         self._collect_extras(routing, agents_cfg)
         self._apply_file_promotion()
+        self._apply_places()
         # `_brief` is on the routing dict already — no wiring needed for the
         # single most useful sentence the router produces.
         self._brief = " ".join((routing.get("_brief") or "").split())
@@ -1163,16 +1195,22 @@ class AgentsPanel(QWidget):
     def _refresh_extras(self):
         lines = []
         if self._attached:
+            reader, where = "ChatGPT", ""
+            if ai_server.browser_work():
+                reader = CB.default_work.file_reader(CB.config.load())
+                where = "browser"
             lines.append(
                 (i18n.t("Prism reads your {n} attached file with ChatGPT "
                         "first, before step 1.") if self._attached == 1 else
                  i18n.t("Prism reads your {n} attached files with ChatGPT "
                         "first, before step 1.")).format(n=self._attached)
-                .replace("ChatGPT", ai_server.display_agent("ChatGPT")))
+                .replace("ChatGPT",
+                         ai_server.display_agent(reader, where=where)))
         for _stage, tool, _qs in self._extras:
             lines.append(i18n.t(
                 "After the last step, {tool} folds every answer into one "
-                "final summary.").format(tool=ai_server.display_agent(tool)))
+                "final summary.").format(tool=ai_server.display_agent(
+                    tool, where=ai_server.place("summary", tool))))
         self.extras.setText("\n".join(lines))
         self.extras.setVisible(bool(lines) and bool(self._rows))
 
@@ -1182,6 +1220,8 @@ class AgentsPanel(QWidget):
         row.changed.connect(self._on_edit)
         row.toggled.connect(self._apply_file_promotion)
         row.changed.connect(self._apply_file_promotion)
+        row.toggled.connect(self._apply_places)
+        row.changed.connect(self._apply_places)
         row.move_requested.connect(self._move)
         row.remove_requested.connect(self._remove)
         row.duplicate_requested.connect(self._duplicate)
@@ -1192,6 +1232,19 @@ class AgentsPanel(QWidget):
             self.rows_box.insertWidget(at, row)
             self._rows.insert(at, row)
         return row
+
+    def _apply_places(self, *_args) -> None:
+        """Mark each step with where it will run, as the engine decides it."""
+        if not ai_server.browser_work():
+            return
+        on = [r for r in self._rows if r.is_checked()]
+        places = CB.default_work.places(
+            [(r.stage, r.selected_agent() or "") for r in on])
+        planned = {id(r): p for r, p in zip(on, places)}
+        for row in self._rows:
+            where = planned.get(id(row)) or ai_server.place(
+                row.stage, row.selected_agent() or "")
+            row.set_place("browser" if where == "browser" else "")
 
     def _apply_file_promotion(self, *_args) -> None:
         """Mark the one step that will hand back a file the person asked for.
@@ -1238,6 +1291,7 @@ class AgentsPanel(QWidget):
         row.hide()   # before setParent(None): avoids ghost-window flash
         row.setParent(None)
         row.deleteLater()
+        self._apply_places()
         self._refresh_count()
         self._refresh_shell()
         self.plan_changed.emit()
@@ -1257,6 +1311,7 @@ class AgentsPanel(QWidget):
                         row.questions(), "")
         clone.mark_edited()
         self._add_row(clone, at=self._rows.index(row) + 1)
+        self._apply_places()
         self._refresh_count()
         self.plan_changed.emit()
 

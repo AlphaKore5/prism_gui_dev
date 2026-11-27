@@ -499,7 +499,9 @@ class _RunCard(C.Card):
         title.setStyleSheet(title.styleSheet() + " font-size: 13px; color: #111110;")
         col.addWidget(title)
         tools = run.get("tools") or []
-        source = ai_server.display_agent(tools[0]) if tools else "Prism"
+        source = ai_server.display_agent(
+            tools[0], where="browser" if tools[0] in (
+                run.get("browser_tools") or []) else "") if tools else "Prism"
         when = run.get("when", "")
         meta = _Elided(f"{source} · {when}" if when else source, "META")
         meta.setStyleSheet(meta.styleSheet()

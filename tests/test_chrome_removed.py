@@ -1,5 +1,9 @@
 """AI steps run on Prism's server; no consumer website and no Chrome.
 
+Since 27 Nov 2026 this is the rule for add-ons, pictures and video, and for
+everything when PRISM_DEFAULT_WORK=server. The one exception is the person's
+own task (automation.run(default_work=True)): tests/test_default_work.py.
+
 Real code paths: automation.run() with a plan, drafting.draft(), the follow-up
 conversation. The only fake is Prism's server (FakeAi, real HTTP on 127.0.0.1,
 shared with test_ai_via_server). Every test also proves Chrome was never asked
@@ -24,7 +28,7 @@ import pytest                                                       # noqa: E402
 
 import core_bridge as CB                                            # noqa: E402
 from core import ai_client                                          # noqa: E402
-from test_ai_via_server import FakeAi, ai, PNG                      # noqa: E402,F401
+from test_ai_via_server import FakeAi, ai, all_server, PNG          # noqa: E402,F401
 
 
 @pytest.fixture
@@ -181,7 +185,7 @@ def test_no_other_website_is_offered_when_a_step_fails(ai):
     assert agents.alternatives_for("content", tried=["Claude"], cfg={}) == []
 
 
-def test_login_tabs_open_nothing_in_server_mode(ai, no_chrome, monkeypatch):
+def test_login_tabs_open_nothing_in_server_mode(all_server, ai, no_chrome, monkeypatch):
     from widgets import login_tabs
     shown = []
     monkeypatch.setattr(login_tabs.QMessageBox, "information",

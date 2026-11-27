@@ -409,6 +409,10 @@ class MainWindow(QMainWindow):
         self._is_followup_run = False
         self._followup_session = None
         self._followup_text = ""
+        # Is the run on screen the person's own task ("Prism default work"),
+        # and where each of its steps ran ("browser" / "server").
+        self._run_default_work = False
+        self._stage_where: dict = {}
 
         self._build_ui()
         self._wire()
@@ -422,8 +426,8 @@ class MainWindow(QMainWindow):
         # not left alone with a locked sidebar and no context. _first_run
         # keeps the Groq key dialog behind the licence check: a customer who
         # cannot use Prism yet does not need a key dialog on top of that.
-        if not self._ready_to_plan():
-            # (server mode needs no key or agents, so no setup wizard: see _ready_to_plan)
+        if not self._ready_to_plan() or self._browser_setup_due():
+            # (the browser setup is offered, never required: see _ready_to_plan)
             # Deferred to the event loop rather than run here. A modal opened
             # from inside __init__ blocks before the window is on screen, so
             # it can appear behind it or with nowhere to centre itself — and
@@ -2064,6 +2068,27 @@ class MainWindow(QMainWindow):
             self.email_panel.cfg = self.cfg
             self.email_panel.refresh()
 
+    def _browser_setup_due(self) -> bool:
+        """Tasks are worked in the browser and the person has not been through
+        picking the tools and signing in to them yet."""
+        return (ai_server.browser_work()
+                and not self.cfg.get("default_work_setup"))
+
+    def _places(self, steps) -> dict:
+        """{stage: "browser" | "server"} for a task about to run; {} when
+        tasks are not worked in the browser."""
+        if not ai_server.browser_work():
+            return {}
+        steps = list(steps.items()) if isinstance(steps, dict) else list(steps)
+        return {s[0]: p for s, p in
+                zip(steps, CB.default_work.places(steps))}
+
+    def _followup_in_browser(self) -> bool:
+        """A follow-up on the person's own task is worked in the browser; one
+        on an add-on's result stays on Prism's server."""
+        sess = getattr(self, "_followup_session", None) or {}
+        return bool(ai_server.browser_work() and sess.get("default_work"))
+
     def _first_run(self):
         """A never-configured machine goes straight into the wizard - no
         blocking Welcome popup first. The wizard's own first page carries the
@@ -2151,6 +2176,8 @@ class MainWindow(QMainWindow):
             "links": record.get("links") or {},
             "agents": agents,
             "artifacts_dir": record.get("artifacts") or "",
+            "default_work": bool(record.get("default_work")),
+            "ran_in": dict(record.get("ran_in") or {}),
         }
         self._offer_followup_for_dialog(record.get("query", ""), responses,
                                         agents, record.get("links") or {},
@@ -2603,6 +2630,8 @@ class MainWindow(QMainWindow):
         self._is_followup_run = False
         self._followup_session = None
         self._followup_text = ""
+        self._run_default_work = True
+        self._stage_where = {}
         getattr(CB.config, "reset_run", lambda: None)()
         if len(self._task_queue) > 1:
             self.statusBar().showMessage(
@@ -3047,7 +3076,11 @@ class MainWindow(QMainWindow):
         # and "Queued" becomes reachable at all — the state was written long
         # ago and could never be seen, because a card was only ever built at
         # the moment its stage started.
-        self.output_panel.set_plan(run_agents, keep_thread=True)
+        self._run_default_work = True
+        self._stage_where = {}
+        places = self._places(run_steps or run_agents)
+        self.output_panel.set_plan(run_agents, keep_thread=True,
+                                   **({"places": places} if places else {}))
         self.output_panel.set_task(getattr(self, "_last_query", ""))
         self._stage_agents = {}
         self._stage_results = []
@@ -3060,7 +3093,7 @@ class MainWindow(QMainWindow):
         self.work_stack.setCurrentIndex(RUNNING)
         worker = AutomationWorker(self.routing, cfg_for_run, self.attachments,
                                   self._last_query, custom_stages=run_steps,
-                                  skip_stages=skip_stages)
+                                  skip_stages=skip_stages, default_work=True)
         # Hold the machine awake for the duration. A run is tens of minutes
         # and the whole promise is that you walk away — a laptop that sleeps
         # halfway through takes the browser session with it.
@@ -3390,7 +3423,11 @@ class MainWindow(QMainWindow):
         if kind == "stage_start":
             agent = payload.get("agent", "")
             self._stage_agents[stage] = agent
-            self.output_panel.stage_started(stage, agent)
+            where = payload.get("on", "")
+            if where:
+                self._stage_where[stage] = where
+            self.output_panel.stage_started(
+                stage, agent, **({"where": where} if where else {}))
             self._push_active_run(stage, agent)
         elif kind == "waiting":
             self.output_panel.stage_waiting(stage, payload.get("seconds", 0))
@@ -3422,6 +3459,7 @@ class MainWindow(QMainWindow):
                 "stage": stage, "agent": self._stage_agents.get(stage, "?"),
                 "text": "\n\n---\n\n".join(texts), "url": url,
                 "snippet": snippet, "ok": bool(texts), "timed_out": timed_out,
+                "where": self._stage_where.get(stage, ""),
                 "files": [f.get("saved") or f.get("path") or ""
                           for f in (payload.get("files") or [])
                           if f.get("saved") or f.get("path")],
@@ -3443,9 +3481,11 @@ class MainWindow(QMainWindow):
             self._stage_agents[stage] = agent
             self.statusBar().showMessage(
                 i18n.t("{failed} {why} — trying {agent} instead…")
-                .replace("{failed}", ai_server.display_agent(failed))
+                .replace("{failed}", ai_server.display_agent(
+                    failed, where=self._stage_where.get(stage, "")))
                 .replace("{why}", why)
-                .replace("{agent}", ai_server.display_agent(agent)), 15000)
+                .replace("{agent}", ai_server.display_agent(
+                    agent, where=self._stage_where.get(stage, ""))), 15000)
             # NOT stage_started(): that built a second card and orphaned the
             # first in the timeline, where nothing could update it and the
             # problem counter no longer saw it. The card now holds RETRYING,
@@ -3473,6 +3513,7 @@ class MainWindow(QMainWindow):
                 "snippet": (texts[0][:150] + "…") if texts and len(texts[0]) > 150
                            else (texts[0] if texts else ""),
                 "ok": True, "timed_out": False,
+                "where": self._stage_where.get(stage, ""),
                 # Kept for History: which tool was asked first, and why the
                 # answer came from somewhere other than the plan said.
                 "failover_from": payload.get("failed", ""),
@@ -3486,7 +3527,8 @@ class MainWindow(QMainWindow):
             licensing.meter.record("stage", tool=agent, stage=stage, ok=True)
             self.statusBar().showMessage(
                 i18n.t("{agent} finished the {stage} step.")
-                .replace("{agent}", ai_server.display_agent(agent))
+                .replace("{agent}", ai_server.display_agent(
+                    agent, where=self._stage_where.get(stage, "")))
                 .replace("{stage}", stage), 8000)
         elif kind == "stage_unrecovered":
             self.statusBar().showMessage(
@@ -3522,6 +3564,7 @@ class MainWindow(QMainWindow):
                 "stage": stage, "agent": self._stage_agents.get(stage, "?"),
                 "text": error, "url": url,
                 "snippet": f"failed: {error[:120]}", "ok": False,
+                "where": self._stage_where.get(stage, ""),
             })
 
     def _save_run(self, responses: dict | None = None, links: dict | None = None,
@@ -3589,8 +3632,12 @@ class MainWindow(QMainWindow):
                     "agents": dict(self._stage_agents),
                     "durations": self.output_panel.stage_durations(),
                     "error": error,
+                    **({"ran_in": dict(self._stage_where)}
+                       if self._stage_where else {}),
                 })
                 record["followups"] = followups
+                if self._stage_where:
+                    record.setdefault("ran_in", {}).update(self._stage_where)
                 if self.output_panel.has_thread():
                     record["thread"] = chatlog.for_record(self.output_panel.thread_items())
                 rec_resp = record.setdefault("responses", {})
@@ -3633,6 +3680,12 @@ class MainWindow(QMainWindow):
         # — so a follow-up from History attaches THIS run's output, not
         # everything ever made under the same words.
         record["artifacts"] = CB.config.current_run_dir()
+        # Whether a follow-up on it belongs in the browser, and where each
+        # step ran, so History can name the tool that really did it.
+        if self._run_default_work:
+            record["default_work"] = True
+        if self._stage_where:
+            record["ran_in"] = dict(self._stage_where)
         # The planner's short name for the job — what History and Home show
         # instead of the request verbatim.
         record["title"] = ((self.routing or {}).get("_title")
@@ -3783,7 +3836,8 @@ class MainWindow(QMainWindow):
         """The run's answer and its files, as messages on the thread."""
         stage, text = chatlog.latest_answer(responses)
         if text:
-            by = ai_server.display_agent(self._stage_agents.get(stage, ""), stage)
+            by = ai_server.display_agent(self._stage_agents.get(stage, ""), stage,
+                                         self._stage_where.get(stage, ""))
             bubble = self.output_panel.add_answer(text, by, stage)
             if not stopped and getattr(self, "_pulse_run_id", ""):
                 bar = self.output_panel.add_feedback("task", self._pulse_run_id)
@@ -3826,6 +3880,13 @@ class MainWindow(QMainWindow):
         """
         if not responses:
             return
+        # An add-on's result continues on Prism's server; only a task reopened
+        # from History carries its own "worked in the browser" mark.
+        sess = getattr(self, "_followup_session", None) or {}
+        if sess.get("query") != query:
+            sess = {}
+        self._run_default_work = bool(sess.get("default_work"))
+        self._stage_where = dict(sess.get("ran_in") or {})
         self._last_query = query
         self._stage_agents = dict(stage_agents or {})
         self.routing = {}
@@ -3881,7 +3942,8 @@ class MainWindow(QMainWindow):
         query = getattr(self, "_last_query", "")
         sess = getattr(self, "_followup_session", None)
         if not sess or sess.get("query") != query:
-            sess = {"query": query, "responses": {}, "links": {}, "agents": {}, "artifacts_dir": ""}
+            sess = {"query": query, "responses": {}, "links": {}, "agents": {},
+                    "artifacts_dir": "", "default_work": self._run_default_work}
         if artifacts_dir:
             sess["artifacts_dir"] = artifacts_dir
         elif not sess.get("artifacts_dir"):
@@ -3889,6 +3951,8 @@ class MainWindow(QMainWindow):
         sess["responses"].update({k: v for k, v in responses.items() if v})
         sess["links"].update({k: v for k, v in (links or {}).items() if v})
         sess["agents"].update({k: v for k, v in self._stage_agents.items() if v})
+        if self._stage_where:
+            sess.setdefault("ran_in", {}).update(self._stage_where)
         self._followup_session = sess
         responses, links = dict(sess["responses"]), dict(sess["links"])
         for s, a in sess["agents"].items():
@@ -4026,6 +4090,11 @@ class MainWindow(QMainWindow):
 
     def _resolve_stage_agent(self, stage: str) -> str:
         """Resolve which tool should run a stage in follow-up."""
+        if self._followup_in_browser():
+            return CB.default_work.pick(stage, self._any_stage_agent(stage))
+        return self._any_stage_agent(stage)
+
+    def _any_stage_agent(self, stage: str) -> str:
         agent = (self._stage_agents.get(stage)
                  or (self.cfg.get("agents") or {}).get(stage))
         if agent:
@@ -4199,7 +4268,8 @@ class MainWindow(QMainWindow):
                 self._turn_begun = False
                 self._save_thread(text)
                 return
-        if not ai_server.active() or CB.contract.wants_file(text):
+        if (not ai_server.active() or self._followup_in_browser()
+                or CB.contract.wants_file(text)):
             primed = self._prime_followup_session(responses, links)
             if primed is None:
                 self._chat_run = False
@@ -4284,7 +4354,11 @@ class MainWindow(QMainWindow):
             "query": record.get("query", ""), "title": record.get("title", ""),
             "run_file": path, "responses": responses,
             "links": record.get("links") or {}, "agents": agents,
-            "artifacts_dir": record.get("artifacts") or ""}
+            "artifacts_dir": record.get("artifacts") or "",
+            "default_work": bool(record.get("default_work")),
+            "ran_in": dict(record.get("ran_in") or {})}
+        self._run_default_work = bool(record.get("default_work"))
+        self._stage_where = dict(record.get("ran_in") or {})
         self._followup_responses = responses
         self._followup_links = dict(record.get("links") or {})
         items = chatlog.thread_of(record)
@@ -4405,8 +4479,13 @@ class MainWindow(QMainWindow):
         self._show_screen("workbench")
         self._set_stage("run")
         self._ensure_turn()
+        browser = self._followup_in_browser()
+        self._run_default_work = bool(sess and sess.get("default_work"))
+        places = self._places(custom) if browser else {}
+        self._stage_where = {}
         self.output_panel.set_plan(
             plan_agents or run_agents, followup=True,
+            **({"places": places} if places else {}),
             prior_responses=responses, prior_links=links,
             prior_agents=self._stage_agents,
             titles=titles or {s: docexport.followup_title(s, self._followup_text)
@@ -4425,7 +4504,8 @@ class MainWindow(QMainWindow):
         worker = AutomationWorker(
             self.routing, cfg_for_run, attachments, self._followup_text,
             custom_stages=custom, resume_urls=resume or None, followup=True,
-            chatgpt_analysis=False, prior_responses=responses)
+            chatgpt_analysis=False, prior_responses=responses,
+            **({"default_work": True} if browser else {}))
         awake.acquire()
         self._active_run = worker
         worker.stage_event.connect(self._on_stage_event)

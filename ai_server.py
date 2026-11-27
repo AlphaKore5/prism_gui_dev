@@ -90,6 +90,25 @@ _SERVER_WORDS = {
 }
 
 
+# The same sentences while "Prism default work" is worked in the person's own
+# browser: Chrome and sign-ins are real again for those steps, but there is
+# still no key to paste, and some work does go through Prism's server.
+_BROWSER_WORK_WORDS = {
+    "Prism opens your Chrome and works the tools as you, using the accounts you already pay for. Nothing is sent to a Prism server.":
+        "For your tasks, Prism opens your Chrome and works the writing and research tools as you, on your own accounts. Planning, pictures, video and the add-ons run on your Prism plan.",
+    "Your Groq key and one tool per kind of step — the router suggests, you decide — plus where each one signs in.":
+        "One tool per kind of step — Prism suggests, you decide — plus where each one signs in.",
+    "AI diagnosis uses your Groq key and a scrubbed recent log.":
+        "AI diagnosis runs on your Prism plan and sends only a scrubbed recent log.",
+}
+
+
+# An add-on's writing still goes through Prism's server either way.
+_BROWSER_WORK_WORDS.update({k: v for k, v in _SERVER_WORDS.items()
+                            if k.startswith(("Writing it in your browser",
+                                             "The AI tool did not answer"))})
+
+
 def install() -> None:
     """Route the engine's AI calls through Prism's server (unless the dev
     switch is set). Safe to call twice."""
@@ -100,10 +119,15 @@ def install() -> None:
     from widgets import usage_chip
     usage_chip.set_provider(usage)
     if ai.active():
-        # Tools Prism's plan does not include are no longer offered anywhere.
+        # The person's own tasks are worked in their browser (this build has
+        # the screens to pick those tools and sign in to them);
+        # PRISM_DEFAULT_WORK=server keeps everything on the server instead.
         import core_bridge as CB
+        CB.default_work.enable(True)
+        # Tools not on offer are no longer listed anywhere.
         CB.agents.prune_for_server()
-        i18n.set_rewording(_SERVER_WORDS)
+        i18n.set_rewording(_BROWSER_WORK_WORDS if CB.default_work.enabled()
+                           else _SERVER_WORDS)
         CB.get_ui().set_rewriter(server_words)
 
 
@@ -160,14 +184,33 @@ def role_word(stage: str, agent: str = "") -> str:
     return i18n.t(ROLE_WORDS.get(role, role))
 
 
-def display_agent(name: str, stage: str = "") -> str:
-    """What a person sees for a step's tool. In server mode there are no
-    websites any more, so every site name (ChatGPT, Claude ...) reads
+def browser_work() -> bool:
+    """Are the person's own tasks ("Prism default work") worked in their
+    browser, with tools they pick and sign in to?"""
+    if not active():
+        return False
+    import core_bridge as CB
+    return CB.default_work.enabled()
+
+
+def place(stage: str, agent: str) -> str:
+    """"browser" when a task's step of this kind is worked in the browser,
+    else "" (Prism's server, or a case this rule does not decide)."""
+    if not agent or not browser_work():
+        return ""
+    import core_bridge as CB
+    return "browser" if CB.default_work.step_in_browser(stage, agent) else ""
+
+
+def display_agent(name: str, stage: str = "", where: str = "") -> str:
+    """What a person sees for a step's tool. A step worked in the browser
+    (`where` = "browser") reads as the site's own name. A step on Prism's
+    server has no website, so every site name (ChatGPT, Claude ...) reads
     "Prism AI" -- and, when the step is known, "Prism AI · writer" (the role
     is the only difference between two steps). The old direct path keeps the
     real names."""
     name = name or ""
-    if name and active():
+    if name and active() and where != "browser":
         word = role_word(stage, name)
         return f"{PRISM_AI} \u00b7 {word}" if word else PRISM_AI
     return name
@@ -184,6 +227,9 @@ def server_words(text: str) -> str:
     global _SITE_RE
     if not text or not active():
         return text
+    import core_bridge as CB
+    if CB.default_work.in_browser_run():
+        return text             # the sites are real in this run: keep names
     import re
     if _SITE_RE is None:
         try:

@@ -26,7 +26,7 @@ import pytest                                                       # noqa: E402
 
 import core_bridge as CB                                            # noqa: E402,F401
 from core import ai_client                                          # noqa: E402
-from test_ai_via_server import FakeAi, ai, PNG                      # noqa: E402,F401
+from test_ai_via_server import FakeAi, ai, all_server, PNG          # noqa: E402,F401
 
 REEL = "make an Instagram reel about Tulsi Vivah for customers"
 SCRIPT = {"scenes": [
@@ -331,7 +331,7 @@ def test_step_wording_says_prism_plan_not_own_key(ai):
     assert "own OpenRouter key" not in cat or "STEP" not in cat.split("own OpenRouter key")[0][-200:]
 
 
-def test_chrome_and_sign_in_sentences_are_reworded_in_server_mode(ai):
+def test_chrome_and_sign_in_sentences_are_reworded_in_server_mode(all_server, ai):
     import i18n
     import ai_server
     from dialogs import guide_dialog

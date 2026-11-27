@@ -121,6 +121,15 @@ class FakeAi:
 
 
 @pytest.fixture
+def all_server(monkeypatch):
+    """The off switch: every step, the person's own tasks included, stays on
+    Prism's server. Since 27 Nov 2026 the app works a task's text steps in the
+    browser (tests/test_default_work.py); a test of the all-server screens or
+    chat asks for this BEFORE `ai`."""
+    monkeypatch.setenv("PRISM_DEFAULT_WORK", "server")
+
+
+@pytest.fixture
 def ai(monkeypatch):
     fake = FakeAi()
     import licensing
@@ -154,6 +163,8 @@ def ai(monkeypatch):
     _agents.CATEGORIES.update(_snap)
     ai_client.set_auth_provider(None)
     ai_client.set_usage_listener(None)
+    from core import default_work as _default_work
+    _default_work.enable(False)          # install() turned it on
     from widgets import usage_chip
     usage_chip.set_provider(None)
     fake.close()
@@ -468,7 +479,7 @@ class Screens:
             p.show_section("agents")
         return p
 
-    def test_settings_has_no_key_fields_and_says_where_AI_comes_from(self, ai):
+    def test_settings_has_no_key_fields_and_says_where_AI_comes_from(self, all_server, ai):
         from PySide6.QtWidgets import QLabel, QLineEdit
         p = self._settings()
         labels = [l.text() for l in p.findChildren(QLabel)]
@@ -478,7 +489,7 @@ class Screens:
             assert edit.placeholderText() not in ("gsk_…", "sk-or-…"), "a provider key field is still on the page"
             assert REAL_GROQ not in edit.text() and REAL_OR not in edit.text()
 
-    def test_settings_agents_has_no_pickers_only_what_runs_each_step(self, ai):
+    def test_settings_agents_has_no_pickers_only_what_runs_each_step(self, all_server, ai):
         """Owner, 19 Nov 2026: fix the Settings agents section now. In server
         mode it showed seven 'skip this category' dropdowns under 'Pick one
         per category' — but server_effective() runs every step on Prism's
@@ -497,7 +508,7 @@ class Screens:
         for site in ("ChatGPT", "Perplexity", "Gemini", "Runway"):
             assert site not in labels, site
 
-    def test_settings_connections_has_no_chrome_login_leftovers(self, ai):
+    def test_settings_connections_has_no_chrome_login_leftovers(self, all_server, ai):
         """Server mode: no website logins, so no Chrome version pin, no
         'copy my Chrome logins', no 'Your logins copied in: NOT YET'."""
         import licensing
