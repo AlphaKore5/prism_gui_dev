@@ -48,6 +48,7 @@ from widgets import controls as C
 from prospector import gateway
 from prospector.filters import MAX_FACET_VALUES, SearchSpec
 from addons.leads import pool as P
+from addons.leads.month_usage import usage_line
 from addons.leads import saved_searches
 from addons.leads.filter_panel import (
     HELP_KEYS as _FILTER_HELP_KEYS, FilterPanel, reveal_in_scroll, static_suggest,
@@ -533,7 +534,13 @@ class LeadsWorkbench(QWidget):
                        i18n.t("You're out of credits — click to ask for more."))
         tip.append(i18n.t("Every paid lookup is charged to your credits. Click to see "
                           "how many are left, what they were spent on, and how to get more."))
+        line = usage_line(gateway.month())
+        if line:
+            tip.append(line)
         self._credits_btn.setToolTip("\n".join(tip))
+        cockpit = getattr(getattr(self, "_cockpit", None), "leads", None)
+        if cockpit is not None:
+            cockpit.set_mobile_gate(gateway.mobiles_left(), gateway.mobiles_why_not())
 
     def _show_credits(self) -> None:
         """The pill's click: Apollo's small "Team credit usage" card — how much is
@@ -546,6 +553,7 @@ class LeadsWorkbench(QWidget):
             pop.card.usageRequested.connect(self._open_credit_usage)
             pop.card.upgradeRequested.connect(self._open_upgrade)
         pop.card.set_loading()
+        pop.card.month.set_month(gateway.month())
         worker = CreditsCallWorker("usage")
         worker.done.connect(pop.show_usage)
         worker.failed.connect(pop.show_error)
@@ -558,6 +566,7 @@ class LeadsWorkbench(QWidget):
         dlg = self._credit_dlg = CreditUsageDialog(self._credit_status.get("rates") or {}, self)
         dlg.setAttribute(Qt.WA_DeleteOnClose, True)
         dlg.upgradeRequested.connect(self._open_upgrade)
+        dlg.month.set_month(gateway.month())
         dlg.destroyed.connect(lambda *_: setattr(self, "_credit_dlg", None))
         dlg.open()
 
@@ -581,6 +590,9 @@ class LeadsWorkbench(QWidget):
         if not gateway.ready(op):
             return i18n.t("That lookup isn't switched on yet — contact Alphakore "
                           "and we'll turn it on. You haven't been charged.")
+        why_not = gateway.limit_why_not(op)
+        if why_not:                         # this month's promise is used up: said before asking anything
+            return i18n.t(why_not)
         balance = self._balance()
         if balance is not None and balance <= 0:
             return i18n.t("You have no credits left. Ask Alphakore to top up and "
@@ -611,6 +623,8 @@ class LeadsWorkbench(QWidget):
             parts.append(i18n.t("{c} used").format(c=self._cr(used)))
         if gateway.exhausted():
             parts.append(i18n.t("stopped: out of credits — ask Alphakore to top up"))
+        if gateway.limited():
+            parts.append(i18n.t(gateway.limited()))     # the server's sentence, with the reset date
         return ("   ·   " + "   ·   ".join(parts)) if parts else ""
 
     # ── what a search runs with: the filters, Find new people, Search settings ─
@@ -1260,6 +1274,7 @@ class LeadsWorkbench(QWidget):
         self._cockpit.verifyRequested.connect(self._verify_selected)
         self._cockpit.emailsRequested.connect(self._find_emails)
         self._cockpit.phonesRequested.connect(self._find_phones)
+        self._cockpit.mobilesRequested.connect(self._find_mobiles)
         self._cockpit.saveListRequested.connect(self._save_list)
         self._cockpit.exportRequested.connect(self._export_selected)
         self._cockpit.sequenceRequested.connect(self._add_to_sequence)
@@ -3026,7 +3041,8 @@ class LeadsWorkbench(QWidget):
             self._status.setText(i18n.t("Those people are revealed already."))
             return
         if self._pooled():
-            blocked = self._pool_blocker("apollo")
+            # A reveal finds an e-mail, so it also stops when this month's e-mails are used up.
+            blocked = self._pool_blocker("apollo") or i18n.t(gateway.emails_why_not())
             if blocked:
                 self._status.setText(blocked)
                 return
@@ -3115,6 +3131,9 @@ class LeadsWorkbench(QWidget):
                 self._status.setText(blocked)
                 return
         leads = leads[:mobiles.LIMIT]
+        left = gateway.mobiles_left() if pooled else None
+        if left is not None:
+            leads = leads[:left]            # never more than this month's promise has left
         if not (self._confirm_mobiles(len(leads)) if pooled
                 else self._confirm_mobiles_direct(len(leads))):
             return
@@ -3135,12 +3154,26 @@ class LeadsWorkbench(QWidget):
         """Every lookup asks first, in credits. Priced per number FOUND, so the figure is a
         ceiling. Tests patch this."""
         price = gateway.rate("phone_mobile", 4)
-        return self._confirm_pool(i18n.t("Find mobiles"), [
-            i18n.t("Look up the mobile number for {n} people — up to {c}.").format(
-                n=n, c=self._cr(n * price)),
-            i18n.t("Prism asks three data sources in turn for each person's own mobile number, "
-                   "cheapest first. It can take a minute or two. A credit is used only for a "
-                   "number found. Nothing is called or checked beyond its format.")])
+        lines = [i18n.t("Look up the mobile number for {n} people — up to {c}.").format(
+                     n=n, c=self._cr(n * price)),
+                 i18n.t("Prism asks three data sources in turn for each person's own mobile number, "
+                        "cheapest first. It can take a minute or two. A credit is used only for a "
+                        "number found. Nothing is called or checked beyond its format.")]
+        quota = self._mobile_quota_line(n)
+        if quota:
+            lines.insert(1, quota)
+        return self._confirm_pool(i18n.t("Find mobiles"), lines)
+
+    def _mobile_quota_line(self, n: int) -> str:
+        """"This uses up to 8 of your 100 mobile numbers this month (60 left)." — the promise the
+        press draws on, said before it runs. Empty when the server counts no limit."""
+        m = gateway.month()
+        if m is None:
+            return ""
+        limit, used = int(m.get("numbers_limit") or 0), int(m.get("numbers_used") or 0)
+        return i18n.t("This uses up to {n} of your {limit} mobile numbers this month "
+                      "({left} left). Only numbers found count.").format(
+            n=n, limit=limit, left=max(0, limit - used))
 
     def _confirm_mobiles_direct(self, n: int) -> bool:
         """The same question in rupees, for the owner's own Monid wallet: three sources are

@@ -104,7 +104,10 @@ def find(leads, cfg: dict | None = None, on_progress=None, *, sleep=None) -> dic
     what was found is kept. `sleep` is accepted and ignored (the lookups no longer poll)."""
     if not gateway.pooled():
         return find_direct(leads, cfg, on_progress)
-    return _batch(leads, on_progress, _ask_pool)
+    return _batch(leads, on_progress, _ask_pool, cap=gateway.mobiles_left())
+
+
+_STOPS = ("quota_numbers", "spend_cap")     # monthly refusals that every later lookup would meet too
 
 
 def _ask_pool(lead):
@@ -112,11 +115,13 @@ def _ask_pool(lead):
     spent, which every later lookup would find too."""
     if gateway.exhausted():
         return None, [gateway.exhausted()], True
+    if gateway.limited(*_STOPS):
+        return None, [gateway.limited(*_STOPS)], True
     first, last, domain = _who(lead)
     why: list = []
     res = gateway.find_mobile(first, last, domain, company=str(getattr(lead, "company", "") or ""),
                               title=str(getattr(lead, "title", "") or ""), why=why)
-    stop = bool(gateway.exhausted())
+    stop = bool(gateway.exhausted() or gateway.limited(*_STOPS))
     if res is None:
         return None, why, stop
     phone, provider = str(res.get("phone") or ""), str(res.get("provider") or "")
@@ -124,12 +129,14 @@ def _ask_pool(lead):
              "tried": [(provider or "server", "found" if phone else "none")]}, why, stop)
 
 
-def _batch(leads, on_progress, ask) -> dict:
+def _batch(leads, on_progress, ask, cap=None) -> dict:
     """The one loop: ask `ask(lead) -> (result | None, messages, stop)` for each person who needs a
     mobile, WORKERS at a time, and write the numbers onto the leads (here, on the calling thread)."""
     why: list = []
     out = {"asked": 0, "found": 0, "given": 0, "failed": 0, "pending": 0, "why": why, "by": {}}
     todo = [lead for lead in leads or () if needs_mobile(lead)][:LIMIT]
+    if cap is not None:
+        todo = todo[:cap]               # never ask for more than this month's promise has left
     total = len(todo)
     if on_progress:
         on_progress(0, total)

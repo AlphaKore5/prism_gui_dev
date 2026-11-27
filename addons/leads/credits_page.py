@@ -34,6 +34,7 @@ import i18n
 import theme
 from dialogs.base import PrismDialog
 from widgets import controls as C
+from addons.leads.month_usage import MonthUsage
 from addons.leads.workers import CreditsCallWorker
 
 DAY = 86400
@@ -231,6 +232,8 @@ class CreditCard(QFrame):
         col.addWidget(self.left)
         self.note = C.label("", level="META", wrap=True)
         col.addWidget(self.note)
+        self.month = MonthUsage()                # this month's e-mails and numbers; hidden when not counted
+        col.addWidget(self.month)
         row = QHBoxLayout()
         row.setSpacing(theme.SPACE_2)
         self.upgrade = C.button(i18n.t("Upgrade plan"), "primary",
@@ -425,6 +428,8 @@ class CreditUsageDialog(PrismDialog):
         self.plan_line = C.label("", level="META", wrap=True)
         icol.addWidget(self.plan_line)
         rcol.addWidget(inner)
+        self.month = MonthUsage()                # this month's e-mails and numbers; hidden when not counted
+        rcol.addWidget(self.month)
         rcol.addStretch(1)
         self.add_credits = C.button(i18n.t("Add more credits"), "primary",
                                     on_click=self.upgradeRequested.emit)
