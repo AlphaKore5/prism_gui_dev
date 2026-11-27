@@ -2,8 +2,8 @@
 
 Best / Balanced / Fast (plus Auto, the default), a percent bar for the week with
 its reset day, "Quality now: Balanced", the one plain sentence when the server
-has stepped the quality down, and at 100% the plain choice between a top-up and
-a simple Reel. Also the Reel style (full / simple / from my pictures).
+has stepped the quality down, and at 100% the plain choice between asking
+Alphakore for more and a simple Reel. Also the Reel style (full / simple / from my pictures).
 
 Every control that is off says why, in its tooltip and in a line under the row.
 Nothing here touches the network: the page hands it the server's usage answer
@@ -74,7 +74,7 @@ class QualityCard(C.Card):
         fbody = fwrap.body((theme.CARD_PAD,) * 4, theme.SPACE_2)
         fbody.addWidget(self.full_text)
         btns = QHBoxLayout()
-        self.topup_btn = C.button(i18n.t("Ask for a top-up"), "secondary", small=True,
+        self.topup_btn = C.button(i18n.t("Ask Alphakore for more"), "secondary", small=True,
                                   on_click=self._ask_topup)
         self.simple_btn = C.button(i18n.t("Make Reels simple"), "secondary", small=True,
                                    on_click=self._choose_simple)
@@ -177,9 +177,9 @@ class QualityCard(C.Card):
         self.full.setVisible(full)
         if full:
             self.full_text.setText(i18n.t(
-                "You have used this week's AI allowance. {resets} Until then you "
-                "can ask Alphakore for a top-up, or make Reels the simple way, "
-                "which uses no AI.").format(resets=quality.resets_words(resets)))
+                "You have used this week's AI allowance. {resets} Nothing was "
+                "charged. Until then you can ask Alphakore for more, or make "
+                "Reels the simple way, which uses no AI.").format(resets=quality.resets_words(resets)))
         self.simple_btn.setEnabled(reel_style(self.cfg) != "simple")
         self.simple_btn.setToolTip(
             "" if reel_style(self.cfg) != "simple"
@@ -217,8 +217,8 @@ class QualityCard(C.Card):
         self._save()
 
     def _ask_topup(self):
-        subject = quote("Top-up for my Prism week")
+        subject = quote("More AI for my Prism week")
         body = quote("Hello Alphakore team,\n\nI have used this week's AI allowance "
-                     "and would like a top-up. Please let me know the options.\n")
+                     "and would like more. Please let me know the options.\n")
         QDesktopServices.openUrl(QUrl(
             f"mailto:{app_meta.SUPPORT_EMAIL}?subject={subject}&body={body}"))

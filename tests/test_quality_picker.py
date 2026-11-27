@@ -1,7 +1,7 @@
 """Best / Balanced / Fast in the real app, offscreen, against the fake servers.
 
   * Settings > Usage shows the quality chips, the weekly bar (percent, reset day),
-    "Quality now", the plain step-down sentence, and at 100% the top-up / simple
+    "Quality now", the plain step-down sentence, and at 100% the ask-for-more / simple
     Reel choice. Drawn by the real UsagePanel from the real worker thread over
     real HTTP (test_usage_panel's fake of GET /v1/ai/usage, with the new fields).
   * Picking a chip saves to the config and tells the engine (`level` on the wire).
@@ -158,13 +158,17 @@ class CardTests(_Base):
         self.load()
         self.assertTrue(self.card.full.isVisibleTo(self.card))
         self.assertIn("used this week's AI allowance. Resets Monday.", self.card.full_text.text())
-        self.assertIn("top-up", self.card.full_text.text())
+        self.assertIn("Nothing was charged", self.card.full_text.text())
+        self.assertIn("ask Alphakore for more", self.card.full_text.text())
+        self.assertNotIn("top-up", self.card.full_text.text())
+        self.assertEqual("Ask Alphakore for more", self.card.topup_btn.text().strip())
         self.assertIn("no AI", self.card.full_text.text())
         opened = []
         with mock.patch("widgets.quality_card.QDesktopServices.openUrl",
                         lambda url: opened.append(url.toString())):
             self.card.topup_btn.click()
-        self.assertTrue(opened and opened[0].startswith("mailto:") and "top-up" in opened[0].lower())
+        self.assertTrue(opened and opened[0].startswith("mailto:") and "more" in opened[0].lower()
+                        and "top-up" not in opened[0].lower())
         self.card.simple_btn.click()
         self.assertEqual(self.card.cfg["reel_style"], "simple")
         self.assertFalse(self.card.simple_btn.isEnabled())
