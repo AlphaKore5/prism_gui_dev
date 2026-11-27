@@ -1,4 +1,4 @@
-"""Find mobiles on the screen (4-Nov-2026) — the person panel's "Find their mobile…" and its Enrichment
+"""Find mobiles on the screen (4-Nov-2026) — the person panel's "Get mobile number…" and its Enrichment
 box, through the workbench, and what the panel and the sheet say a found mobile is.
 
 The engine (prospector/mobiles.py) and its worker are tested in test_prospector_mobiles.py. Here:
@@ -329,14 +329,14 @@ class ThePanelSaysWhatTheMobileIs(unittest.TestCase):
 
     def test_someone_who_can_be_looked_up_is_offered_it_and_it_is_asked_for(self):
         p = self.panel(lead())
-        [find] = self.buttons(p, "Find their mobile…")
+        [find] = self.buttons(p, "Get mobile number…")
         find.click()
         self.assertEqual(self.asked, [["mobile"]])
         self.assertTrue(p.enrich_boxes["mobile"].isEnabled())
 
     def test_someone_with_no_company_website_is_not_offered_a_lookup(self):
         p = self.panel(lead(domain=""))
-        self.assertFalse(self.buttons(p, "Find their mobile…"))
+        self.assertFalse(self.buttons(p, "Get mobile number…"))
         self.assertFalse(p.enrich_boxes["mobile"].isEnabled())
 
     def test_a_found_mobile_is_their_own_number_not_the_companys(self):
@@ -353,7 +353,7 @@ class ThePanelSaysWhatTheMobileIs(unittest.TestCase):
         l = lead()
         M.apply(l, MOBILE)
         p = self.panel(l)
-        self.assertFalse(self.buttons(p, "Find their mobile…"))
+        self.assertFalse(self.buttons(p, "Get mobile number…"))
         self.assertFalse(p.enrich_boxes["mobile"].isEnabled())
 
     def test_a_number_they_came_with_keeps_the_phone_field_and_the_mobile_is_still_shown(self):

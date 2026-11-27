@@ -43,7 +43,8 @@ RETRIES = 1
 
 _lock = threading.Lock()
 _state = {"used": 0, "balance": None, "exhausted": "", "rates": {}, "ready": {},
-          "outdated": False}
+          "outdated": False, "month": None, "limited": "",
+          "limited_reason": ""}
 _send: Optional[Callable] = None            # tests: fn(path, body) -> dict
 
 
@@ -77,6 +78,16 @@ class OutOfCredits(GatewayError):
     @property
     def needed(self) -> int:
         return int(self.detail.get("needed", 0) or 0)
+
+
+class LimitReached(GatewayError):
+    """The server refused a lookup because this month's promise is used up: quota_emails,
+    quota_numbers or spend_cap (`detail["reason"]`). `message` already says when it resets and
+    that nothing was charged."""
+
+    @property
+    def reason(self) -> str:
+        return str(self.detail.get("reason") or "")
 
 
 # ── mode ─────────────────────────────────────────────────────────────────────
@@ -158,6 +169,8 @@ def _raw_call(path: str, body: dict) -> dict:
             with _lock:
                 _state["outdated"] = True
             raise GatewayError("SERVER_OUTDATED", OUTDATED_MESSAGE) from e
+        if e.code == "LEADS_LIMIT":
+            raise LimitReached(e.code, e.message, e.detail) from e
         raise GatewayError(e.code, e.message, e.detail) from e
     except Unreachable:
         raise GatewayError(
@@ -180,6 +193,13 @@ def _call(op: str, **params) -> dict:
         out = _raw_call("/v1/leads/" + op, body)
     except OutOfCredits as e:
         _note_exhausted(e)
+        raise
+    except LimitReached as e:
+        # Every later lookup of this kind would be refused the same way: remember it, so a batch
+        # stops at once instead of asking again (and `limited()` can say why).
+        with _lock:
+            _state["limited"] = e.message
+            _state["limited_reason"] = e.reason
         raise
     _note(out)
     return out
@@ -210,7 +230,7 @@ def forget() -> None:
     global _send
     with _lock:
         _state.update({"used": 0, "balance": None, "exhausted": "", "rates": {}, "ready": {},
-                       "outdated": False})
+                       "outdated": False, "month": None, "limited": "", "limited_reason": ""})
     _send = None
 
 # ── a run's accounting ───────────────────────────────────────────────────────
@@ -221,6 +241,7 @@ def reset() -> None:
     with _lock:
         _state["used"] = 0
         _state["exhausted"] = ""
+        _state["limited"] = _state["limited_reason"] = ""
 
 
 def used() -> int:
@@ -251,9 +272,80 @@ def status() -> dict:
         _state["balance"] = int(out.get("balance", 0) or 0)
         _state["rates"] = dict(out.get("rates") or {})
         _state["ready"] = dict(out.get("ready") or {})
+        _state["month"] = dict(out["month"]) if isinstance(out.get("month"), dict) else None
         if _state["balance"] > 0:
             _state["exhausted"] = ""
     return out
+
+
+# ── this month's promise: how many e-mails and mobile numbers are left ───────
+
+def month() -> Optional[dict]:
+    """{"emails_used", "emails_limit", "numbers_used", "numbers_limit", "resets_label", "spend_cap_reached"}
+    from the last status(), or None when the server has not said — or is too old to count, or is not
+    enforcing a monthly limit (its "guard" flag is off). None means "no limit known", never "unlimited"."""
+    with _lock:
+        m = _state["month"]
+    return dict(m) if m and m.get("guard") else None
+
+
+def limited(*reasons: str) -> str:
+    """'' or the server's own sentence for the monthly limit it last refused with — with `reasons`,
+    only when it was one of those."""
+    with _lock:
+        if reasons and _state["limited_reason"] not in reasons:
+            return ""
+        return _state["limited"]
+
+
+def _left(kind: str) -> Optional[int]:
+    m = month()
+    if m is None:
+        return None
+    if m.get("spend_cap_reached"):
+        return 0
+    return max(0, int(m.get(kind + "_limit") or 0) - int(m.get(kind + "_used") or 0))
+
+
+def mobiles_left() -> Optional[int]:
+    """Mobile numbers still included this month; 0 when the spend cap is reached; None when no limit
+    is known (an old server, or the limit is switched off)."""
+    return _left("numbers")
+
+
+def _why_not(kind: str, used_up: str) -> str:
+    m = month()
+    if m is None or _left(kind) != 0:
+        return ""
+    when = m.get("resets_label") or ""
+    limit = int(m.get(kind + "_limit") or 0)
+    if int(m.get(kind + "_used") or 0) < limit:             # not the quota: the spend cap
+        return "This month's limit for paid lookups is reached. It resets on %s." % when
+    return used_up % (limit, when)
+
+
+def mobiles_why_not() -> str:
+    """Plain words for why no mobile number can be fetched right now because of the monthly limit,
+    or '' when one can."""
+    return _why_not("numbers", "You have used all %d mobile numbers included this month. They come back on %s.")
+
+
+def emails_why_not() -> str:
+    """The same for e-mail addresses."""
+    return _why_not("emails", "You have used all %d e-mail lookups included this month. They come back on %s.")
+
+
+def limit_why_not(op: str) -> str:
+    """Why this month's limit stops the paid lookup `op` (a "ready" name), or ''. Apollo's search is
+    free, so no limit stops it."""
+    if op == "mobile":
+        return mobiles_why_not()
+    if op == "find_email":
+        return emails_why_not()
+    m = month()
+    if op != "apollo" and m is not None and m.get("spend_cap_reached"):
+        return "This month's limit for paid lookups is reached. It resets on %s." % (m.get("resets_label") or "")
+    return ""
 
 
 def rate(action: str, default: int = 1) -> int:

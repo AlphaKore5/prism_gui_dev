@@ -4626,8 +4626,9 @@ class ResultRows(unittest.TestCase):
                       self._person("Kale", "Owner", "Kale Panels", "Pune", 64, saved=True)],
                      {"page": 0, "pages": 1, "start": 1, "end": 2, "total": 2}, {"total": 2, "net_new": 1, "saved": 1})
         rows = c._grid.rows()
-        self.assertEqual([b.text() for b in rows[0].buttons], ["Open", "Save"])
-        self.assertEqual([b.text() for b in rows[1].buttons], ["Open"])               # already saved
+        # Someone with no mobile of their own and a company website also offers the lookup, last.
+        self.assertEqual([b.text() for b in rows[0].buttons if b.text() != "Get mobile number"], ["Open", "Save"])
+        self.assertEqual([b.text() for b in rows[1].buttons if b.text() != "Get mobile number"], ["Open"])   # already saved
         self.assertIn("Cold", [p.text() for p in rows[1].pills])                      # a saved person shows their stage
         asked = []
         c.saveContactsRequested.connect(asked.append)

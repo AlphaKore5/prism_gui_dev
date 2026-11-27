@@ -219,7 +219,7 @@ class TheDrawer(unittest.TestCase):
         lead = apollo._preview_of(apollo._card(card(1), ""))
         texts = self.drawer_links(lead)
         self.assertIn("Find their e-mail…", texts)                     # it reveals them
-        self.assertNotIn("Find their mobile…", texts)                  # a mobile is bought by full name
+        self.assertNotIn("Get mobile number…", texts)                  # a mobile is bought by full name
 
 
 if __name__ == "__main__":
