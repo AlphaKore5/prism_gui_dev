@@ -10,7 +10,7 @@ them. If you only want to *run* Prism from source, see README.md.
 
 | Platform | Artifact | How they run it |
 |---|---|---|
-| Linux | `Prism-<version>-linux-x64.tar.gz`, plus `Prism-<version>-x64.AppImage` | Extract and run `./install.sh`, or `chmod +x` the AppImage and double-click |
+| Linux | `Prism-<version>-linux-x64.tar.gz`, plus `Prism-<version>-x64.AppImage` (`Prism-<flavour>-<version>-x64.AppImage` for Sales, Studio, Engineering) | Extract and run `./install.sh`, or `chmod +x` the AppImage and double-click |
 | Windows | `Prism-<version>-windows-x64.zip` | Extract anywhere, run `Prism.exe` |
 | macOS | `Prism-<version>-macos-<arch>.dmg` | Open, drag Prism to Applications |
 

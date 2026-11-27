@@ -18,6 +18,7 @@ import os
 import shutil
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (QAbstractItemView, QFileDialog, QFrame, QHBoxLayout,
                                QLabel, QMessageBox, QTableWidget,
                                QTableWidgetItem, QVBoxLayout, QWidget)
@@ -30,6 +31,8 @@ from widgets import controls as C
 from widgets.files_panel import size_label
 
 PREVIEW_ROWS, PREVIEW_COLS = 20, 8
+THUMB_W, THUMB_H = 320, 220
+_IMAGE_EXT = (".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp")
 
 _SHEET_EXT = (".xlsx", ".csv", ".zip")
 _TYPE_WORD = {".xlsx": "Excel", ".csv": "CSV", ".zip": "CSV (several sheets)",
@@ -132,6 +135,10 @@ class FileCard(QFrame):
         self.row.activated.connect(lambda: exists and paths.open_result(path))
         box.addWidget(self.row)
 
+        self.thumb = self._thumbnail(path) if exists else None
+        if self.thumb is not None:
+            box.addWidget(self.thumb)
+
         self.convert_btns: dict[str, object] = {}
         if exists and CB.filespec.has_spec(path) or not exists:
             self._build_convert(box, exists)
@@ -155,6 +162,23 @@ class FileCard(QFrame):
             else:
                 self.preview.deleteLater()
                 self.preview = None
+
+    @staticmethod
+    def _thumbnail(path: str):
+        """A small picture of an image file, or None when it is not an image
+        or cannot be read (a corrupt file just keeps its plain card)."""
+        if os.path.splitext(path)[1].lower() not in _IMAGE_EXT:
+            return None
+        pix = QPixmap(path)
+        if pix.isNull():
+            return None
+        label = QLabel()
+        label.setObjectName("fileThumb")
+        label.setPixmap(pix.scaled(THUMB_W, THUMB_H, Qt.KeepAspectRatio,
+                                   Qt.SmoothTransformation))
+        label.setAlignment(Qt.AlignLeft)
+        label.setToolTip(os.path.basename(path))
+        return label
 
     # ── convert ──────────────────────────────────────────────────────────────
     def _build_convert(self, box, exists: bool):

@@ -5,8 +5,11 @@ about it when somebody phoned. Pulse sends a few small, scrubbed facts to the
 licence server (/v1/pulse, see license_server app/pulse.py):
 
   error  the exception TYPE, the top frames of OUR code (file:function), a
-         fingerprint of those, and a one-line message with anything quoted or
-         numeric blanked out, because an exception message can quote user data
+         fingerprint of those, a one-line message with anything quoted or
+         numeric blanked out, because an exception message can quote user data,
+         and the last few web calls the app made (method, host, path with ids
+         blanked, status, milliseconds: never a query string, a body or a header),
+         so we can see which call failed and where it went
   start  how many milliseconds from launch to a usable window
   slow   an action that took two seconds or more (which screen, how long)
   run    how a run ended: ok, failed or cancelled, in which add-on
@@ -28,6 +31,7 @@ Rules this module keeps:
 """
 from __future__ import annotations
 
+import collections
 import hashlib
 import json
 import os
@@ -36,6 +40,7 @@ import sys
 import threading
 import time
 import traceback
+import urllib.parse
 import uuid
 
 MAX_QUEUE = 300
@@ -138,7 +143,12 @@ def _context() -> dict:
         plat = updater.platform_tag()
     except Exception:                                    # noqa: BLE001
         plat = sys.platform
-    return {"version": app_meta.VERSION, "flavour": "complete", "platform": plat,
+    try:
+        import flavour
+        flav = flavour.FLAVOUR
+    except Exception:                                    # noqa: BLE001
+        flav = "complete"
+    return {"version": app_meta.VERSION, "flavour": flav, "platform": plat,
             "channel": "dev" if channel.is_dev() else "prod"}
 
 
@@ -170,6 +180,87 @@ def record(kind: str, **fields) -> None:
         pass
 
 
+# ---- the call trail: where the app's last web calls went ---------------------------------------
+# Wraps requests.Session.request and urllib's OpenerDirector.open ONCE, so every module's web call
+# (our own and our libraries') leaves one short line in a ring of the last CALLS_MAX. The wrappers
+# only note and re-raise: they never change a result, an exception, or what is sent. An error report
+# carries the newest few, so "which call failed and where it went" is on the admin panel.
+CALLS_MAX = 10
+CALLS_SENT = 8
+_calls: collections.deque = collections.deque(maxlen=CALLS_MAX)
+_trail_installed = False
+# a path segment that is an id, a token or a file name: 5+ digits in a row, or 20+ word characters
+_SEGMENT = re.compile(r"\d{5,}|[A-Za-z0-9_\-]{20,}")
+
+
+def _call_text(method: str, url, status, started: float) -> str:
+    """"POST api.example.com/v1/ai/<id> -> 502 1840ms". Host and path only: no port, user,
+    query, fragment, body or header. Returns "" if the URL cannot be read."""
+    try:
+        parts = urllib.parse.urlsplit(str(url))
+        path = "/".join("<id>" if _SEGMENT.search(seg) else seg for seg in parts.path.split("/"))[:80]
+        ms = int((time.perf_counter() - started) * 1000)
+        return f"{str(method).upper()} {parts.hostname or '?'}{path} -> {status} {ms}ms"
+    except Exception:                                    # noqa: BLE001
+        return ""
+
+
+def _note_call(method, url, status, started) -> None:
+    text = _call_text(method, url, status, started)
+    if text:
+        _calls.append(text)                              # deque.append is thread-safe
+
+
+def recent_calls() -> list[str]:
+    return list(_calls)[-CALLS_SENT:]
+
+
+def install_call_trail() -> None:
+    """Idempotent, never raises, and a library that is missing is simply not wrapped."""
+    global _trail_installed
+    if _trail_installed:
+        return
+    _trail_installed = True
+    try:
+        import requests.sessions as _rs
+        _orig_request = _rs.Session.request
+
+        def request(self, method, url, *a, **k):
+            started, status = time.perf_counter(), "error"
+            try:
+                r = _orig_request(self, method, url, *a, **k)
+                status = getattr(r, "status_code", "?")
+                return r
+            except Exception as e:                       # noqa: BLE001 - noted, then re-raised unchanged
+                status = type(e).__name__
+                raise
+            finally:
+                _note_call(method, url, status, started)
+        _rs.Session.request = request
+    except Exception:                                    # noqa: BLE001
+        pass
+    try:
+        import urllib.request as _ur
+        _orig_open = _ur.OpenerDirector.open
+
+        def open_(self, fullurl, data=None, *a, **k):
+            started, status = time.perf_counter(), "error"
+            url = getattr(fullurl, "full_url", fullurl)
+            method = fullurl.get_method() if hasattr(fullurl, "get_method") else ("POST" if data is not None else "GET")
+            try:
+                r = _orig_open(self, fullurl, data, *a, **k)
+                status = getattr(r, "status", None) or r.getcode()
+                return r
+            except Exception as e:                       # noqa: BLE001
+                status = getattr(e, "code", None) or type(e).__name__
+                raise
+            finally:
+                _note_call(method, url, status, started)
+        _ur.OpenerDirector.open = open_
+    except Exception:                                    # noqa: BLE001
+        pass
+
+
 def error(exc_type, exc, tb, *, addon: str = "", screen: str = "") -> None:
     """An exception nobody handled. Called from diagnostics' crash hooks."""
     try:
@@ -177,7 +268,8 @@ def error(exc_type, exc, tb, *, addon: str = "", screen: str = "") -> None:
         name = getattr(exc_type, "__name__", "Error")
         record("error", addon=addon, screen=screen,
                fingerprint=fingerprint(exc_type, frames),
-               title=scrub_title(f"{name}: {exc}"), detail={"frames": frames})
+               title=scrub_title(f"{name}: {exc}"),
+               detail={"frames": frames, "calls": recent_calls()})
         flush_async()
     except Exception:                                    # noqa: BLE001
         pass
@@ -329,6 +421,7 @@ def begin_session() -> None:
     try:
         if not active():
             return
+        install_call_trail()
         marker = _marker_path()
         if os.path.exists(marker):
             try:

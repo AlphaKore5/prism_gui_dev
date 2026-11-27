@@ -35,11 +35,17 @@ ALL = flavour.ADDONS_BY_FLAVOUR["complete"]
 
 class TheOwnerTable(unittest.TestCase):
 
-    def test_every_add_on_has_exactly_one_home_edition(self):
+    def test_every_add_on_has_one_home_edition(self):
+        # Reel and Motion sit in Studio, Sales and Engineering (owner rule
+        # 2026-11-26); their home is the first of those, Studio. Every other
+        # add-on is in exactly one edition.
         for key in ALL:
             owners = [f for f in EC.EDITION_NAMES
                       if key in flavour.ADDONS_BY_FLAVOUR[f]]
-            self.assertEqual(len(owners), 1, (key, owners))
+            if key in ("reel", "motion"):
+                self.assertEqual(owners, ["studio", "sales", "engineering"], key)
+            else:
+                self.assertEqual(len(owners), 1, (key, owners))
             self.assertEqual(EC.owner_edition(key), owners[0])
 
     def test_the_card_names_the_right_edition(self):

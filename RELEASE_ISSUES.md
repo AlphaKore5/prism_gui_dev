@@ -152,6 +152,56 @@ something you did not run.
 
 ## Issue log (newest first)
 
+### ISS-037 — A helper's test run wrote reel folders into the real Desktop (2026-11-26) — CAUGHT, cleaned, nothing else touched
+- **Found by:** the helper agent reported it, and I checked the folder, `~/.prism/config.json` and the engine clones afterwards.
+- **What went wrong:** two early test runs in a helper's shell had no sandbox `HOME` (the `export` did not carry between
+  shell calls). A reel test wrote six output folders named `2026-11-26 21-15*` into the real
+  `~/Desktop/Prism Artifacts/make an Instagram reel about Tulsi/`. Outputs go to the real home by design (ISS-009), so a
+  sandbox `HOME` is the only thing that keeps tests away from them.
+- **Fix:** deleted exactly those six folders (the 18 Nov ones were left alone). Confirmed afterwards: no `2026-11-26` folder
+  remains, `~/.prism/config.json` is unchanged (20 Nov, 1632 bytes), nothing under `~/.prism` was written.
+- **Check:** every test command sets `HOME=$(mktemp -d)` on the SAME line as the command, never in an earlier `export`.
+  After a test session, `ls "~/Desktop/Prism Artifacts"` for folders dated today.
+- **Lesson:** a safety variable set in one shell call is gone in the next. Put it in the command, or use a wrapper script.
+
+### ISS-033 — A "pull latest" rebase rewrote commits that were already published (2026-11-13) — CAUGHT before pushing
+- **Found by:** checking `merge-base --is-ancestor <remote branch> HEAD` before pushing the engine for a PR.
+- **What went wrong:** asked to pull, I ran `git rebase --autostash origin/main` on the engine branch. Its first nine commits
+  were already on `origin/fix/motion-text-anchor-and-render` (the branch behind an open PR), so the rebase gave them new hashes
+  and the branch no longer fast-forwarded the remote. Pushing would have needed a force-push, and the GUI repo's engine
+  pointers named the old hashes.
+- **Fix:** kept the rebased result on `local/rebased-onto-main-2026-11-13`, went back to the published lineage
+  (`backup/pre-pull-2026-11-13`), committed on top of it, and pushed as a fast-forward.
+- **Check:** before any rebase of a branch that has a PR, `git merge-base --is-ancestor <remote branch> HEAD` must say YES
+  afterwards; if the remote branch is already pushed, do not rebase it, put the new work on top.
+- **Lesson:** "rebase, never merge" is for unpublished work. I applied it to published commits because I did not look at what
+  was published first.
+- **Numbering:** first logged as ISS-023 on `motion/reference-match-part-1`, which clashed with an existing ISS-023; renumbered here.
+
+### ISS-036 — I opened a licence-server PR without running its browser test; CI went red (2026-11-26) — FIXED
+- **Seen:** licence-server PR #4 failed `tests/test_console_ui.py::test_pulse_new_badge_only_on_errors_first_seen_in_the_last_day`.
+  I had run the whole suite with `--ignore=tests/test_console_ui.py` (it needs Chromium) and added `<b>` tags inside the Pulse error
+  rows, so the test's `td b` selector matched several elements.
+- **Fix:** the drill-down names the customer with a styled `span`. Ran all 18 browser tests locally, then CI was green.
+- **Rule:** when a change edits `app/console.html`, run `tests/test_console_ui.py` before pushing; an ignored test file is a test not run.
+
+### ISS-035 — GitHub blocked asset downloads and workflow dispatches while the quota showed 4,800 of 5,000 left (2026-11-26) — OPEN (wait it out)
+- **Seen:** `HTTP 403: API rate limit exceeded` on `gh release download` and `gh workflow run`, for about an hour, while
+  `gh api rate_limit` showed ~4,870 core requests left. This is a burst limit on the account, not the hourly quota. Three
+  parallel publish runs plus a retry every 90 s kept it alive.
+- **Also:** my first waiting loop used `gh api -o`, which does not exist, so its check could never succeed.
+- **Rule:** one flavour at a time; after a 403, stop and wait 15+ minutes (retry every 5, not 1.5); test a waiting loop's check
+  command once by hand before starting it.
+
+### ISS-034 — Signing the 2.0.0 flavours failed: "this signing key is not the one published as 'udev2'" (2026-11-26) — FIXED
+- **Seen:** `sign_manifest.py` refused the key. `prism_gui/devtools/dev-signing-key.hex` (git-ignored) holds a DIFFERENT key
+  (public half 4fd56e...) than the one `licensing/keys.py` publishes as `udev2` (0b0591...).
+- **Cause (PROVEN):** the real private key is `~/prism-keys/prism-update-dev-udev2.hex`; the stray file was picked up by the old
+  default. Nothing was wrong with the builds or with `keys.py`.
+- **Fix:** sign with `UPDATE_SIGNING_KEY_HEX="$(tr -d '[:space:]' < ~/prism-keys/prism-update-dev-udev2.hex)"`; the stray file is
+  to be deleted once the 2.0.0 publish has succeeded.
+- **Rule:** the signing key lives only in `~/prism-keys/`; derive its public half and compare with `keys.py` before a release.
+
 ### ISS-032 — Publishing a 2.0.0 flavour from a laptop failed with HTTP 408, and I called it "still uploading" (2026-11-26) — FIXED
 - **Seen:** `v2.0.0-studio` existed with only its two small manifests. I told the owner the installers were "still uploading";
   the script had already died: `HTTP 408: Upload body timed out due to inactivity` (`gh release upload` with 4 files of 400-670 MB

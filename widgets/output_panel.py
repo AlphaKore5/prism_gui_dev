@@ -1614,11 +1614,31 @@ class OutputPanel(QWidget):
         card.move_focus.connect(
             lambda step, key=stage: self._focus_neighbour(key, step))
         self._cards[stage] = card
-        self._order.append(stage)
+        # The engine adds artwork and design BEFORE the video step runs, but
+        # the plan only seeded the video card, so they arrived below it. Put
+        # them where they actually run: just above a video card still queued.
+        video = self._cards.get("media")
+        before = (video is not None and video._state == "queued"
+                  and stage in ("artwork", "design") and "media" in self._order)
+        if before:
+            self._order.insert(self._order.index("media"), stage)
+        else:
+            self._order.append(stage)
         if self._turn_item is None:
             self._open_turn("")          # a run that never said who asked
-        self._turn_keys.append(stage)
-        self._insert(card)
+        if before and "media" in self._turn_keys:
+            self._turn_keys.insert(self._turn_keys.index("media"), stage)
+        else:
+            self._turn_keys.append(stage)
+        if before:
+            self.empty.setVisible(False)
+            self.cards_box.insertWidget(self.cards_box.indexOf(video), card)
+            self._sync_tail()
+            for i, key in enumerate(self._order):
+                if key in self._cards:
+                    self._cards[key].number.setText(str(i + 1))
+        else:
+            self._insert(card)
         self._relink()
         self._sync_tail()
         return card

@@ -23,8 +23,8 @@ ADDONS_BY_FLAVOUR: dict[str, tuple[str, ...]] = {
     "complete": ("inquiry", "boq", "gerber", "step", "bom", "email", "leads",
                  "whatsapp", "reel", "motion"),
     "studio": ("reel", "motion"),
-    "sales": ("inquiry", "email", "leads", "whatsapp"),
-    "engineering": ("boq", "bom", "step", "gerber"),
+    "sales": ("inquiry", "email", "leads", "whatsapp", "reel", "motion"),
+    "engineering": ("boq", "bom", "step", "gerber", "reel", "motion"),
 }
 
 FLAVOURS = tuple(ADDONS_BY_FLAVOUR)
@@ -87,10 +87,9 @@ def excluded_addon_keys(flavour: str | None = None) -> tuple[str, ...]:
 
 # Third-party packages a build carries only when one of the listed add-ons is
 # in it (owner decisions 2026-11-21, DECISIONS item 2). The rest of the
-# environment is bundled by every flavour. Chromium (playwright) stays for
-# Studio and Engineering because Motion rendering and the BOQ PDF quotation
-# need it; Sales has neither. Video encoding (imageio_ffmpeg) is Reel and
-# Motion only. The Engineering-only stack is STEP (cadquery with its OCP, vtk,
+# environment is bundled by every flavour. Since 2026-11-26 Studio (Reel +
+# Motion) sits inside Sales and Engineering, so every flavour carries Chromium
+# (playwright) and video encoding (imageio_ffmpeg). The Engineering-only stack is STEP (cadquery with its OCP, vtk,
 # casadi, numba/llvmlite, nlopt), Gerber's gerbonara and BOQ's pdfplumber.
 # shapely is NOT here although Gerber uses it: the OCR engine imports it in
 # every build (see ALWAYS_BUNDLED).

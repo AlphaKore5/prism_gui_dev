@@ -77,9 +77,6 @@ class Probe(unittest.TestCase):
         self.assertTrue(any("never rests" in f for f in rhythm.faults(p)), p)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 class ProbeVideo(unittest.TestCase):
     """The same rhythm numbers, from a finished video file — Studio, Reel, anything."""
@@ -130,3 +127,99 @@ class ProbeVideo(unittest.TestCase):
         a = rhythm.profile_from_frames([np.full((20, 20), 200.0)] * 30, fps=10)
         self.assertEqual(a["static_pct"], 100.0)
         self.assertEqual(a["holds_ge_1s"], 1)
+
+
+class Repair(unittest.TestCase):
+    """The film-level pass: which scenes go back, and when a fix counts."""
+
+    def _p(self, still, per_second):
+        return {"seconds": float(len(per_second)), "static_pct": still, "per_second": per_second,
+                "longest_hold": 0.3, "holds_ge_1s": 0, "top10_share": 25.0, "luminance": [200.0, 240.0], "holds": []}
+
+    def test_kind_names_both_failures_and_none_inside_the_band(self):
+        self.assertEqual(rhythm.kind(self._p(8, [1] * 12)), "never_rests")
+        self.assertEqual(rhythm.kind(self._p(68, [1] * 12)), "mostly_still")
+        self.assertIsNone(rhythm.kind(self._p(30, [1] * 12)))
+        self.assertIsNone(rhythm.kind(None))
+        self.assertIsNone(rhythm.kind(self._p(8, [1, 1])), "too short to judge")
+
+    def test_a_scene_activity_is_the_series_averaged_over_its_own_seconds(self):
+        p = self._p(8, [4, 4, 1, 1, 1, 1, 0, 0])
+        self.assertEqual(rhythm.scene_activity(p, [2, 4, 2]), [4.0, 1.0, 0.0])
+
+    def test_never_rests_sends_the_busiest_back_but_never_the_payoff(self):
+        p = self._p(8, [5, 5, 1, 1, 1, 1, 9, 9])
+        self.assertEqual(rhythm.targets(p, [2, 4, 2], "never_rests"), [0, 1])
+
+    def test_mostly_still_sends_the_quietest_back_but_never_the_opening(self):
+        p = self._p(70, [0, 0, 1, 1, 1, 1, 0.1, 0.1])
+        self.assertEqual(rhythm.targets(p, [2, 4, 2], "mostly_still"), [1, 2])
+
+    def test_a_fix_must_land_clearly_nearer_the_band(self):
+        before, near, same = self._p(8, [1] * 12), self._p(13, [1] * 12), self._p(9, [1] * 12)
+        self.assertTrue(rhythm.better(before, near))
+        self.assertFalse(rhythm.better(before, same), "one point is noise")
+        self.assertFalse(rhythm.better(before, None))
+        self.assertTrue(rhythm.better(self._p(70, [1] * 12), self._p(50, [1] * 12)))
+
+    def test_the_repair_text_carries_the_measured_numbers_and_the_cure(self):
+        t = rhythm.repair_text(2, "never_rests", self._p(8, [1] * 12), 4.2)
+        self.assertIn("8%", t); self.assertIn("Scene 2", t); self.assertIn("NOTHING moves", t)
+        t = rhythm.repair_text(3, "mostly_still", self._p(68, [1] * 12), 0.1)
+        self.assertIn("68%", t); self.assertIn("camera", t)
+
+
+class RepairInTheBuild(unittest.TestCase):
+    """build_spec sends a scene back when the film never rests, keeps the fix only when it helps."""
+
+    def _run(self, profiles):
+        import json
+        from core.motion import generate
+        first = json.dumps({"project": {"width": 1080, "height": 1920, "fps": 30},
+                            "storyboard": [{"scene": i + 1, "seconds": 3, "job": "j", "caption": "", "subject": "s",
+                                            "look": "l", "motion": "m"} for i in range(3)]})
+        asked = []
+
+        def ask(prompt, expect=None):
+            asked.append(prompt)
+            return "```json\n" + json.dumps({"nodes": [{"id": "a", "type": "text", "content": "Hi", "position": [540, 900]}]}) + "\n```"
+
+        calls = iter(profiles)
+        spec = generate.build_spec(first, ask, check=lambda s: [], measure=lambda s: next(calls), skeleton=None)
+        return spec, asked
+
+    def _p(self, still):
+        return {"seconds": 9.0, "static_pct": still, "per_second": [3.0] * 9, "longest_hold": 0.3,
+                "holds_ge_1s": 0, "top10_share": 25.0, "luminance": [200.0, 240.0], "holds": []}
+
+    def test_a_film_that_never_rests_is_sent_back_and_a_real_fix_is_kept(self):
+        spec, asked = self._run([self._p(5), self._p(30)])
+        rhythm_asks = [a for a in asked if "finished film was measured" in a]
+        self.assertEqual(len(rhythm_asks), 1, "fixed on the first scene, band reached, so it stops")
+        self.assertIn("5%", rhythm_asks[0])
+
+    def test_a_fix_that_does_not_help_is_not_kept_and_the_pass_tries_the_next_scene(self):
+        spec, asked = self._run([self._p(5), self._p(5.5), self._p(5.5)])
+        self.assertEqual(len([a for a in asked if "finished film was measured" in a]), 2)
+
+    def test_a_film_inside_the_band_is_left_alone(self):
+        spec, asked = self._run([self._p(30)])
+        self.assertEqual([a for a in asked if "finished film was measured" in a], [])
+
+    def test_a_measure_that_fails_never_costs_the_film(self):
+        import json
+        from core.motion import generate
+        first = json.dumps({"project": {"width": 1080, "height": 1920, "fps": 30},
+                            "storyboard": [{"scene": i + 1, "seconds": 3, "job": "j", "caption": "", "subject": "s",
+                                            "look": "l", "motion": "m"} for i in range(2)]})
+        ask = lambda p, expect=None: "```json\n" + json.dumps({"nodes": [{"id": "a", "type": "text", "content": "Hi"}]}) + "\n```"
+
+        def boom(spec):
+            raise RuntimeError("no browser")
+
+        spec = generate.build_spec(first, ask, check=lambda s: [], measure=boom, skeleton=None)
+        self.assertEqual(len(spec["scenes"]), 2)
+
+
+if __name__ == "__main__":
+    unittest.main()

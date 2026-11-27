@@ -179,9 +179,13 @@ class Sending(Base):
 
 class MatchesServerSchema(Base):
     def test_every_kind_the_client_sends_is_accepted_by_the_server_model(self):
-        server = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "wt-server-ai")
-        if not os.path.isdir(server):
-            self.skipTest("server worktree not found at " + server)
+        root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        # the licence server checkout (it holds /v1/pulse since 2026-11); older names kept for old layouts
+        found = [os.path.join(root, d) for d in ("license_server", "wt-license-key", "wt-server-ai")
+                 if os.path.isfile(os.path.join(root, d, "app", "pulse.py"))]
+        if not found:
+            self.skipTest("licence server checkout with app/pulse.py not found under " + root)
+        server = found[0]
         sys.path.insert(0, server)
         try:
             from app.schemas import PulseEventIn

@@ -400,6 +400,7 @@ class MainWindow(QMainWindow):
         self._task_runs: list[dict] = []
         self._queue_stopped = False               # a licence refusal kills the rest
         self._auto_run = False                    # set once Start the work is pressed
+        self._lite_run = False                    # the simpler reel was chosen for the run being started
         # Plan AND start, no stop at the plan (owner, 19 Nov 2026: "dont
         # stop at plan just sent it directly", then for every way in). Set by
         # _route(); cleared on planning failure, cancel and reset.
@@ -2948,6 +2949,15 @@ class MainWindow(QMainWindow):
 
         skip_stages = sorted(dropped)
 
+        # A reel whose estimate is over the balance: ask, before anything is
+        # written or spent. Never a silent downgrade.
+        self._lite_run = False
+        if "Prism Studio" in run_agents.values():
+            choice = self._offer_simpler_reel()
+            if choice == "cancel":
+                return
+            self._lite_run = choice == "lite"
+
         # Pressing Start the work commits the whole queue, not just the plan on
         # screen. From here every later task plans and runs without stopping.
         # Armed only now, after every confirmation above has been answered:
@@ -2983,6 +2993,46 @@ class MainWindow(QMainWindow):
             worker.start()
             return
         self._authorize_and_start(run_agents, run_steps, skip_stages)
+
+    def _offer_simpler_reel(self) -> str:
+        """"lite", "full" or "cancel". Asked only when the plan's estimate is
+        over a balance the server has told us; an unknown balance is not
+        nagged about. The estimate is the plan's own (it undercounts the
+        design step), so the words say "about"."""
+        est = (self.routing or {}).get("_estimate") or {}
+        st = ai_server.status_now() if ai_server.active() else {}
+        have = st.get("balance_mc") if st.get("ready") else None
+        need = int(est.get("typical_mc") or 0)
+        if have is None or need <= 0 or need <= int(have):
+            return "full"
+        credits = lambda mc: max(1, round(int(mc) / 1000))      # noqa: E731
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Question)
+        box.setWindowTitle(i18n.t("Prism Studio"))
+        box.setText(i18n.t(
+            "This reel is estimated at about {need} credits and you have about "
+            "{have}. Make a simpler version that fits your credits?").format(
+            need=credits(need), have=credits(have)))
+        simple = int(est.get("simple_mc") or 0)
+        more = (i18n.t("The simpler version still writes the script and draws "
+                       "the pictures (about {n} credits), but skips the paid "
+                       "art-direction step and films a plain layout from them.")
+                .format(n=credits(simple)) if simple > 0 else
+                i18n.t("The simpler version still writes the script and draws "
+                       "the pictures, but skips the paid art-direction step "
+                       "and films a plain layout from them. It costs much less."))
+        if 0 < simple and simple > int(have):
+            more += " " + i18n.t("That may still be more than you have.")
+        box.setInformativeText(more)
+        lite_btn = box.addButton(i18n.t("Make a simpler version"), QMessageBox.AcceptRole)
+        full_btn = box.addButton(i18n.t("Continue with the full version"),
+                                 QMessageBox.ActionRole)
+        cancel_btn = box.addButton(i18n.t("Cancel"), QMessageBox.RejectRole)
+        box.setEscapeButton(cancel_btn)
+        box.exec()
+        clicked = box.clickedButton()
+        return ("lite" if clicked is lite_btn
+                else "full" if clicked is full_btn else "cancel")
 
     def _prompts_written(self, steps: list, run_agents: dict,
                          skip_stages: list, error: str = ""):
@@ -3060,7 +3110,9 @@ class MainWindow(QMainWindow):
         self.work_stack.setCurrentIndex(RUNNING)
         worker = AutomationWorker(self.routing, cfg_for_run, self.attachments,
                                   self._last_query, custom_stages=run_steps,
-                                  skip_stages=skip_stages)
+                                  skip_stages=skip_stages,
+                                  lite=getattr(self, "_lite_run", False))
+        self._lite_run = False              # one run only
         # Hold the machine awake for the duration. A run is tens of minutes
         # and the whole promise is that you walk away — a laptop that sleeps
         # halfway through takes the browser session with it.
@@ -3779,9 +3831,24 @@ class MainWindow(QMainWindow):
             self.output_panel.begin_turn(getattr(self, "_followup_text", ""))
         self._turn_begun = False
 
+    def _fresh_responses(self, responses: dict) -> dict:
+        """Only what THIS run produced. A follow-up's engine run is seeded
+        with the earlier answers, so when its step failed the old answer was
+        still in `responses` and was shown again as the new reply. A step
+        whose card failed here, or whose text is just the earlier one
+        unchanged, is not a reply."""
+        ok = {r["stage"] for r in self._stage_results if r.get("ok")}
+        failed = {r["stage"] for r in self._stage_results
+                  if not r.get("ok")} - ok
+        prior = (getattr(self, "_followup_responses", None) or {}
+                 if getattr(self, "_is_followup_run", False) else {})
+        return {s: t for s, t in (responses or {}).items()
+                if s not in failed
+                and (s in ok or s not in prior or prior[s] != t)}
+
     def _add_turn_result(self, responses: dict, links: dict, stopped: bool = False):
         """The run's answer and its files, as messages on the thread."""
-        stage, text = chatlog.latest_answer(responses)
+        stage, text = chatlog.latest_answer(self._fresh_responses(responses))
         if text:
             by = ai_server.display_agent(self._stage_agents.get(stage, ""), stage)
             bubble = self.output_panel.add_answer(text, by, stage)
@@ -3923,9 +3990,10 @@ class MainWindow(QMainWindow):
         return responses, links, artifact_paths
 
     def _submit_followup(self, text: str, file_paths: list, artifact_paths: list,
-                         responses: dict, links: dict):
+                         responses: dict, links: dict, forced: dict | None = None):
         """Carry out one follow-up: the words, the files that came with them,
-        and the files this task already made."""
+        and the files this task already made. `forced` ({"steps", "prompts",
+        "titles"}) skips the classifier and runs exactly those steps."""
         self._followup_text = text
         self._followup_responses = responses
         # Attachments = files the person just added + the active artifacts this task
@@ -3938,6 +4006,9 @@ class MainWindow(QMainWindow):
                 except Exception:                       # noqa: BLE001
                     pass
         self._followup_attachments = atts
+        if forced:
+            self._on_followup_routed(dict(forced, forced=True))
+            return
         # Explicit agent name WINS over auto-detect. "give it to Perplexity"
         # means the Perplexity step — not a guess, and not a silent fall-back
         # to "the last AI" when the Groq classify can't run. Only when no agent
@@ -4056,11 +4127,19 @@ class MainWindow(QMainWindow):
         responses = getattr(self, "_followup_responses", {})
         if not responses:
             return
+        plan = plan if isinstance(plan, dict) else {}
+        if plan.get("forced"):
+            forced = [s for s in (plan.get("steps") or []) if isinstance(s, str)]
+            self._set_stage("run")
+            self._start_followup_run(
+                forced, getattr(self, "_followup_attachments", []),
+                plan_agents={s: self._resolve_stage_agent(s) for s in forced},
+                prompts=plan.get("prompts"), titles=plan.get("titles"))
+            return
         if self._followup_as_local_file(responses):
             return
         links = getattr(self, "_followup_links", {}) or {}
         atts = getattr(self, "_followup_attachments", [])
-        plan = plan if isinstance(plan, dict) else {}
         steps = [s for s in (plan.get("steps") or []) if isinstance(s, str)]
         reel = self._studio_reel_in(links)
         saved_studio = (reel[2].get("_studio") or {}) if reel else {}
@@ -4199,6 +4278,23 @@ class MainWindow(QMainWindow):
                 self._turn_begun = False
                 self._save_thread(text)
                 return
+        if (chatlog.is_finish_request(text)
+                and chatlog.reel_did_not_finish(self.output_panel.thread_items())):
+            self._finish_reel(text, responses, links, sess)
+            return
+        picture = self._picture_stage_in(responses, links)
+        if picture and chatlog.is_change_request(text):
+            brief = self._previous_brief(turns, sess)
+            self.output_panel.add_note(i18n.t(
+                "Prism AI draws pictures from a description; it cannot edit "
+                "the picture you have. It will draw a new one from your "
+                "earlier request plus this change."))
+            self._submit_followup(
+                text, [], [], responses, links,
+                forced={"steps": [picture],
+                        "prompts": {picture: f"{brief}\n\nChange: {text}"},
+                        "titles": {picture: i18n.t("Redraw the picture")}})
+            return
         if not ai_server.active() or CB.contract.wants_file(text):
             primed = self._prime_followup_session(responses, links)
             if primed is None:
@@ -4209,6 +4305,87 @@ class MainWindow(QMainWindow):
             return
         self._read_files_then(file_paths, lambda atts: self._start_chat_reply(
             text, turns, atts))
+
+    def _finish_reel(self, text: str, responses: dict, links: dict, sess: dict):
+        """"Continue / finish / try again" on a reel that did not finish: film
+        it from the script and pictures this task already made. Never the text
+        writer, never a new picture or script call; a reel that cannot be
+        continued from what is on disk says so and asks for nothing."""
+        script = chatlog.saved_script(responses)
+        pictures = chatlog.saved_pictures(links, sess.get("artifacts_dir") or "")
+        if not script or not pictures:
+            self.output_panel.add_note(i18n.t(
+                "This reel's script and pictures are not all on this computer, "
+                "so it cannot be continued without drawing new ones. Nothing "
+                "was asked and no credits were used. Start the reel again "
+                "from the steps."), True)
+            self._chat_run = False
+            self._turn_begun = False
+            self._save_thread(text)
+            return
+        self.output_panel.add_note(i18n.t(
+            "Continuing your reel from the script and pictures already made. "
+            "No new pictures will be drawn."))
+        files = []
+        for p in pictures:
+            try:
+                rec = CB.files.attach(p)
+            except Exception:                               # noqa: BLE001
+                rec = {"path": p, "name": os.path.basename(p)}
+            files.append(dict(rec, kind="image", _generated=True))
+        # The failed attempt's own design/film answers are errors, not answers:
+        # carrying them would make the engine treat the design step as done.
+        kept = {k: v for k, v in responses.items()
+                if k not in ("design", "media", "followup")}
+        self._followup_responses = dict(
+            kept, content=[script],
+            artwork=responses.get("artwork") or [
+                i18n.t("{n} pictures already made.").format(n=len(pictures))])
+        maker = (self._stage_agents.get("artwork")
+                 or (self.cfg.get("agents") or {}).get("visual") or "Prism Image")
+        agents = {"content": self._resolve_stage_agent("content"),
+                  "artwork": maker,
+                  "design": (self._stage_agents.get("design")
+                             or self._stage_agents.get("brains") or "ChatGPT"),
+                  "media": "Prism Studio"}
+        self._set_stage("run")
+        self._start_followup_run(
+            ["content", "media"], [], plan_agents=agents,
+            prompts={"content": "Write the reel script.", "media": "Make the reel."},
+            titles={"content": i18n.t("Script (already written)"),
+                    "artwork": i18n.t("Pictures (already made)"),
+                    "design": i18n.t("Design the reel"),
+                    "media": i18n.t("Make the video")},
+            reuse_stages=["content", "artwork"], files_out=files)
+
+    _IMAGE_EXT = (".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp")
+
+    def _picture_stage_in(self, responses: dict, links: dict) -> str:
+        """The picture step, when the newest answer in the chat is a picture
+        and its image file is still on disk; "" otherwise."""
+        stage, _text = chatlog.latest_answer(responses)
+        if stage not in ("visual", "artwork"):
+            return ""
+        sess = getattr(self, "_followup_session", None) or {}
+        found = [links.get(stage) or ""]
+        folder = sess.get("artifacts_dir") or ""
+        if folder and os.path.isdir(folder):
+            found += [os.path.join(folder, n) for n in os.listdir(folder)]
+        for p in found:
+            if (isinstance(p, str) and p.lower().endswith(self._IMAGE_EXT)
+                    and os.path.isfile(p)):
+                return stage
+        return ""
+
+    def _previous_brief(self, turns: list, sess: dict) -> str:
+        """What the picture was asked for: the task as first asked, then each
+        earlier change the person made to it, so a second change does not
+        lose the first."""
+        users = [t.strip() for who, t in turns if who == "USER" and t.strip()]
+        base = (sess.get("query") or getattr(self, "_last_query", "")
+                or (users[0] if users else "")).strip()
+        later = [t for t in users if t != base and chatlog.is_change_request(t)]
+        return "\n\n".join([base] + [f"Change: {t}" for t in later]).strip()
 
     def _read_files_then(self, file_paths: list, then):
         """Read what was attached (a big PDF or sheet takes seconds) off the
@@ -4368,7 +4545,8 @@ class MainWindow(QMainWindow):
 
     def _start_followup_run(self, stages: list, attachments: list,
                             plan_agents: dict = None, then=None,
-                            prompts: dict = None, titles: dict = None):
+                            prompts: dict = None, titles: dict = None,
+                            reuse_stages: list = None, files_out: list = None):
         """Run the follow-up's steps — one, or a relay of several — reusing
         the run surface, so a follow-up shows and finishes like any other
         run (and can itself offer another follow-up when it completes).
@@ -4425,7 +4603,8 @@ class MainWindow(QMainWindow):
         worker = AutomationWorker(
             self.routing, cfg_for_run, attachments, self._followup_text,
             custom_stages=custom, resume_urls=resume or None, followup=True,
-            chatgpt_analysis=False, prior_responses=responses)
+            chatgpt_analysis=False, prior_responses=responses,
+            reuse_stages=reuse_stages, files_out=files_out)
         awake.acquire()
         self._active_run = worker
         worker.stage_event.connect(self._on_stage_event)
