@@ -36,6 +36,7 @@ def _tab_names() -> tuple:
 
 class WhatsAppWorkbench(QWidget):
     unreadChanged = Signal(int)
+    planChanged = Signal(object)            # the plan reply (usage/plan), each time it is read
 
     def __init__(self, cfg: dict, parent=None):
         super().__init__(parent)
@@ -73,6 +74,7 @@ class WhatsAppWorkbench(QWidget):
         have = set((reply or {}).get("features") or [])
         cat = (reply or {}).get("catalogue") or {}
         self._plan_reply = dict(reply or {})
+        self.planChanged.emit(self._plan_reply)
         was_locked = self._current in self._locked_tabs
         self._locked_tabs = []
         for idx, feature in _TAB_FEATURE.items():
@@ -88,6 +90,9 @@ class WhatsAppWorkbench(QWidget):
                          else i18n.t("Not part of your plan."))
         if self._current >= 0 and (was_locked or self._current in self._locked_tabs):
             self._select(self._current)             # the tab on screen just became locked, or unlocked
+
+    def plan_reply(self) -> dict:
+        return dict(self._plan_reply)
 
     def _sign_in_dialog(self):
         from addons.whatsapp.settings_sso import SignInDialog

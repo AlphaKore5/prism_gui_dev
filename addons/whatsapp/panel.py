@@ -38,8 +38,13 @@ class WhatsAppPanel(QWidget):
         root.setSpacing(0)
         self.broadcast_btn = C.button(i18n.t("New campaign"), "primary",
                                       on_click=self.new_broadcast)
+        # The plan this workspace is on, one click from every tab (the owner, 27-Nov-2026: "add a upgrade option on
+        # this part of the module.. so that he can directly see"): opens Compare plans.
+        self.plan_btn = C.button(i18n.t("Plans"), "secondary", icon_name="sparkles", on_click=self.show_plans)
+        self.plan_btn.setToolTip(i18n.t("See every plan and ask for a bigger one."))
         self.header = C.PageHeader(
             i18n.t(self.TITLE), i18n.t(self.BLURB), [
+                self.plan_btn,
                 C.button(i18n.t("AI tools"), "tertiary", icon_name="grid",
                          on_click=lambda: self.navigate.emit("agents")),
                 self.broadcast_btn])
@@ -77,7 +82,23 @@ class WhatsAppPanel(QWidget):
         # screen is not opened.
         from addons.whatsapp.workbench import WhatsAppWorkbench
         self._workbench = WhatsAppWorkbench(self.cfg, self)
+        self._workbench.planChanged.connect(self._on_plan)
         self._body_lay.addWidget(self._workbench)
+
+    def _on_plan(self, reply: dict) -> None:
+        """"Free · Upgrade" while there is a bigger plan; the plan's name alone on the top one."""
+        label = (reply or {}).get("label") or ""
+        if not label:
+            return
+        self.plan_btn.setText(i18n.t("{p} · Upgrade").format(p=label) if (reply or {}).get("next_plan")
+                              else i18n.t("{p} plan").format(p=label))
+
+    def show_plans(self):
+        if self._workbench is None:
+            self._build()
+        from addons.whatsapp.plan_compare import PlanCompareDialog
+        self._plans_dlg = PlanCompareDialog(self._workbench.plan_reply(), parent=self.window())
+        self._plans_dlg.open()
 
     def new_broadcast(self):
         if self._workbench is None:

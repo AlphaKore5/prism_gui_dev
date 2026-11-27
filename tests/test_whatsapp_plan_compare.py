@@ -207,6 +207,35 @@ class ALockedTabDoesNotOpen(TheTabsShowWhatThePlanLacks):
         self.assertEqual(wb._stack.currentIndex(), WB._SHOP)
 
 
+class TheHeaderNamesThePlanAndOpensThePlans(unittest.TestCase):
+    """27-Nov-2026, the owner: "add a upgrade option on this part of the module.. so that he can directly see"."""
+
+    def panel(self):
+        from addons.whatsapp import ui
+        from addons.whatsapp.panel import WhatsAppPanel
+        with mock.patch.object(ui, "call", lambda *a, **k: None):
+            p = WhatsAppPanel({})
+            p._build()
+        self.addCleanup(p.deleteLater)
+        return p
+
+    def test_the_button_says_the_plan_and_upgrade_while_there_is_a_bigger_one(self):
+        p = self.panel()
+        self.assertEqual(p.plan_btn.text(), "Plans")                       # before the plan is read
+        p._workbench._apply_plan(plan_reply("free") | {"label": "Free", "next_plan": "basic", "features": []})
+        self.assertEqual(p.plan_btn.text(), "Free · Upgrade")
+        p._workbench._apply_plan(plan_reply("enterprise") | {"label": "Enterprise", "next_plan": None, "features": []})
+        self.assertEqual(p.plan_btn.text(), "Enterprise plan")
+
+    def test_it_opens_compare_plans_with_the_workspaces_plan(self):
+        p = self.panel()
+        p._workbench._apply_plan(plan_reply("pro") | {"label": "Pro", "next_plan": "premium", "features": []})
+        opened = []
+        with mock.patch.object(PC.PlanCompareDialog, "open", lambda self_: opened.append(self_.current)):
+            p.plan_btn.click()
+        self.assertEqual(opened, ["pro"])
+
+
 class ThePlanPage(unittest.TestCase):
     def test_add_ons_and_extra_seats_are_named(self):
         from addons.whatsapp.settings_plan import addons_words
