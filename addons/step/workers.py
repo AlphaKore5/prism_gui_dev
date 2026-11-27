@@ -145,7 +145,11 @@ def _cheap_ask(cheap, report: dict, question: str, model: str,
     """step_cheap.ask(), with its fixed sentences in the app's language."""
     res = cheap.ask(report, question, licence_id=_licence_id(), model=model,
                     attachments=attachments, history=history)
-    if res.get("path") in ("capped", "unverified"):
+    if res.get("path") == "unverified" and res.get("answer"):
+        res = dict(res, text=(cheap.WARNING_MARK
+                              + i18n.t(cheap.UNVERIFIED_WARNING)
+                              + "\n\n" + res["answer"]))
+    elif res.get("path") in ("capped", "unverified"):
         res = dict(res, text=i18n.t(res["text"]))
     return res
 

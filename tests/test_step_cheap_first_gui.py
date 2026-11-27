@@ -6,6 +6,7 @@ in for ai_client.chat that records which role was called, so nothing is paid
 for and no network is used. HOME is a sandbox (the cap file and the answer log
 live under ~/.prism), so the real ~/.prism is never touched.
 """
+import glob
 import json
 import os
 import sys
@@ -25,6 +26,7 @@ except ImportError:                                     # pragma: no cover
     cq = None
 
 SC = CB.get_step_cheap()
+SAVE_RUN = CB.config.save_run          # the real one, for the tests that read it back
 SF = CB.get_stepfile()
 
 from PySide6.QtWidgets import QApplication  # noqa: E402
@@ -151,13 +153,14 @@ class EachPathAnswersAndIsNamedInPlainWords(_Base):
         self.assertEqual(self.roles, [SC.ROLE_FAST, SC.ROLE_ESCALATE])
         self.assertEqual(path_label(out["answered"][0]), "Full check")
 
-    def test_an_answer_that_never_checks_out_says_so_and_proposes_nothing(self):
+    def test_an_answer_that_never_checks_out_is_shown_with_a_warning(self):
         self.replies = [LIE, LIE]
         out = self.run_ask(NEEDS_AI)
         self.assertEqual(len(self.roles), 2)
         self.assertEqual(path_label(out["answered"][0]), "Could not be verified")
         self.assertEqual(out["answered"][0]["plan"]["changes"], [])
-        self.assertIn("could not verify", out["done"][0])
+        self.assertIn(SC.UNVERIFIED_WARNING, out["done"][0])
+        self.assertIn(GOOD["answer"], out["done"][0])
 
     def test_no_label_names_a_model(self):
         for text in ("Measured from the file", "Quick check", "Full check",
@@ -245,7 +248,7 @@ class ThePlanReusesTheAnswerInsteadOfAskingAgain(_Base):
         out = self.run_plan(NEEDS_AI)
         plan, _ = SF.parse_plan(out["done"])
         self.assertEqual(plan["changes"], [])
-        self.assertIn("could not verify", plan["advice"][0])
+        self.assertIn(SC.UNVERIFIED_WARNING, plan["advice"][0])
 
 
 class AFollowUpIsJudgedOnWhatThePersonJustTyped(_Base):
@@ -568,6 +571,55 @@ class FollowUpsCarryTheEarlierChat(_WithDrawing):
         self.assertEqual(len(self.dlg._load_conversation(self.m)), 6)
 
 
+class AnUnverifiedAnswerIsShownWithAWarning(_Dialog):
+
+    def setUp(self):
+        super().setUp()
+        self.addCleanup(i18n.load, "en")
+        # The chat is drawn from the saved run, so save for real, into the
+        # suite's throwaway runs folder (conftest points RUNS_DIR there), and
+        # have History read that same folder.
+        self.assertTrue(CB.config.RUNS_DIR.startswith(tempfile.gettempdir()))
+        for p in (mock.patch.object(CB.config, "save_run", SAVE_RUN),
+                  mock.patch.object(
+                      SD.DATA, "_run_files", lambda cfg: sorted(
+                          glob.glob(os.path.join(CB.config.RUNS_DIR, "*.json")),
+                          reverse=True))):
+            p.start()
+            self.addCleanup(p.stop)
+        self.dlg._session_key = os.path.basename(self.home)   # as Generate sets it
+
+    def _seen(self):
+        from addons.step import workbench as WB
+        self.dlg._show_tab(1)
+        _app.processEvents()
+        return "\n".join(w.toPlainText()
+                         for w in self.dlg.findChildren(WB._Markdown))
+
+    def test_the_paid_answer_and_the_warning_are_both_on_screen(self):
+        self.replies = [LIE, LIE]
+        self._ask(NEEDS_AI, action="edit")
+        self.assertEqual(self._who(), "Could not be verified")
+        seen = self._seen()
+        self.assertIn("did not pass Prism's checks", seen)
+        self.assertIn("Enlarge H2 from", seen)
+        self.assertEqual(self.dlg._current["plan"]["changes"], [])
+        self.assertFalse(self.dlg.plan_panel.bar.isVisibleTo(self.dlg.plan_panel))
+
+    def test_the_sonnet_pick_shows_it_too_in_gujarati(self):
+        i18n.load("gu")
+        self.dlg.model_combo.setCurrentIndex(
+            self.dlg.model_combo.findData("Claude Sonnet 5.5"))
+        self.replies = [LIE]
+        self._ask(NEEDS_AI, action="edit")
+        self.assertEqual(len(self.roles), 1)
+        warning = i18n.t(SC.UNVERIFIED_WARNING)
+        self.assertNotEqual(warning, SC.UNVERIFIED_WARNING)
+        self.assertIn(warning, self.dlg._thread[-1][1])
+        self.assertIn(GOOD["answer"], self.dlg._thread[-1][1])
+        self.assertIn("Enlarge H2 from", self._seen())
+
+
 class InTheAppsLanguage(_Dialog):
 
     def setUp(self):
@@ -580,7 +632,7 @@ class InTheAppsLanguage(_Dialog):
             for english in ("Measured from the file", "Quick check",
                             "Full check", "Could not be verified",
                             SC.CAP_MESSAGE_DAY, SC.CAP_MESSAGE_MONTH,
-                            SC.UNVERIFIED_MESSAGE):
+                            SC.UNVERIFIED_MESSAGE, SC.UNVERIFIED_WARNING):
                 self.assertNotEqual(i18n.t(english), english, (code, english))
 
     def test_the_screen_shows_the_label_and_the_limit_in_hindi(self):

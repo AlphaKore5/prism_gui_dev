@@ -239,6 +239,7 @@ EXTRA = [
     "You have reached today's limit of AI-assisted STEP files. Measurements, sizes, hole counts and simple edits still work and are free. AI suggestions are available again tomorrow.",
     "You have reached this month's limit of AI-assisted STEP files. Measurements, sizes, hole counts and simple edits still work and are free. AI suggestions are available again next month.",
     "Prism could not verify an AI answer against the measurements of this file, so it is not shown and no change is proposed. Sizes, hole counts and part names can still be asked directly.",
+    "Could not be verified: this answer did not pass Prism's checks against the measurements of this file. Check every figure before using it. No change is proposed.",
 ]
 
 

@@ -297,7 +297,8 @@
   "Could not be verified": "ખાતરી થઈ શકી નહીં",
   "You have reached today's limit of AI-assisted STEP files. Measurements, sizes, hole counts and simple edits still work and are free. AI suggestions are available again tomorrow.": "તમે AI ની મદદવાળી STEP ફાઇલોની આજની મર્યાદા સુધી પહોંચી ગયા છો. માપ, કદ, છિદ્રોની ગણતરી અને સરળ ફેરફારો હજી પણ ચાલે છે અને મફત છે. AI સૂચનો આવતીકાલે ફરી મળશે.",
   "You have reached this month's limit of AI-assisted STEP files. Measurements, sizes, hole counts and simple edits still work and are free. AI suggestions are available again next month.": "તમે AI ની મદદવાળી STEP ફાઇલોની આ મહિનાની મર્યાદા સુધી પહોંચી ગયા છો. માપ, કદ, છિદ્રોની ગણતરી અને સરળ ફેરફારો હજી પણ ચાલે છે અને મફત છે. AI સૂચનો આવતા મહિને ફરી મળશે.",
-  "Prism could not verify an AI answer against the measurements of this file, so it is not shown and no change is proposed. Sizes, hole counts and part names can still be asked directly.": "Prism આ ફાઇલનાં માપ સાથે AI ના જવાબની ખાતરી કરી શક્યું નથી, તેથી તે બતાવ્યો નથી અને કોઈ ફેરફાર સૂચવ્યો નથી. કદ, છિદ્રોની ગણતરી અને પાર્ટનાં નામ હજી પણ સીધાં પૂછી શકાય છે."
+  "Prism could not verify an AI answer against the measurements of this file, so it is not shown and no change is proposed. Sizes, hole counts and part names can still be asked directly.": "Prism આ ફાઇલનાં માપ સાથે AI ના જવાબની ખાતરી કરી શક્યું નથી, તેથી તે બતાવ્યો નથી અને કોઈ ફેરફાર સૂચવ્યો નથી. કદ, છિદ્રોની ગણતરી અને પાર્ટનાં નામ હજી પણ સીધાં પૂછી શકાય છે.",
+  "Could not be verified: this answer did not pass Prism's checks against the measurements of this file. Check every figure before using it. No change is proposed.": "ખાતરી થઈ શકી નહીં: આ જવાબ આ ફાઇલનાં માપ સાથે Prism ની તપાસમાં પાસ થયો નથી. વાપરતાં પહેલાં દરેક આંકડો તપાસો. કોઈ ફેરફાર સૂચવ્યો નથી."
  },
- "count": 296
+ "count": 297
 }
