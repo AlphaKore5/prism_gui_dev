@@ -579,7 +579,9 @@ class AnUnverifiedAnswerIsShownWithAWarning(_Dialog):
         # The chat is drawn from the saved run, so save for real, into the
         # suite's throwaway runs folder (conftest points RUNS_DIR there), and
         # have History read that same folder.
-        self.assertTrue(CB.config.RUNS_DIR.startswith(tempfile.gettempdir()))
+        norm = lambda p: os.path.normcase(os.path.realpath(p))      # noqa: E731  Windows: short names, case
+        self.assertTrue(norm(CB.config.RUNS_DIR).startswith(norm(tempfile.gettempdir())),
+                        (CB.config.RUNS_DIR, tempfile.gettempdir()))
         for p in (mock.patch.object(CB.config, "save_run", SAVE_RUN),
                   mock.patch.object(
                       SD.DATA, "_run_files", lambda cfg: sorted(
