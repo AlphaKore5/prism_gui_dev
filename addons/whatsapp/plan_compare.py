@@ -12,7 +12,7 @@ console), and the plan changes when the operator grants it.
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QLabel, QWidget
+from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 import i18n
 import theme
@@ -251,6 +251,62 @@ class UpgradePrompt(PrismDialog):
         self.ask_btn.setEnabled(False)
         self.note.set(i18n.t("Sending your request…"))
         ui.call(self, "plan/request", {"want": want, "note": i18n.t("Asked when a feature was locked")},
+                done=lambda r: self.note.ok(i18n.t("Asked. Alphakore will be in touch to switch it on.")),
+                failed=lambda m, _d: (self.ask_btn.setEnabled(True), self.note.error(m)))
+
+
+class LockedTab(QWidget):
+    """What a tab the plan does not include shows instead of its page (the owner, 27-Nov-2026: a locked tab must
+    not open — "see i can still check and use these"): what it is, which plan has it, and the way there."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(theme.SPACE_5, theme.SPACE_5, theme.SPACE_5, theme.SPACE_5)
+        self.state = C.EmptyState("lock", "", "")
+        lay.addWidget(self.state, 1)
+        row = QHBoxLayout()
+        row.addStretch(1)
+        self.compare_btn = C.button(i18n.t("Compare plans"), "secondary", on_click=self._compare)
+        self.ask_btn = C.button("", "primary", on_click=self._ask)
+        row.addWidget(self.compare_btn)
+        row.addWidget(self.ask_btn)
+        row.addStretch(1)
+        self.state.content_layout.addLayout(row)
+        self.note = ui.note()
+        self.note.setAlignment(Qt.AlignCenter)
+        self.state.content_layout.addWidget(self.note)
+        self.plan_reply: dict = {}
+        self.feature = ""
+
+    def show_for(self, tab_name: str, feature: str, plan_reply: dict) -> None:
+        self.feature, self.plan_reply = feature, dict(plan_reply or {})
+        where = lowest_plan_label(feature, self.plan_reply.get("catalogue")) or i18n.t("a bigger plan")
+        self.state.set_text(i18n.t("{t} is part of {p}").format(t=tab_name, p=where),
+                            i18n.t("Your plan does not include it. Compare the plans, or ask Alphakore to switch "
+                                   "you to {p}.").format(p=where))
+        self.ask_btn.setText(i18n.t("Ask for {p}").format(p=where))
+        self.ask_btn.setEnabled(True)
+        self.note.clear_note()
+
+    def _plan_key(self) -> str:
+        for t in (self.plan_reply.get("catalogue") or {}).get("tiers") or []:
+            if self.feature in (t.get("features") or []):
+                return t.get("plan") or ""
+        return ""
+
+    def _compare(self):
+        self._dlg = PlanCompareDialog(self.plan_reply, parent=self.window())
+        self._dlg.open()
+
+    def _ask(self):
+        plan = self._plan_key()
+        if not plan:
+            self._compare()
+            return
+        self.ask_btn.setEnabled(False)
+        self.note.set(i18n.t("Sending your request…"))
+        ui.call(self, "plan/request", {"want": {"plan": plan}, "note": i18n.t("Asked from a locked tab")},
                 done=lambda r: self.note.ok(i18n.t("Asked. Alphakore will be in touch to switch it on.")),
                 failed=lambda m, _d: (self.ask_btn.setEnabled(True), self.note.error(m)))
 

@@ -52,6 +52,12 @@ class WhatsAppWorkbench(QWidget):
         self._stack.setStyleSheet("QStackedWidget { background: transparent; }")
         for _ in range(len(_tab_names())):
             self._stack.addWidget(QWidget())        # placeholders, replaced on first open
+        # What a tab the plan does not include shows instead of its page (plan_compare.LockedTab).
+        from addons.whatsapp.plan_compare import LockedTab
+        self._locked_page = LockedTab()
+        self._stack.addWidget(self._locked_page)
+        self._locked_tabs: list = []
+        self._plan_reply: dict = {}
         root.addWidget(self._stack, 1)
         self._signing_in = False
         from addons.whatsapp import sso_state
@@ -66,6 +72,8 @@ class WhatsAppWorkbench(QWidget):
         from widgets import icons
         have = set((reply or {}).get("features") or [])
         cat = (reply or {}).get("catalogue") or {}
+        self._plan_reply = dict(reply or {})
+        was_locked = self._current in self._locked_tabs
         self._locked_tabs = []
         for idx, feature in _TAB_FEATURE.items():
             b = self._tab_buttons[idx]
@@ -78,6 +86,8 @@ class WhatsAppWorkbench(QWidget):
             where = lowest_plan_label(feature, cat)
             b.setToolTip(i18n.t("Part of {p} — your plan does not include it.").format(p=where) if where
                          else i18n.t("Not part of your plan."))
+        if self._current >= 0 and (was_locked or self._current in self._locked_tabs):
+            self._select(self._current)             # the tab on screen just became locked, or unlocked
 
     def _sign_in_dialog(self):
         from addons.whatsapp.settings_sso import SignInDialog
@@ -207,10 +217,14 @@ class WhatsAppWorkbench(QWidget):
         if prev is not None and hasattr(prev, "deactivate"):
             prev.deactivate()                  # a page that refreshes itself stops when it is left
         self._current = index
-        page = self._page(index)
-        self._stack.setCurrentIndex(index)
         for k, b in enumerate(self._tab_buttons):
             self._style_tab(b, k == index)
+        if index in self._locked_tabs:              # not on this plan: say so, and the way there, instead of the page
+            self._locked_page.show_for(_tab_names()[index], _TAB_FEATURE[index], self._plan_reply)
+            self._stack.setCurrentWidget(self._locked_page)
+            return
+        page = self._page(index)
+        self._stack.setCurrentIndex(index)
         page.activate()
 
     def _use_template(self, name: str):

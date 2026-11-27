@@ -170,6 +170,43 @@ class TheTabsShowWhatThePlanLacks(unittest.TestCase):
         self.assertEqual(wb._tab_buttons[WB._SHOP].toolTip(), "")
 
 
+class ALockedTabDoesNotOpen(TheTabsShowWhatThePlanLacks):
+    """27-Nov-2026, the owner on a Free workspace: "see i can still check and use these". A locked tab shows what it
+    is and which plan has it, instead of its page."""
+
+    def free(self, wb):
+        cat = demo_usage.catalogue()
+        wb._apply_plan({"features": next(t for t in cat["tiers"] if t["plan"] == "free")["features"], "catalogue": cat})
+
+    def test_a_locked_tab_shows_the_upgrade_screen_and_never_builds_its_page(self):
+        wb, WB = self.bench()
+        self.free(wb)
+        wb._select(WB._SHOP)
+        self.assertIs(wb._stack.currentWidget(), wb._locked_page)
+        self.assertNotIn(WB._SHOP, wb._pages)                       # the Shop page was never built
+        self.assertIn("Shop is part of Pro", wb._locked_page.state.title.text())
+        self.assertEqual(wb._locked_page.ask_btn.text(), "Ask for Pro")
+
+    def test_asking_from_the_locked_tab_requests_that_plan(self):
+        wb, WB = self.bench()
+        self.free(wb)
+        wb._select(WB._CAMPAIGNS)
+        sent = []
+        with mock.patch.object(PC.ui, "call", lambda owner, route, data=None, **kw: sent.append((route, data))):
+            wb._locked_page.ask_btn.click()
+        self.assertEqual(sent, [("plan/request", {"want": {"plan": "basic"}, "note": "Asked from a locked tab"})])
+
+    def test_a_bigger_plan_opens_the_tab_on_screen_again(self):
+        wb, WB = self.bench()
+        self.free(wb)
+        with mock.patch.object(WB.WhatsAppWorkbench, "_page", lambda self_, i: self_._stack.widget(i)),                 mock.patch("PySide6.QtWidgets.QWidget.activate", create=True, new=lambda self_: None):
+            wb._select(WB._SHOP)
+            cat = demo_usage.catalogue()
+            wb._apply_plan({"features": next(t for t in cat["tiers"] if t["plan"] == "pro")["features"], "catalogue": cat})
+        self.assertIsNot(wb._stack.currentWidget(), wb._locked_page)
+        self.assertEqual(wb._stack.currentIndex(), WB._SHOP)
+
+
 class ThePlanPage(unittest.TestCase):
     def test_add_ons_and_extra_seats_are_named(self):
         from addons.whatsapp.settings_plan import addons_words
