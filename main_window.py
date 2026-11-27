@@ -4220,7 +4220,7 @@ class MainWindow(QMainWindow):
                     shown["artwork"] = maker
                 shown.update({"design": agent, "media": "Prism Studio"})
                 self._start_followup_run(
-                    ordinary, atts, plan_agents=shown,
+                    ordinary, atts, plan_agents=shown, film="reel",
                     then=lambda r, l: self._continue_studio_followup(
                         r, l, reel, design_url, agent, atts, images))
             else:
@@ -4578,7 +4578,8 @@ class MainWindow(QMainWindow):
     def _start_followup_run(self, stages: list, attachments: list,
                             plan_agents: dict = None, then=None,
                             prompts: dict = None, titles: dict = None,
-                            reuse_stages: list = None, files_out: list = None):
+                            reuse_stages: list = None, files_out: list = None,
+                            film: str = ""):
         """Run the follow-up's steps — one, or a relay of several — reusing
         the run surface, so a follow-up shows and finishes like any other
         run (and can itself offer another follow-up when it completes).
@@ -4636,7 +4637,7 @@ class MainWindow(QMainWindow):
             self.routing, cfg_for_run, attachments, self._followup_text,
             custom_stages=custom, resume_urls=resume or None, followup=True,
             chatgpt_analysis=False, prior_responses=responses,
-            reuse_stages=reuse_stages, files_out=files_out)
+            reuse_stages=reuse_stages, files_out=files_out, film=film)
         awake.acquire()
         self._active_run = worker
         worker.stage_event.connect(self._on_stage_event)

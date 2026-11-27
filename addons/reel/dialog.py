@@ -362,7 +362,7 @@ class ReelDialog(PrismDialog):
         self._worker = AutomationWorker(
             {}, self.cfg, self.images, f"write a reel script — {request}",
             custom_stages=[("script", agents[writer], [prompt])],
-            chatgpt_analysis=False)
+            chatgpt_analysis=False, film="reel")
         self._worker.done.connect(self._on_script)
         self._worker.failed.connect(self._on_failed)
         self._worker.start()
