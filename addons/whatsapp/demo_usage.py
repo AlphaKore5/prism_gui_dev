@@ -23,15 +23,58 @@ EVENTS = {"message.received": "A customer sent a message", "message.status": "A 
           "contact.opt_out": "A contact opted out", "template.status": "Meta approved, rejected or changed a template",
           "flow.response": "A customer finished a form or flow", "payment.status": "A payment was made, failed or refunded"}
 TIER_LIMITS = {"TIER_50": 50, "TIER_250": 250, "TIER_1K": 1000, "TIER_2K": 2000, "TIER_10K": 10000, "TIER_100K": 100000, "TIER_UNLIMITED": None}
-LIMITS = {"basic": {"tags": 10, "attributes": 5, "segments": 2, "agents": 6, "mps": 40, "webhooks": 0, "flows": 0, "ai_messages": 0, "storage_mb": 1024},
+LIMITS = {"free": {"tags": 10, "attributes": 5, "segments": 0, "agents": 1, "mps": 40, "webhooks": 0, "flows": 0, "ai_messages": 0, "storage_mb": 1024},
+          "basic": {"tags": 10, "attributes": 5, "segments": 2, "agents": 6, "mps": 40, "webhooks": 0, "flows": 0, "ai_messages": 0, "storage_mb": 1024},
           "pro": {"tags": 100, "attributes": 20, "segments": 10, "agents": 6, "mps": 40, "webhooks": 0, "flows": 5, "ai_messages": 0, "storage_mb": 5120},
           "premium": {"tags": 250, "attributes": 50, "segments": 50, "agents": 10, "mps": 250, "webhooks": 1, "flows": 20, "ai_messages": 1000, "storage_mb": 5120},
           "unlimited": {"tags": 500, "attributes": 100, "segments": 50, "agents": 201, "mps": 1000, "webhooks": 3, "flows": 50, "ai_messages": 5000, "storage_mb": 10240}}
-ORDER = ("basic", "pro", "premium", "unlimited")
-LABELS = {"basic": "Basic", "pro": "Pro", "premium": "Premium", "unlimited": "Unlimited"}
+ORDER = ("free", "basic", "pro", "premium", "unlimited")
+LABELS = {"free": "Free", "basic": "Basic", "pro": "Pro", "premium": "Premium", "unlimited": "Unlimited"}
+# The catalogue prism-wa's plans.catalogue() returns (27-Nov-2026), for the Compare plans screen in demo mode. A copy:
+# demo mode is stdlib-only and never talks to prism-wa. Flows and AI replies come with the add-ons, not a tier.
+_TIER_FEATURES = {
+    "free": ["ads_manager", "integrations"],
+    "basic": ["broadcast", "multi_agent", "transfer", "template_api", "ads_manager", "integrations"],
+}
+_TIER_FEATURES["pro"] = _TIER_FEATURES["basic"] + ["scheduler", "csv_scheduler", "click_tracking", "budget_analytics", "project_api",
+                                                  "agent_rules", "access_control", "auto_retry", "flow_delay", "commerce", "forms"]
+_TIER_FEATURES["premium"] = _TIER_FEATURES["pro"] + ["number_masking", "reports_download", "template_ttl", "webhooks", "duplicate_csv",
+                                                    "multi_ad_flow", "priority_support", "turbo_onboarding"]
+_TIER_FEATURES["unlimited"] = _TIER_FEATURES["premium"] + ["dedicated_manager"]
+_TIER_FEATURES["enterprise"] = _TIER_FEATURES["unlimited"] + ["sso", "audit_log", "sla_support"]
+_FEATURE_LABELS = (
+    ("broadcast", "Broadcasting & retargeting"), ("multi_agent", "Multi-agent live chat"), ("transfer", "Agent transfer & manager monitoring"),
+    ("template_api", "Template message APIs"), ("ads_manager", "Click-to-WhatsApp ads manager"),
+    ("integrations", "Shopify, WooCommerce & other integrations"), ("scheduler", "Campaign scheduler"), ("csv_scheduler", "CSV campaign scheduler"),
+    ("click_tracking", "Campaign click tracking"), ("budget_analytics", "Campaign budget & analytics"), ("project_api", "Project APIs"),
+    ("agent_rules", "Custom agent rules"), ("access_control", "User access control"), ("auto_retry", "Automatic failed-message retry"),
+    ("flow_delay", "Time delay & timeout in chatbot flows"), ("commerce", "Shop, catalog & payments"), ("forms", "WhatsApp forms"),
+    ("number_masking", "Number masking"), ("reports_download", "Download reports"), ("template_ttl", "Template TTL"), ("webhooks", "Webhooks"),
+    ("duplicate_csv", "Duplicate contacts in a CSV broadcast"), ("multi_ad_flow", "Several ads into one chatbot flow"),
+    ("priority_support", "Priority support"), ("turbo_onboarding", "Turbo onboarding"), ("dedicated_manager", "Dedicated account manager"),
+    ("sso", "Company sign-in (SSO)"), ("audit_log", "Audit log"), ("sla_support", "SLA-backed support"))
+_LIMIT_LABELS = (("agents", "Agent seats (with the owner)"), ("mps", "Messages a second"), ("tags", "Tags"), ("attributes", "Custom attributes"),
+                 ("segments", "Audience segments"), ("webhooks", "Webhooks"), ("storage_mb", "Media storage (MB)"))
+_PRICES = {"free": 0, "basic": 1500, "pro": 3200, "premium": 9100, "unlimited": 45000, "enterprise": None}
+_TAGLINES = {"free": "WhatsApp API free for life", "basic": "Get started fast", "pro": "Growth marketer", "premium": "Expert marketer",
+             "unlimited": "Everything, no limits", "enterprise": "Built for your scale"}
+
+
+def catalogue() -> dict:
+    tiers = []
+    for p in ORDER + ("enterprise",):
+        lim = LIMITS.get(p) or {k: None for k, _ in _LIMIT_LABELS}
+        tiers.append({"plan": p, "label": LABELS.get(p, "Enterprise"), "tagline": _TAGLINES[p], "price": _PRICES[p],
+                      "limits": {k: lim.get(k) for k, _ in _LIMIT_LABELS}, "features": [f for f, _ in _FEATURE_LABELS if f in _TIER_FEATURES[p]]})
+    return {"tiers": tiers, "features": [{"key": k, "label": v} for k, v in _FEATURE_LABELS],
+            "limits": [{"key": k, "label": v} for k, v in _LIMIT_LABELS],
+            "addons": [{"addon": "chatbot", "label": "Chatbot flows", "price": 2500, "features": ["flows"], "limits": {"flows": 5}},
+                       {"addon": "ai_agent", "label": "AI agent", "price": 1350, "features": ["ai_agent"], "limits": {"ai_messages": 1000}},
+                       {"addon": "seat", "label": "Extra agent seat", "price": 750, "features": [], "limits": {"agents": 1}}],
+            "billing_discount": {"monthly": 0, "quarterly": 5, "yearly": 10}, "currency": "INR"}
 VERTICALS = ("UNDEFINED", "OTHER", "AUTO", "BEAUTY", "APPAREL", "EDU", "ENTERTAIN", "EVENT_PLAN", "FINANCE", "GROCERY", "GOVT", "HOTEL", "HEALTH",
              "NONPROFIT", "PROF_SERVICES", "RETAIL", "TRAVEL", "RESTAURANT", "NOT_A_BIZ")
-_ROUTES = ("usage/", "reports/", "numbers/limits", "numbers/refresh", "profile/", "webhooks/", "inbox/changes")
+_ROUTES = ("usage/", "plan/", "reports/", "numbers/limits", "numbers/refresh", "profile/", "webhooks/", "inbox/changes")
 
 
 def _now() -> datetime:
@@ -147,7 +190,22 @@ def _campaigns(p: dict) -> list:
 
 
 def _plan(p: dict) -> str:
-    return p.get("plan") or "premium"
+    """The demo workspace's plan. PRISM_WHATSAPP_DEMO_PLAN picks another (free, basic, pro...), to see a plan's locks
+    without a server; demo mode itself never runs in a frozen build (demo.enabled)."""
+    import os
+    want = (os.environ.get("PRISM_WHATSAPP_DEMO_PLAN") or "").strip().lower()
+    return p.get("plan") or (want if want in LIMITS else "") or "premium"
+
+
+def _demo_addons(p: dict) -> list:
+    """The demo workspace's add-ons: PRISM_WHATSAPP_DEMO_ADDONS="chatbot,ai_agent" (or "none"), else both."""
+    import os
+    if p.get("addons") is not None:
+        return list(p["addons"])
+    raw = os.environ.get("PRISM_WHATSAPP_DEMO_ADDONS")
+    if raw is None:
+        return ["chatbot", "ai_agent"]
+    return [a for a in (x.strip() for x in raw.split(",")) if a in ("chatbot", "ai_agent")]
 
 
 def _csv(header: list, rows: list) -> str:
@@ -156,6 +214,14 @@ def _csv(header: list, rows: list) -> str:
     w.writerow(header)
     w.writerows(rows)
     return buf.getvalue()
+
+
+def _features(p: dict) -> list:
+    """The plan's features as prism-wa's plans.features_of gives them: the tier's, plus its add-ons'."""
+    out = list(_TIER_FEATURES.get(_plan(p), ()))
+    addons = _demo_addons(p)
+    out += [f for a, f in (("chatbot", "flows"), ("ai_agent", "ai_agent")) if a in addons]
+    return sorted(set(out))
 
 
 def _plan_view(p: dict) -> dict:
@@ -169,7 +235,8 @@ def _plan_view(p: dict) -> dict:
     nxt = next((x for x in ORDER[ORDER.index(plan) + 1:]), None)
     return {"plan": plan, "label": LABELS[plan], "limits": [{"key": k, "limit": limits.get(k), "used": used.get(k, 0)} for k in
                                                           ("agents", "tags", "attributes", "segments", "flows", "webhooks", "ai_messages", "storage_mb", "mps")],
-            "features": ["broadcast", "scheduler", "reports_download"] if plan in ("premium", "unlimited") else ["broadcast"], "next_plan": nxt,
+            "features": _features(p), "next_plan": nxt,
+            "addons": _demo_addons(p), "extra_seats": int(p.get("extra_seats") or 0), "catalogue": catalogue(),
             "month": {"label": now.strftime("%B %Y"), "totals": month["totals"], "by_category": month["by_category"]}, "storage": q,
             "ai": {"replies": 212, "limit": limits["ai_messages"], "configured": True, "month": now.strftime("%Y-%m")}, "rates": month["rates"], "gst": GST,
             "is_estimate": True}
@@ -184,6 +251,11 @@ def handle(route: str, d: dict, p: dict, s: dict):
         return _usage(p, *_range(d))
     if route == "usage/plan":
         return _plan_view(p)
+    if route == "plan/request":                       # demo: pretend Alphakore got it
+        want = d.get("want") or {}
+        name = " + ".join(([LABELS.get(want.get("plan"), want.get("plan", "").title())] if want.get("plan") else [])
+                          + [{"chatbot": "Chatbot flows", "ai_agent": "AI agent"}.get(a, a) for a in want.get("addons") or []])
+        return {"request": {"id": 1, "offer_name": "WhatsApp " + (name or "upgrade"), "kind": "wa_plan", "status": "new"}, "created": True}
     if route in ("usage/rates", "usage/rates_save"):
         if route == "usage/rates_save":
             for k, v in (d.get("rates") or {}).items():

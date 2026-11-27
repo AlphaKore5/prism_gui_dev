@@ -26,6 +26,9 @@ def call(owner, route: str, data: dict = None, *, done=None, failed=None):
     w = PlatformWorker(route, data)
     if done is not None:
         w.done.connect(done)
+    # A plan refusal (the server's plan_feature / plan_limit) also offers the way to the plan or add-on that has it —
+    # one prompt for every screen (plan_compare.offer_upgrade; the owner, 27-Nov-2026: plans "like aisensy").
+    w.failed.connect(lambda m, d, o=owner: _offer_upgrade(o, m, d))
     if failed is not None:
         w.failed.connect(failed)
     elif hasattr(owner, "say"):
@@ -37,6 +40,12 @@ def call(owner, route: str, data: dict = None, *, done=None, failed=None):
         finished.connect(lambda w=w: keep.remove(w) if w in keep else None)
     w.start()
     return w
+
+
+def _offer_upgrade(owner, message: str, detail) -> None:
+    if isinstance(detail, dict) and detail.get("reason") in ("plan_feature", "plan_limit"):
+        from addons.whatsapp import plan_compare
+        plan_compare.offer_upgrade(owner, message, detail)
 
 
 def note(text: str = "") -> "NoteLabel":

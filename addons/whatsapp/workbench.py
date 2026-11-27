@@ -11,6 +11,7 @@ whether this is live, demo data, or unreachable.
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (QFrame, QHBoxLayout, QPushButton, QStackedWidget,
                                QVBoxLayout, QWidget)
 
@@ -20,6 +21,9 @@ from addons.whatsapp import demo
 from widgets import controls as C
 
 _INBOX, _CONTACTS, _TEMPLATES, _CAMPAIGNS, _AUTOMATIONS, _ADS, _SHOP, _FORMS, _ANALYTICS, _SETTINGS = range(10)
+# The plan feature a whole tab is about. A tab the plan does not include shows a lock and says which plan has it
+# (the owner, 27-Nov-2026: plans "like aisensy"); it still opens, and anything locked in it offers the upgrade.
+_TAB_FEATURE = {_CAMPAIGNS: "broadcast", _SHOP: "commerce", _FORMS: "forms"}
 
 
 def _tab_names() -> tuple:
@@ -32,6 +36,7 @@ def _tab_names() -> tuple:
 
 class WhatsAppWorkbench(QWidget):
     unreadChanged = Signal(int)
+    planChanged = Signal(object)            # the plan reply (usage/plan), each time it is read
 
     def __init__(self, cfg: dict, parent=None):
         super().__init__(parent)
@@ -48,11 +53,46 @@ class WhatsAppWorkbench(QWidget):
         self._stack.setStyleSheet("QStackedWidget { background: transparent; }")
         for _ in range(len(_tab_names())):
             self._stack.addWidget(QWidget())        # placeholders, replaced on first open
+        # What a tab the plan does not include shows instead of its page (plan_compare.LockedTab).
+        from addons.whatsapp.plan_compare import LockedTab
+        self._locked_page = LockedTab()
+        self._stack.addWidget(self._locked_page)
+        self._locked_tabs: list = []
+        self._plan_reply: dict = {}
         root.addWidget(self._stack, 1)
         self._signing_in = False
         from addons.whatsapp import sso_state
         sso_state.NOTIFY.required.connect(self._on_sign_in_required)  # the workspace asks everyone to sign in with the company account
         self._select(_INBOX)
+        from addons.whatsapp import ui
+        ui.call(self, "usage/plan", {}, done=self._apply_plan, failed=lambda _m, _d: None)
+
+    def _apply_plan(self, reply: dict) -> None:
+        """Lock the tabs this plan does not include: a lock icon, and a tooltip naming the plan that has it."""
+        from addons.whatsapp.plan_compare import lowest_plan_label
+        from widgets import icons
+        have = set((reply or {}).get("features") or [])
+        cat = (reply or {}).get("catalogue") or {}
+        self._plan_reply = dict(reply or {})
+        self.planChanged.emit(self._plan_reply)
+        was_locked = self._current in self._locked_tabs
+        self._locked_tabs = []
+        for idx, feature in _TAB_FEATURE.items():
+            b = self._tab_buttons[idx]
+            if feature in have:
+                b.setIcon(QIcon())
+                b.setToolTip("")
+                continue
+            self._locked_tabs.append(idx)
+            b.setIcon(icons.icon("lock", 13, theme.NEUTRAL[500]))
+            where = lowest_plan_label(feature, cat)
+            b.setToolTip(i18n.t("Part of {p} — your plan does not include it.").format(p=where) if where
+                         else i18n.t("Not part of your plan."))
+        if self._current >= 0 and (was_locked or self._current in self._locked_tabs):
+            self._select(self._current)             # the tab on screen just became locked, or unlocked
+
+    def plan_reply(self) -> dict:
+        return dict(self._plan_reply)
 
     def _sign_in_dialog(self):
         from addons.whatsapp.settings_sso import SignInDialog
@@ -182,10 +222,14 @@ class WhatsAppWorkbench(QWidget):
         if prev is not None and hasattr(prev, "deactivate"):
             prev.deactivate()                  # a page that refreshes itself stops when it is left
         self._current = index
-        page = self._page(index)
-        self._stack.setCurrentIndex(index)
         for k, b in enumerate(self._tab_buttons):
             self._style_tab(b, k == index)
+        if index in self._locked_tabs:              # not on this plan: say so, and the way there, instead of the page
+            self._locked_page.show_for(_tab_names()[index], _TAB_FEATURE[index], self._plan_reply)
+            self._stack.setCurrentWidget(self._locked_page)
+            return
+        page = self._page(index)
+        self._stack.setCurrentIndex(index)
         page.activate()
 
     def _use_template(self, name: str):
