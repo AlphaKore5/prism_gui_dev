@@ -11,6 +11,7 @@ whether this is live, demo data, or unreachable.
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (QFrame, QHBoxLayout, QPushButton, QStackedWidget,
                                QVBoxLayout, QWidget)
 
@@ -20,6 +21,9 @@ from addons.whatsapp import demo
 from widgets import controls as C
 
 _INBOX, _CONTACTS, _TEMPLATES, _CAMPAIGNS, _AUTOMATIONS, _ADS, _SHOP, _FORMS, _ANALYTICS, _SETTINGS = range(10)
+# The plan feature a whole tab is about. A tab the plan does not include shows a lock and says which plan has it
+# (the owner, 27-Nov-2026: plans "like aisensy"); it still opens, and anything locked in it offers the upgrade.
+_TAB_FEATURE = {_CAMPAIGNS: "broadcast", _SHOP: "commerce", _FORMS: "forms"}
 
 
 def _tab_names() -> tuple:
@@ -53,6 +57,27 @@ class WhatsAppWorkbench(QWidget):
         from addons.whatsapp import sso_state
         sso_state.NOTIFY.required.connect(self._on_sign_in_required)  # the workspace asks everyone to sign in with the company account
         self._select(_INBOX)
+        from addons.whatsapp import ui
+        ui.call(self, "usage/plan", {}, done=self._apply_plan, failed=lambda _m, _d: None)
+
+    def _apply_plan(self, reply: dict) -> None:
+        """Lock the tabs this plan does not include: a lock icon, and a tooltip naming the plan that has it."""
+        from addons.whatsapp.plan_compare import lowest_plan_label
+        from widgets import icons
+        have = set((reply or {}).get("features") or [])
+        cat = (reply or {}).get("catalogue") or {}
+        self._locked_tabs = []
+        for idx, feature in _TAB_FEATURE.items():
+            b = self._tab_buttons[idx]
+            if feature in have:
+                b.setIcon(QIcon())
+                b.setToolTip("")
+                continue
+            self._locked_tabs.append(idx)
+            b.setIcon(icons.icon("lock", 13, theme.NEUTRAL[500]))
+            where = lowest_plan_label(feature, cat)
+            b.setToolTip(i18n.t("Part of {p} — your plan does not include it.").format(p=where) if where
+                         else i18n.t("Not part of your plan."))
 
     def _sign_in_dialog(self):
         from addons.whatsapp.settings_sso import SignInDialog

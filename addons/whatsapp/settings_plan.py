@@ -46,6 +46,21 @@ def fraction(row: dict) -> float:
     return min(1.0, int(row.get("used") or 0) / float(limit))
 
 
+def addon_names() -> dict:
+    """Literal i18n.t calls, so the extractor sees every word."""
+    return {"chatbot": i18n.t("Chatbot flows"), "ai_agent": i18n.t("AI agent")}
+
+
+def addons_words(reply: dict) -> str:
+    """"Add-ons: Chatbot flows, AI agent · 2 extra seats", or "" when there are none."""
+    names = addon_names()
+    parts = [names.get(a, a) for a in (reply or {}).get("addons") or []]
+    seats = int((reply or {}).get("extra_seats") or 0)
+    if seats:
+        parts.append(i18n.t("1 extra seat") if seats == 1 else i18n.t("{n} extra seats").format(n=seats))
+    return i18n.t("Add-ons: {a}").format(a=", ".join(parts)) if parts else ""
+
+
 class PlanSection(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -60,9 +75,15 @@ class PlanSection(QWidget):
         top.addWidget(self.plan_name, stretch=1)
         self.plan_next = C.label("", level="SUPPORT", colour=theme.NEUTRAL[600])
         top.addWidget(self.plan_next)
+        # Every plan side by side, and a way to ask for another (plan_compare; the owner, 27-Nov-2026).
+        self.compare_btn = C.button(i18n.t("Compare plans"), "secondary", small=True, on_click=self._compare)
+        self.compare_btn.setEnabled(False)                  # until the plan, with its catalogue, has arrived
+        top.addWidget(self.compare_btn)
         pc.addLayout(top)
         self.plan_note = C.label("", level="SUPPORT", colour=theme.NEUTRAL[600], wrap=True)
         pc.addWidget(self.plan_note)
+        self.addons_note = C.label("", level="SUPPORT", colour=theme.NEUTRAL[700], wrap=True)
+        pc.addWidget(self.addons_note)
         col.addWidget(card)
 
         card, uc = ui.card(i18n.t("What you use"), i18n.t("Each limit against what is in use now."), width=_COLUMN)
@@ -110,6 +131,12 @@ class PlanSection(QWidget):
         col.addWidget(card)
         col.addStretch(1)
         self._defaults: dict = {}
+        self._plan_reply: dict = {}
+
+    def _compare(self):
+        from addons.whatsapp.plan_compare import PlanCompareDialog
+        self._compare_dlg = PlanCompareDialog(self._plan_reply, parent=self.window())
+        self._compare_dlg.open()
 
     def say(self, message: str, error: bool = False):
         (self.rates_note.error if error else self.rates_note.ok)(message)
@@ -122,7 +149,11 @@ class PlanSection(QWidget):
         pass
 
     def _plan(self, reply: dict):
+        self._plan_reply = dict(reply or {})
+        self.compare_btn.setEnabled(bool((reply or {}).get("catalogue")))
         self.plan_name.setText(reply.get("label") or "")
+        self.addons_note.setText(addons_words(reply))
+        self.addons_note.setVisible(bool(self.addons_note.text()))
         nxt = reply.get("next_plan")
         self.plan_next.setText(i18n.t("The next plan up is {p}.").format(p=nxt.title()) if nxt else i18n.t("This is the top plan."))
         feats = reply.get("features") or []
